@@ -175,10 +175,20 @@ rooms.patch('/:roomId/documents/:documentId', async (c) => {
     data: { title: text(input.title, 'Document title', 150), category: text(input.category ?? 'Notes', 'Category', 70), status } }) })
 })
 
-rooms.get('/:roomId/documents/:documentId/versions', async (c) => c.json({ versions: await c.get('db').documentVersion.findMany({
-  where: { organizationId: c.get('organizationId'), roomId: c.req.param('roomId'), documentId: c.req.param('documentId') },
-  select: versionSelect, orderBy: { versionNumber: 'desc' }, take: 100,
-}) }))
+rooms.get('/:roomId/documents/:documentId/versions', async (c) => {
+  const before = c.req.query('before')
+  if (before !== undefined && (!/^[1-9]\d*$/.test(before) || !Number.isSafeInteger(Number(before)) || Number(before) > 2_147_483_647)) {
+    throw new HTTPException(400, { message: 'Invalid version cursor.' })
+  }
+  const rows = await c.get('db').documentVersion.findMany({
+    where: { organizationId: c.get('organizationId'), roomId: c.req.param('roomId'), documentId: c.req.param('documentId'),
+      ...(before === undefined ? {} : { versionNumber: { lt: Number(before) } }),
+    },
+    select: versionSelect, orderBy: { versionNumber: 'desc' }, take: 101,
+  })
+  const versions = rows.slice(0, 100)
+  return c.json({ versions, nextCursor: rows.length > 100 ? String(versions[versions.length - 1].versionNumber) : null })
+})
 
 rooms.get('/:roomId/documents/:documentId/content', async (c) => {
   const document = await c.get('db').document.findFirstOrThrow({ where: { id: c.req.param('documentId'), roomId: c.req.param('roomId'), organizationId: c.get('organizationId') },

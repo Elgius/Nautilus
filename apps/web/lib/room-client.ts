@@ -20,6 +20,7 @@ export type DocumentVersion = {
   id: string; versionNumber: number; sizeBytes: number; createdAt: string; changeSummary: string | null;
   authorUser: { name: string } | null; authorAgent: { name: string } | null;
 };
+export type DocumentVersionsPage = { versions: DocumentVersion[]; nextCursor: string | null };
 export type RoomDetail = { room: RoomRecord; messages: RoomMessage[]; nextCursor: string | null; storageConfigured: boolean; officeConfigured: boolean };
 
 export function toRoom(room: RoomRecord): Room {

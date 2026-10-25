@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { ArrowLeft, ArrowUp, Bot, ChevronRight, FileText, Link2, MessageSquare, Users } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
@@ -26,6 +26,14 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
   const [mobilePanel, setMobilePanel] = useState<"chat" | "document">("chat");
   const [selectedDocumentId, setSelectedDocumentId] = useState(room.documents[0]?.id);
   const [attachDocument, setAttachDocument] = useState(false);
+  const [dirtyDocumentIds, setDirtyDocumentIds] = useState<Set<string>>(new Set());
+  const onDocumentDirtyChange = useCallback((id: string, dirty: boolean) => {
+    setDirtyDocumentIds((previous) => {
+      const next = new Set(previous);
+      if (dirty) next.add(id); else next.delete(id);
+      return next;
+    });
+  }, []);
   const messageList = useRef<HTMLDivElement>(null);
   const previousLatest = useRef(messages.at(-1)?.id);
   useEffect(() => {
@@ -63,7 +71,9 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
   }
   return <div className="room-workspace">
     <header className="room-topbar">
-      <div className="room-location"><Link href="/" className="room-back" aria-label="Back to workspace"><ArrowLeft size={17} /></Link><BrandMark className="size-7" />
+      <div className="room-location"><Link href="/" className="room-back" aria-label="Back to workspace" onNavigate={(event) => {
+        if (dirtyDocumentIds.size && !window.confirm('You have unsaved document changes. Leave this room and discard them?')) event.preventDefault();
+      }}><ArrowLeft size={17} /></Link><BrandMark className="size-7" />
         <span className="room-workspace-label">{session.activeOrganization?.name}</span><ChevronRight size={14} className="room-breadcrumb-divider" /><h1>{room.name}</h1>
       </div>
       <div className="room-header-actions"><div className="room-participants" aria-label="Room participants">
@@ -100,7 +110,7 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
         </form><p className="room-local-note">Messages are saved to your organisation.</p></div>
       </section>
       <section className="room-document-panel" id="room-document" aria-label="Room documents">
-        <RoomDocuments organizationId={organizationId} roomId={room.id} initialDocuments={room.documents} storageConfigured={initialData.storageConfigured} officeConfigured={initialData.officeConfigured} selectedId={selectedDocumentId} onSelect={setSelectedDocumentId} />
+        <RoomDocuments organizationId={organizationId} roomId={room.id} initialDocuments={room.documents} storageConfigured={initialData.storageConfigured} officeConfigured={initialData.officeConfigured} selectedId={selectedDocumentId} onSelect={setSelectedDocumentId} onDirtyChange={onDocumentDirtyChange} />
       </section>
     </main>
     {notice && <div className="room-toast" role="status">{notice}<Button variant="ghost" size="sm" aria-label="Dismiss notification" onClick={() => setNotice('')}>×</Button></div>}

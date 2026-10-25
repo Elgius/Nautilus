@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Dropzone } from '@/components/ui/dropzone';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { errorMessage } from '@/lib/auth-client';
-import { roomRequest, type RoomDocument, type DocumentVersion } from '@/lib/room-client';
+import { roomRequest, type RoomDocument, type DocumentVersion, type DocumentVersionsPage } from '@/lib/room-client';
 import { downloadBlob, officeContent, type OfficeContent, type LegacyContent } from '@/lib/office-content';
 import type { OfficeEditorHandle } from './univer-editor';
 import { addLocalRoomFiles, MAX_LOCAL_FILES, type LocalRoomFile } from '@/lib/local-room-files';
@@ -19,9 +19,10 @@ const UniverEditor = dynamic(() => import('./univer-editor'), {
   ssr: false, loading: () => <p role="status" className="p-6 text-sm">Loading editor…</p>,
 });
 
-export function RoomDocuments({ organizationId, roomId, initialDocuments, storageConfigured, officeConfigured = false, selectedId, onSelect }: {
+export function RoomDocuments({ organizationId, roomId, initialDocuments, storageConfigured, officeConfigured = false, selectedId, onSelect, onDirtyChange }: {
   organizationId: string; roomId: string; initialDocuments: RoomDocument[]; storageConfigured: boolean; officeConfigured?: boolean;
   selectedId?: string; onSelect: (id: string) => void;
+  onDirtyChange: (id: string, dirty: boolean) => void;
 }) {
   const [documents, setDocuments] = useState(initialDocuments);
   const [localFiles, setLocalFiles] = useState<LocalRoomFile[]>([]);
@@ -89,23 +90,26 @@ export function RoomDocuments({ organizationId, roomId, initialDocuments, storag
     </div>
     {documents.filter((document) => document.id === selectedId || visitedIds.includes(document.id)).map((document) =>
       <div key={document.id} className="min-h-0 flex-1 flex-col" style={{ display: document.id === selectedId ? 'flex' : 'none' }}>
-        <RoomDocumentEditor active={document.id === selectedId} organizationId={organizationId} roomId={roomId} document={document} storageConfigured={storageConfigured} officeConfigured={officeConfigured} onLoaded={markLoaded} />
+        <RoomDocumentEditor active={document.id === selectedId} organizationId={organizationId} roomId={roomId} document={document} storageConfigured={storageConfigured} officeConfigured={officeConfigured} onLoaded={markLoaded} onDirtyChange={onDirtyChange} />
       </div>)}
     {selectedLocalFile && <LocalRoomFilePreview key={selectedLocalFile.id} entry={selectedLocalFile} onRemove={() => removeLocalFile(selectedLocalFile.id)} />}
     {!selected && !selectedLocalFile && <p className="p-6 text-sm text-muted-foreground">Upload files from your computer, or create a document or spreadsheet.</p>}
   </>;
 }
 
-function RoomDocumentEditor({ active, organizationId, roomId, document, storageConfigured, officeConfigured, onLoaded }: {
+function RoomDocumentEditor({ active, organizationId, roomId, document, storageConfigured, officeConfigured, onLoaded, onDirtyChange }: {
   active: boolean;
   organizationId: string; roomId: string; document: RoomDocument; storageConfigured: boolean; officeConfigured: boolean;
   onLoaded: (id: string) => void;
+  onDirtyChange: (id: string, dirty: boolean) => void;
 }) {
   const path = `/${encodeURIComponent(roomId)}/documents/${encodeURIComponent(document.id)}`;
   const endpoint = `/api/organizations/${encodeURIComponent(organizationId)}/rooms${path}`;
   const [content, setContent] = useState<OfficeContent | null>(null);
   const [versionId, setVersionId] = useState<string | null>(document.currentVersionId);
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
+  const [nextVersionCursor, setNextVersionCursor] = useState<string | null>(null);
+  const [loadingVersions, setLoadingVersions] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false), [dirty, setDirty] = useState(false);
   const [converting, setConverting] = useState(false), [editorReady, setEditorReady] = useState(false);
@@ -119,14 +123,18 @@ function RoomDocumentEditor({ active, organizationId, roomId, document, storageC
     let active = true;
     Promise.all([
       roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`),
-      roomRequest<{ versions: DocumentVersion[] }>(organizationId, `${path}/versions`),
+      roomRequest<DocumentVersionsPage>(organizationId, `${path}/versions`),
     ]).then(([saved, history]) => {
       if (!active) return;
       setContent(officeContent(document.kind, document.id, document.title, saved.content));
-      setVersionId(saved.currentVersionId); setVersions(history.versions); onLoaded(document.id);
+      setVersionId(saved.currentVersionId); setVersions(history.versions); setNextVersionCursor(history.nextCursor); onLoaded(document.id);
     }).catch((error) => { if (active) setError(errorMessage(error)); });
     return () => { active = false; };
   }, [organizationId, path, document.id, document.kind, document.title, onLoaded]);
+  useEffect(() => {
+    onDirtyChange(document.id, dirty);
+    return () => onDirtyChange(document.id, false);
+  }, [document.id, dirty, onDirtyChange]);
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
@@ -145,6 +153,16 @@ function RoomDocumentEditor({ active, organizationId, roomId, document, storageC
       if (revision.current === savedRevision) { setDirty(false); setNotice('Version saved.'); }
     } catch (error) { setError(errorMessage(error)); }
     finally { setSaving(false); }
+  }
+  async function loadOlderVersions() {
+    if (!nextVersionCursor || loadingVersions) return;
+    setLoadingVersions(true); setError('');
+    try {
+      const page = await roomRequest<DocumentVersionsPage>(organizationId, `${path}/versions?before=${encodeURIComponent(nextVersionCursor)}`);
+      setVersions((previous) => [...previous, ...page.versions.filter((version) => !previous.some((item) => item.id === version.id))]);
+      setNextVersionCursor(page.nextCursor);
+    } catch (error) { setError(errorMessage(error)); }
+    finally { setLoadingVersions(false); }
   }
   async function checkResponse(response: Response) {
     if (!response.ok) {
@@ -190,7 +208,7 @@ function RoomDocumentEditor({ active, organizationId, roomId, document, storageC
   return <div className="flex min-h-0 flex-1 flex-col overflow-auto">
     <div className="room-panel-heading room-document-toolbar"><div><h2>{document.title}</h2><span className="room-document-status" role="status">{dirty ? 'Unsaved changes' : versionId ? 'Saved' : 'Draft'}</span></div>
       <div className="flex flex-wrap items-center gap-1">
-        <Button variant="ghost" size="sm" onClick={() => setHistoryOpen(!historyOpen)} aria-expanded={historyOpen}>History ({versions.length})</Button>
+        <Button variant="ghost" size="sm" onClick={() => setHistoryOpen(!historyOpen)} aria-expanded={historyOpen}>History ({versions.length}{nextVersionCursor ? '+' : ''})</Button>
         <Button variant="outline" size="sm" onClick={() => setImportOpen(true)} disabled={!officeConfigured || !editorReady || converting || saving}><Upload size={14} />Import {isDoc ? 'Word' : 'Excel'}</Button>
         <Button variant="outline" size="sm" onClick={exportFile} disabled={!officeConfigured || !editorReady || converting || saving}><Download size={14} />Export {isDoc ? '.docx' : '.xlsx'}</Button>
         <Button size="sm" onClick={save} disabled={saving || converting || !editorReady || !storageConfigured || (!dirty && !!versionId)}><Save size={14} />{saving ? 'Saving…' : 'Save'}</Button>
@@ -215,6 +233,7 @@ function RoomDocumentEditor({ active, organizationId, roomId, document, storageC
     {historyOpen && <ol className="border-b p-3 text-sm" aria-label="Document versions">
       {versions.map((version) => <li key={version.id} className="flex items-center justify-between gap-2 py-1"><span>Version {version.versionNumber} · {version.authorUser?.name || version.authorAgent?.name} · {new Date(version.createdAt).toLocaleString()}</span><Button size="sm" variant="ghost" onClick={() => download(version.id)}>Download snapshot</Button></li>)}
       {!versions.length && <li>No saved versions yet.</li>}
+      {nextVersionCursor && <li><Button size="sm" variant="ghost" onClick={loadOlderVersions} disabled={loadingVersions}>{loadingVersions ? 'Loading…' : 'Load older versions'}</Button></li>}
     </ol>}
     {!content && !error && <p role="status" className="p-6 text-sm">Loading document…</p>}
     {content && active && <div className="flex min-h-0 flex-1 flex-col" inert={converting} aria-busy={converting}>
