@@ -1,0 +1,261 @@
+/* Components consume the shared light/dark tokens instead of fixed colors. */
+.workspace-shell {
+  --workspace-tint: color-mix(in srgb, var(--primary) 7%, var(--card));
+  --workspace-tint-border: color-mix(
+    in srgb,
+    var(--primary) 17%,
+    var(--border)
+  );
+  --workspace-shadow: var(--shadow-offset-x) var(--shadow-offset-y)
+    var(--shadow-blur) var(--shadow-spread)
+    color-mix(in srgb, var(--shadow-color) 5%, transparent);
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter), var(--font-sans);
+}
+.sidebar {
+  background: var(--sidebar);
+  color: var(--sidebar-foreground);
+  border-right-color: color-mix(
+    in srgb,
+    var(--sidebar-border) 18%,
+    var(--sidebar)
+  );
+}
+.sidebar .brand,
+.sidebar .brand-dot {
+  color: var(--sidebar-foreground);
+}
+.sidebar .workspace-switcher,
+.sidebar .team-callout {
+  background: color-mix(in srgb, var(--sidebar-foreground) 5%, var(--sidebar));
+  border-color: color-mix(in srgb, var(--sidebar-border) 20%, var(--sidebar));
+  box-shadow: var(--workspace-shadow);
+}
+.sidebar .workspace-switcher strong,
+.sidebar .user-profile strong,
+.sidebar .callout-icon {
+  color: var(--sidebar-foreground);
+}
+.sidebar .workspace-switcher small,
+.sidebar .user-profile small,
+.sidebar .team-callout p,
+.sidebar .nav-label,
+.sidebar .starred-rooms p {
+  color: color-mix(in srgb, var(--sidebar-foreground) 65%, var(--sidebar));
+}
+.sidebar .nav-item,
+.sidebar .starred-rooms button,
+.sidebar .starred-rooms svg,
+.sidebar .workspace-switcher > svg {
+  color: color-mix(in srgb, var(--sidebar-foreground) 78%, var(--sidebar));
+}
+.sidebar .nav-item:hover,
+.sidebar .starred-rooms button:hover {
+  background: color-mix(in srgb, var(--sidebar-accent) 60%, var(--sidebar));
+  color: var(--sidebar-accent-foreground);
+}
+.sidebar .nav-item.active {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+}
+.sidebar .nav-count {
+  color: var(--sidebar-foreground);
+  border-color: color-mix(in srgb, var(--sidebar-border) 25%, var(--sidebar));
+}
+.sidebar .workspace-avatar,
+.sidebar .profile-avatar {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+}
+.sidebar .workspace-avatar span {
+  color: var(--sidebar-accent-foreground);
+}
+.sidebar .user-profile {
+  border-top-color: color-mix(
+    in srgb,
+    var(--sidebar-border) 18%,
+    var(--sidebar)
+  );
+}
+.sidebar .team-callout button {
+  background: var(--sidebar-accent);
+  border-color: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+}
+.sidebar .team-callout button:hover {
+  background: var(--sidebar-ring);
+}
+.sidebar .nav-dot,
+.sidebar .profile-dot {
+  background: var(--chart-2);
+}
+.topbar {
+  background: var(--card);
+}
+.primary-action,
+.workspace-switcher,
+.stat-card,
+.room-card,
+.agent-card,
+.agent-naming-panel {
+  box-shadow: var(--workspace-shadow);
+}
+.welcome-banner {
+  background: var(--workspace-tint);
+  border-color: var(--workspace-tint-border);
+}
+.banner-copy h2,
+.banner-copy button,
+.banner-kicker,
+.eyebrow,
+.text-link:hover {
+  color: var(--primary);
+}
+.banner-number,
+.orbit-spark {
+  color: color-mix(in srgb, var(--primary) 65%, var(--muted-foreground));
+}
+.orbit,
+.orbit-center,
+.orbit-node {
+  border-color: var(--workspace-tint-border);
+}
+.orbit-center {
+  background: var(--card);
+  color: var(--primary);
+}
+.orbit-line {
+  background: var(--workspace-tint-border);
+}
+.orbit-node {
+  background: var(--card);
+  color: var(--primary);
+}
+.node-one,
+.violet {
+  background: color-mix(in srgb, var(--chart-3) 9%, var(--card));
+  color: color-mix(in srgb, var(--chart-3) 75%, var(--foreground));
+}
+.node-two,
+.green {
+  background: var(--workspace-tint);
+  color: var(--primary);
+}
+.node-three,
+.orange {
+  background: color-mix(in srgb, var(--chart-4) 8%, var(--card));
+  color: var(--chart-4);
+}
+.node-four,
+.coral {
+  background: color-mix(in srgb, var(--chart-5) 10%, var(--card));
+  color: color-mix(in srgb, var(--chart-5) 65%, var(--foreground));
+}
+.blue {
+  background: color-mix(in srgb, var(--chart-1) 8%, var(--card));
+  color: var(--chart-1);
+}
+.room-filters button.selected,
+.layout-toggle button.selected,
+.agent-choices button.chosen {
+  background: var(--workspace-tint);
+  color: var(--primary);
+  border-color: var(--workspace-tint-border);
+}
+.room-status,
+.activity-icon.check {
+  background: color-mix(in srgb, var(--chart-5) 10%, var(--card));
+  color: color-mix(in srgb, var(--chart-5) 60%, var(--foreground));
+}
+.room-status.needs-review {
+  background: color-mix(in srgb, var(--chart-4) 8%, var(--card));
+  color: var(--chart-4);
+}
+.room-status.ready,
+.activity-icon.join {
+  background: var(--workspace-tint);
+  color: var(--primary);
+}
+.activity-icon.message {
+  background: color-mix(in srgb, var(--chart-3) 8%, var(--card));
+  color: color-mix(in srgb, var(--chart-3) 65%, var(--foreground));
+}
+.room-card:hover {
+  border-color: var(--ring);
+}
+.star-button.is-starred {
+  color: var(--primary);
+}
+.star-button.is-starred svg {
+  fill: var(--workspace-tint);
+}
+.agent-state.working,
+.knowledge-illustration {
+  color: var(--primary);
+}
+.availability.working,
+.status-dot {
+  background: var(--chart-5);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--chart-5) 10%, transparent);
+}
+.notification-button i,
+.eyebrow > span {
+  background: var(--primary);
+}
+.agent-naming-panel,
+.workspace-dialog,
+.room-dialog,
+.message-form input,
+.dialog-form input,
+.dialog-form textarea,
+.dialog-form select,
+.agent-name-field input {
+  background: var(--card);
+}
+.workspace-dialog [data-slot="dialog-title"],
+.room-dialog [data-slot="dialog-title"],
+.agent-naming-heading h2 {
+  color: var(--foreground);
+}
+.agent-name-error {
+  color: var(--destructive);
+}
+.toast {
+  background: var(--card);
+  border-color: var(--border);
+  color: var(--foreground);
+  box-shadow: var(--workspace-shadow);
+}
+button:focus-visible,
+a:focus-visible,
+select:focus-visible {
+  outline-color: var(--ring);
+}
+
+/* The shadcn sidebar reserves its own responsive width. */
+.nautilus-sidebar-layout > .workspace-main {
+  margin-left: 0;
+  min-width: 0;
+}
+.nautilus-sidebar-layout .toast {
+  left: 50%;
+}
+
+.room-file-types {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin: 11px 0;
+}
+.room-file-types > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-foreground);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 9px;
+}

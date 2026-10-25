@@ -1,0 +1,32 @@
+{
+  "name": "@nautilus/server",
+  "type": "module",
+  "scripts": {
+    "dev": "prisma generate && wrangler dev",
+    "deploy": "wrangler deploy --minify",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "build": "prisma generate && wrangler deploy --dry-run --outdir dist",
+    "typecheck": "prisma generate && tsc --noEmit && tsc --noEmit -p tsconfig.tools.json",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:bootstrap-admin": "bun scripts/bootstrap-admin.ts",
+    "test": "bun test tests"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^1.2.0",
+    "@prisma/adapter-neon": "7",
+    "@prisma/client": "7",
+    "aws4fetch": "^1.0.20",
+    "better-auth": "^1.7.12",
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4",
+    "dotenv": "^18.0.9",
+    "prisma": "7",
+    "typescript": "^5",
+    "wrangler": "^4.110.0"
+  },
+  "private": true
+}

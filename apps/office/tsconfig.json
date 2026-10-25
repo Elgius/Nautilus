@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "target": "ESNext", "lib": ["ESNext", "DOM"], "types": ["bun"] },
+  "include": ["src/**/*.ts", "tests/**/*.ts"]
+}

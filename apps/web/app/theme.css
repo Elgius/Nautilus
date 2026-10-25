@@ -1,0 +1,97 @@
+:root {
+  --card: #ffffff;
+  --ring: #324f9a;
+  --input: #ffffff;
+  --muted: #f5f5f5;
+  --accent: #19398d;
+  --border: #e3e3e3;
+  --radius: 0.5rem;
+  --chart-1: #0159b7;
+  --chart-2: #13c9aa;
+  --chart-3: #cf3fd9;
+  --chart-4: #8f3c1e;
+  --chart-5: #17ab92;
+  --popover: #ffffff;
+  --primary: #19398d;
+  --sidebar: #001b3c;
+  --spacing: 0.24rem;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  --font-sans: Inter, ui-sans-serif, sans-serif, system-ui;
+  --secondary: #0a0a0a;
+  --background: #f3f5fb;
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --foreground: #010101;
+  --destructive: #9b0033;
+  --shadow-blur: 2px;
+  --shadow-color: #1a2137;
+  --sidebar-ring: #19398d;
+  --shadow-spread: 0px;
+  --letter-spacing: 0em;
+  --shadow-opacity: 0.05;
+  --sidebar-accent: #19398d;
+  --sidebar-border: #d4d4d4;
+  --card-foreground: #010101;
+  --shadow-offset-x: 0;
+  --shadow-offset-y: 1px;
+  --sidebar-primary: #19398d;
+  --muted-foreground: #454545;
+  --accent-foreground: #ffffff;
+  --popover-foreground: #010101;
+  --primary-foreground: #f3f5f9;
+  --sidebar-foreground: #f4f5fc;
+  --secondary-foreground: #f5f7fb;
+  --destructive-foreground: #ffffff;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-primary-foreground: #ffffff;
+}
+
+.dark {
+  --card: #0a0a0a;
+  --ring: #6a8dd8;
+  --input: #121212;
+  --muted: #262626;
+  --accent: #404040;
+  --border: #282828;
+  --radius: 0.5rem;
+  --chart-1: #6a8dd8;
+  --chart-2: #2062ce;
+  --chart-3: #4c5f00;
+  --chart-4: #cc7455;
+  --chart-5: #4bb3a1;
+  --popover: #171717;
+  --primary: #6a8dd8;
+  --sidebar: #0a0a0a;
+  --spacing: 0.24rem;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  --font-sans: Inter, ui-sans-serif, sans-serif, system-ui;
+  --secondary: #171717;
+  --background: #050505;
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --foreground: #fafafa;
+  --destructive: #cd6e7b;
+  --shadow-blur: 2px;
+  --shadow-color: #000000;
+  --sidebar-ring: #6a8dd8;
+  --shadow-spread: 0px;
+  --letter-spacing: 0em;
+  --shadow-opacity: 0.05;
+  --sidebar-accent: #262626;
+  --sidebar-border: #282828;
+  --card-foreground: #fafafa;
+  --shadow-offset-x: 0;
+  --shadow-offset-y: 1px;
+  --sidebar-primary: #6a8dd8;
+  --muted-foreground: #a1a1a1;
+  --accent-foreground: #fafafa;
+  --popover-foreground: #fafafa;
+  --primary-foreground: #0a0a0a;
+  --sidebar-foreground: #fafafa;
+  --secondary-foreground: #fafafa;
+  --destructive-foreground: #fafafa;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-primary-foreground: #fafafa;
+}

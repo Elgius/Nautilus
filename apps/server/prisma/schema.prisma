@@ -1,0 +1,381 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  runtime  = "workerd"
+}
+
+// Operator scripts and Bun integration tests cannot load workerd's WASM modules.
+generator tooling {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma-tooling"
+  runtime  = "bun"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  platformRole  String   @default("user")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+  members       Member[]
+  invitations   Invitation[]
+  createdRooms  Room[]
+  roomStars     RoomStar[]
+  roomMessages  RoomMessage[]
+  documentVersions DocumentVersion[]
+  roomAgentAssignments RoomAgent[]
+
+  @@map("user")
+}
+
+model Session {
+  id                   String   @id
+  expiresAt            DateTime
+  token                String   @unique
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  ipAddress            String?
+  userAgent            String?
+  userId               String
+  activeOrganizationId String?
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                     String   @id
+  accountId              String
+  providerId             String
+  userId                 String
+  accessToken            String?
+  refreshToken           String?
+  idToken                String?
+  accessTokenExpiresAt   DateTime?
+  refreshTokenExpiresAt  DateTime?
+  scope                  String?
+  password               String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model Organization {
+  id          String   @id
+  name        String
+  slug        String   @unique
+  logo        String?
+  metadata    String?
+  createdAt   DateTime @default(now())
+  members     Member[]
+  invitations Invitation[]
+  agents      Agent[]
+  rooms       Room[]
+
+  @@map("organization")
+}
+
+model Member {
+  id             String       @id
+  organizationId String
+  userId         String
+  role           String       @default("member")
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rooms          RoomMember[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@map("member")
+}
+
+model Invitation {
+  id             String       @id
+  organizationId String
+  email          String
+  role           String?
+  status         String       @default("pending")
+  expiresAt      DateTime
+  createdAt      DateTime     @default(now())
+  inviterId      String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inviter        User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, email])
+  @@index([email, status, expiresAt])
+  @@index([inviterId])
+  @@map("invitation")
+}
+
+enum AgentColor {
+  violet
+  coral
+  blue
+  green
+}
+
+enum AgentIcon {
+  bot
+  sparkles
+  compass
+  code
+  book
+  chart
+}
+
+enum AgentStatus {
+  Working
+  Available
+}
+
+model Agent {
+  id             String       @id @default(uuid())
+  organizationId String
+  name           String       @db.VarChar(30)
+  nameKey        String
+  role           String       @db.VarChar(70)
+  color          AgentColor   @default(violet)
+  avatarIcon     AgentIcon    @default(bot)
+  avatarUrl      String?
+  rules          String[]     @default([])
+  status         AgentStatus  @default(Available)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  rooms          RoomAgent[]
+  roomMessages   RoomMessage[]
+  documentVersions DocumentVersion[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, nameKey])
+  @@index([organizationId, createdAt])
+  @@map("agent")
+}
+
+model RateLimit {
+  id          String @id
+  key         String @unique
+  count       Int
+  lastRequest BigInt
+
+  @@map("rateLimit")
+}
+
+// Local development only. Production email is delivered through the provider.
+model EmailMessage {
+  id        String   @id @default(cuid())
+  recipient String
+  subject   String
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("emailMessage")
+}
+
+
+enum RoomStatus {
+  READY
+  WORKING
+  NEEDS_REVIEW
+}
+
+enum RoomMemberRole {
+  OWNER
+  MEMBER
+}
+
+enum DocumentKind {
+  DOCUMENT
+  SPREADSHEET
+}
+
+enum DocumentStatus {
+  DRAFT
+  IN_REVIEW
+  READY
+}
+
+model Room {
+  id              String       @id @default(uuid())
+  organizationId  String
+  name            String       @db.VarChar(70)
+  description     String       @default("") @db.VarChar(600)
+  category        String       @default("General") @db.VarChar(70)
+  status          RoomStatus   @default(READY)
+  color           String       @default("green") @db.VarChar(20)
+  createdByUserId  String
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  lastActivityAt  DateTime     @default(now())
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy       User         @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+  members         RoomMember[]
+  agents          RoomAgent[]
+  stars           RoomStar[]
+  messages        RoomMessage[]
+  documents       Document[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, lastActivityAt, id])
+  @@map("room")
+}
+
+model RoomMember {
+  organizationId       String
+  roomId               String
+  organizationMemberId String
+  role                 RoomMemberRole @default(MEMBER)
+  joinedAt             DateTime       @default(now())
+  lastReadAt           DateTime?
+  room                 Room           @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Cascade)
+  member               Member         @relation(fields: [organizationId, organizationMemberId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([roomId, organizationMemberId])
+  @@index([organizationId, organizationMemberId])
+  @@map("roomMember")
+}
+
+model RoomAgent {
+  organizationId String
+  roomId         String
+  agentId        String
+  addedByUserId  String
+  position       Int      @default(0)
+  addedAt        DateTime @default(now())
+  addedBy        User     @relation(fields: [addedByUserId], references: [id], onDelete: Restrict)
+  room           Room     @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Cascade)
+  agent          Agent    @relation(fields: [organizationId, agentId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([roomId, agentId])
+  @@index([organizationId, agentId])
+  @@index([addedByUserId])
+  @@map("roomAgent")
+}
+
+model RoomStar {
+  organizationId String
+  roomId         String
+  userId         String
+  createdAt      DateTime @default(now())
+  room           Room     @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([roomId, userId])
+  @@index([organizationId, userId])
+  @@map("roomStar")
+}
+
+model RoomMessage {
+  id             String   @id @default(uuid())
+  organizationId String
+  roomId         String
+  authorUserId   String?
+  authorAgentId  String?
+  text           String
+  createdAt      DateTime @default(now())
+  editedAt       DateTime?
+  room           Room     @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Cascade)
+  authorUser     User?     @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
+  authorAgent    Agent?    @relation(fields: [organizationId, authorAgentId], references: [organizationId, id], onDelete: NoAction)
+  documents      MessageDocument[]
+
+  @@unique([organizationId, roomId, id])
+  @@index([roomId, createdAt, id])
+  @@index([authorUserId])
+  @@index([organizationId, authorAgentId])
+  @@map("roomMessage")
+}
+
+model Document {
+  id               String         @id @default(uuid())
+  organizationId   String
+  roomId           String
+  title            String         @db.VarChar(150)
+  kind             DocumentKind
+  category         String         @default("Notes") @db.VarChar(70)
+  status           DocumentStatus @default(DRAFT)
+  currentVersionId String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  room             Room           @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Cascade)
+  versions         DocumentVersion[] @relation("DocumentVersions")
+  currentVersion   DocumentVersion? @relation("CurrentVersion", fields: [organizationId, roomId, id, currentVersionId], references: [organizationId, roomId, documentId, id], onDelete: NoAction, onUpdate: NoAction)
+  messages         MessageDocument[]
+
+  @@unique([organizationId, roomId, id])
+  @@index([organizationId, updatedAt])
+  @@index([roomId, createdAt])
+  @@map("document")
+}
+
+model DocumentVersion {
+  id             String   @id @default(uuid())
+  organizationId String
+  roomId         String
+  documentId     String
+  versionNumber  Int
+  objectKey      String   @unique
+  mimeType       String
+  sizeBytes      Int
+  checksum       String
+  authorUserId   String?
+  authorAgentId  String?
+  changeSummary  String?  @db.VarChar(500)
+  createdAt      DateTime @default(now())
+  document       Document @relation("DocumentVersions", fields: [organizationId, roomId, documentId], references: [organizationId, roomId, id], onDelete: Cascade)
+  currentFor     Document[] @relation("CurrentVersion")
+  authorUser     User?    @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
+  authorAgent    Agent?   @relation(fields: [organizationId, authorAgentId], references: [organizationId, id], onDelete: NoAction)
+  messages       MessageDocument[]
+
+  @@unique([documentId, versionNumber])
+  @@unique([organizationId, roomId, documentId, id])
+  @@index([authorUserId])
+  @@index([organizationId, authorAgentId])
+  @@map("documentVersion")
+}
+
+model MessageDocument {
+  organizationId    String
+  roomId            String
+  messageId         String
+  documentId        String
+  documentVersionId String?
+  message           RoomMessage @relation(fields: [organizationId, roomId, messageId], references: [organizationId, roomId, id], onDelete: Cascade)
+  document          Document @relation(fields: [organizationId, roomId, documentId], references: [organizationId, roomId, id], onDelete: Cascade)
+  version           DocumentVersion? @relation(fields: [organizationId, roomId, documentId, documentVersionId], references: [organizationId, roomId, documentId, id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@id([messageId, documentId])
+  @@index([organizationId, roomId, documentId])
+  @@map("messageDocument")
+}

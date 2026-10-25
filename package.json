@@ -1,35 +1,28 @@
 {
-  "name": "my-app",
-  "version": "0.1.0",
+  "name": "nautilus-stack",
   "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "next": "16.4.3",
-    "react": "19.3.0",
-    "react-dom": "19.3.0"
-  },
-  "devDependencies": {
-    "@tailwindcss/turbopack": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.4.3",
-    "tailwindcss": "^4",
-    "typescript": "^5"
-  },
   "packageManager": "bun@1.3.13",
-  "ignoreScripts": [
-    "sharp",
-    "unrs-resolver"
+  "workspaces": [
+    "apps/*"
   ],
+  "scripts": {
+    "dev": "bun run --parallel --filter \"./apps/*\" dev",
+    "dev:web": "bun run --filter @nautilus/web dev",
+    "dev:server": "bun run --filter @nautilus/server dev",
+    "build": "bun run --sequential --filter \"./apps/*\" build",
+    "build:web": "bun run --filter @nautilus/web build",
+    "build:server": "bun run --filter @nautilus/server build",
+    "lint": "bun run --filter @nautilus/web lint",
+    "typecheck": "bun run --filter \"./apps/*\" typecheck",
+    "start": "bun run --filter @nautilus/web start",
+    "deploy:server": "bun run --filter @nautilus/server deploy",
+    "cf-typegen": "bun run --filter @nautilus/server cf-typegen",
+    "dev:office": "bun run --filter @nautilus/office dev"
+  },
   "trustedDependencies": [
+    "esbuild",
     "sharp",
-    "unrs-resolver"
+    "unrs-resolver",
+    "workerd"
   ]
 }

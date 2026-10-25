@@ -1,0 +1,12 @@
+.nautilus-office-editor {
+  position: relative;
+  isolation: isolate;
+  flex: 1 0 560px;
+  height: max(560px, 65dvh);
+  min-width: 0;
+  width: 100%;
+  color: #1f2937;
+  background: #fff;
+  color-scheme: light;
+}
+.nautilus-office-editor [contenteditable] { outline: none; }
