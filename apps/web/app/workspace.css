@@ -737,7 +737,12 @@ h1 {
   background: var(--card);
 }
 .layout-toggle button {
-  padding: 4px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 26px;
+  padding: 0;
   border-radius: 3px;
   color: var(--muted-foreground);
 }
@@ -751,6 +756,8 @@ h1 {
   gap: 15px;
 }
 .room-card {
+  position: relative;
+  isolation: isolate;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 9px;
@@ -813,11 +820,16 @@ h1 {
   background: var(--muted);
 }
 .star-button {
+  position: relative;
+  z-index: 2;
   color: var(--muted-foreground);
   padding: 4px;
 }
 .star-button.is-starred {
   color: var(--muted-foreground);
+}
+.room-card .star-button:disabled {
+  pointer-events: auto;
 }
 .star-button.is-starred svg {
   fill: var(--muted);
@@ -838,6 +850,23 @@ h1 {
   color: var(--muted-foreground);
   opacity: 0;
   flex-shrink: 0;
+}
+.room-title::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: 9px;
+}
+.room-title:focus-visible {
+  outline: none;
+}
+.room-title:focus-visible::after {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.room-card:hover .room-title > svg {
+  opacity: 1;
 }
 .room-title:hover > svg,
 .room-title:focus-visible > svg {

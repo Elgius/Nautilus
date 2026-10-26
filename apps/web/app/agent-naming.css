@@ -42,9 +42,6 @@
   color: var(--muted-foreground);
   font-size: 11px;
 }
-.agent-profile-button:hover strong {
-  color: var(--primary);
-}
 .agent-expand {
   flex: 0 0 32px;
   padding: 8px;

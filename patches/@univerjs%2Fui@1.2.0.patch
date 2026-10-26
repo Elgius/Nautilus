@@ -1,0 +1,44 @@
+diff --git a/lib/cjs/index.js b/lib/cjs/index.js
+index 6cf71ff7b88752338b9c38648da7a7b3f10c4575..1b904cf776c9e2c0443ba2c37b76a77c52cec418 100644
+--- a/lib/cjs/index.js
++++ b/lib/cjs/index.js
+@@ -6980,13 +6980,17 @@ var SingleUnitUIController = class extends _univerjs_core.Disposable {
+ 		const initialSkeleton = (_this$_injector$get = this._injector.get(IWorkbenchService, _univerjs_core.Quantity.OPTIONAL)) === null || _this$_injector$get === void 0 ? void 0 : _this$_injector$get.acquireSkeleton();
+ 		if (initialSkeleton) this.disposeWithMe(initialSkeleton);
+ 		this.disposeWithMe(this.bootstrap(async (contentElement, containerElement) => {
++			if (this._disposed) return;
+ 			if (this._layoutService) {
+ 				this.disposeWithMe(this._layoutService.registerRootContainerElement(containerElement));
+ 				this.disposeWithMe(this._layoutService.registerContentElement(contentElement));
+ 			}
+ 			try {
+ 				await this._lifecycleService.onStage(_univerjs_core.LifecycleStages.Ready);
++				// The workbench may have been disposed while Ready was pending.
++				if (this._disposed) return;
+ 				this._renderTimeout = window.setTimeout(() => {
++					if (this._disposed) return;
+ 					const allRenders = this._renderManagerService.getRenderAll();
+ 					for (const [key] of allRenders) if (this._changeRenderUnit(key, contentElement)) break;
+ 					requestAnimationFrame(() => requestAnimationFrame(() => initialSkeleton === null || initialSkeleton === void 0 ? void 0 : initialSkeleton.dispose()));
+diff --git a/lib/es/index.js b/lib/es/index.js
+index d4260b98c3352af92ccbb5c283cdae24d2ad6142..1834e1619b98a303027468effff8e69321b717e5 100644
+--- a/lib/es/index.js
++++ b/lib/es/index.js
+@@ -6979,13 +6979,17 @@ var SingleUnitUIController = class extends Disposable {
+ 		const initialSkeleton = (_this$_injector$get = this._injector.get(IWorkbenchService, Quantity.OPTIONAL)) === null || _this$_injector$get === void 0 ? void 0 : _this$_injector$get.acquireSkeleton();
+ 		if (initialSkeleton) this.disposeWithMe(initialSkeleton);
+ 		this.disposeWithMe(this.bootstrap(async (contentElement, containerElement) => {
++			if (this._disposed) return;
+ 			if (this._layoutService) {
+ 				this.disposeWithMe(this._layoutService.registerRootContainerElement(containerElement));
+ 				this.disposeWithMe(this._layoutService.registerContentElement(contentElement));
+ 			}
+ 			try {
+ 				await this._lifecycleService.onStage(LifecycleStages.Ready);
++				// The workbench may have been disposed while Ready was pending.
++				if (this._disposed) return;
+ 				this._renderTimeout = window.setTimeout(() => {
++					if (this._disposed) return;
+ 					const allRenders = this._renderManagerService.getRenderAll();
+ 					for (const [key] of allRenders) if (this._changeRenderUnit(key, contentElement)) break;
+ 					requestAnimationFrame(() => requestAnimationFrame(() => initialSkeleton === null || initialSkeleton === void 0 ? void 0 : initialSkeleton.dispose()));

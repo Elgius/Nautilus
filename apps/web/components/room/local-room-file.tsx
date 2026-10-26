@@ -1,13 +1,17 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Download, FileText, Trash2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Download, FileText, Trash2, Info, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { downloadBlob } from '@/lib/office-content';
 import { localPreviewType, type LocalRoomFile } from '@/lib/local-room-files';
 
-export function LocalRoomFilePreview({ entry, onRemove }: { entry: LocalRoomFile; onRemove: () => void }) {
+export function LocalRoomFilePreview({ entry, onRemove, active, actionsContainer }: { entry: LocalRoomFile; onRemove: () => void; active: boolean; actionsContainer: HTMLDivElement | null }) {
   const { file } = entry;
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const kind = localPreviewType(file);
   const [preview, setPreview] = useState<{ url?: string; text?: string; error?: string }>({});
   useEffect(() => {
@@ -29,11 +33,22 @@ export function LocalRoomFilePreview({ entry, onRemove }: { entry: LocalRoomFile
     }
   }, [file, kind]);
   return <section className="flex min-h-0 flex-1 flex-col overflow-auto" aria-label={`Local file ${file.name}`}>
-    <div className="room-panel-heading flex-wrap gap-2"><div className="min-w-0"><FileText size={16} /><h2 className="break-all">{file.name}</h2><span className="room-document-status">Local file</span></div>
-      <div className="flex gap-1"><Button variant="outline" size="sm" onClick={() => downloadBlob(file, file.name)}><Download size={14} />Download original</Button>
-        <Button variant="ghost" size="icon-sm" aria-label={`Remove ${file.name} from this tab`} onClick={onRemove}><Trash2 size={15} /></Button></div>
-    </div>
-    <p className="border-b px-4 py-3 text-xs text-muted-foreground" role="status">{(file.size / 1024).toLocaleString(undefined, { maximumFractionDigits: 1 })} KB · Kept in this browser tab. Not uploaded to cloud storage. Leaving or refreshing this room clears local files.</p>
+    {active && actionsContainer && createPortal(<div className="room-document-toolbar">
+      <div className="room-active-file"><FileText size={15} /><strong title={file.name}>{file.name}</strong></div>
+      <Button variant="ghost" size="sm" className="room-local-badge" onClick={() => setDetailsOpen(true)} aria-label="Local file details"><Info size={13} />Local file</Button>
+      <DropdownMenu><DropdownMenuTrigger render={<Button variant="ghost" size="sm" />} aria-label="File menu">File<ChevronDown size={12} /></DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-48">
+          <DropdownMenuItem onClick={() => downloadBlob(file, file.name)}><Download size={14} />Download original</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setDetailsOpen(true)}><Info size={14} />File details</DropdownMenuItem>
+          <DropdownMenuItem variant="destructive" onClick={onRemove}><Trash2 size={14} />Remove local file</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button variant="outline" size="sm" onClick={() => downloadBlob(file, file.name)}><Download size={14} /><span className="room-download-label">Download original</span></Button>
+    </div>, actionsContainer)}
+    <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}><DialogContent><DialogHeader><DialogTitle>Local file details</DialogTitle><DialogDescription>This file stays in this browser tab. It is not saved to the room or uploaded to cloud storage.</DialogDescription></DialogHeader>
+      <p className="break-all font-medium">{file.name}</p><p className="text-sm text-muted-foreground">{file.size.toLocaleString()} bytes · {file.type || 'Unknown file type'}</p>
+      <p className="text-sm text-muted-foreground">Closing its tab keeps it in Files. Leaving or refreshing this room clears local files.</p>
+    </DialogContent></Dialog>
     {preview.error && <p role="alert" className="p-4 text-sm text-destructive">{preview.error}</p>}
     {kind === 'text' && preview.text !== undefined && <div className="min-h-0 flex-1 overflow-auto p-5"><pre className="whitespace-pre-wrap break-words font-mono text-sm" aria-label="Local file preview">{preview.text}</pre>{file.size > 200_000 && <p className="mt-3 text-xs text-muted-foreground">Preview shows the first 200 KB. Download the original for the complete file.</p>}</div>}
     {/* Raster-only previews: active HTML/SVG files are never embedded. */}

@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { type Room } from "@/lib/room-data";
 import { roomRequest, toRoom, type RoomRecord } from "@/lib/room-client";
 import { type Agent, type AgentProfile } from "@/lib/agent-data";
@@ -46,7 +47,6 @@ import {
   Users,
   Workflow,
   X,
-  Zap,
   type LucideIcon,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -391,48 +391,6 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
               <>
                 {view === "Overview" && (
                   <>
-                    <section className="welcome-banner">
-                      <div className="banner-copy">
-                        <span className="banner-kicker">
-                          <Sparkles size={14} /> A NEW WAY TO WORK
-                        </span>
-                        <h2>Big ideas deserve a bigger team.</h2>
-                        <p>
-                          A room for every goal. An agent for every challenge.
-                          <br />
-                          Build something great, together.
-                        </p>
-                        <Button variant="ghost" size="sm" onClick={() => setModal("room")}>
-                          Create your next room <ArrowRight size={15} />
-                        </Button>
-                      </div>
-                      <div className="orbit-art" aria-hidden="true">
-                        <div className="orbit orbit-outer" />
-                        <div className="orbit orbit-inner" />
-                        <div className="orbit-line line-one" />
-                        <div className="orbit-line line-two" />
-                        <div className="orbit-center">
-                          <BrandMark className="nautilus-mark" />
-                        </div>
-                        <span className="orbit-node node-one">
-                          <Bot />
-                        </span>
-                        <span className="orbit-node node-two">
-                          <Users />
-                        </span>
-                        <span className="orbit-node node-three">
-                          <Zap />
-                        </span>
-                        <span className="orbit-node node-four">
-                          <Sparkles />
-                        </span>
-                        <span className="orbit-spark spark-one">✦</span>
-                        <span className="orbit-spark spark-two">✧</span>
-                      </div>
-                      <span className="banner-number">
-                        01 / BUILT FOR COLLABORATION
-                      </span>
-                    </section>
                     <section
                       className="stats-grid"
                       aria-label="Workspace statistics"
@@ -535,7 +493,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
                         />
                       </div>
                       <div className="layout-toggle">
-                        <Button variant="ghost" size="sm"
+                        <Button variant="ghost" size="icon-sm"
                           aria-label="Grid view"
                           aria-pressed={layout === "grid"}
                           className={layout === "grid" ? "selected" : ""}
@@ -543,7 +501,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
                         >
                           <LayoutGrid size={15} />
                         </Button>
-                        <Button variant="ghost" size="sm"
+                        <Button variant="ghost" size="icon-sm"
                           aria-label="List view"
                           aria-pressed={layout === "list"}
                           className={layout === "list" ? "selected" : ""}
@@ -582,13 +540,13 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
                             </Button>
                           </div>
                         </div>
-                        <Button variant="ghost" size="sm"
-                          className="room-title h-auto justify-start whitespace-normal px-0"
-                          onClick={() => openRoom(room)}
+                        <Link
+                          className="room-title"
+                          href={`/room-id=${encodeURIComponent(room.id)}`}
                         >
                           {room.name}
                           <ArrowUpRight size={16} />
-                        </Button>
+                        </Link>
                         <p className="room-description">{room.description}</p>
                         <div
                           className="room-file-types"
@@ -751,17 +709,13 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
                         className="agent-accordion-item"
                       >
                         <div className="agent-accordion-header">
-                          <Button variant="ghost" size="sm"
-                            className="agent-profile-button h-auto justify-start whitespace-normal"
-                            onClick={() => setEditingAgentId(agent.id)}
-                            aria-label={`Edit ${agent.name} profile`}
-                          >
+                          <div className="agent-profile-button">
                             <AgentPortrait agent={agent} />
                             <span>
                               <strong>{agent.name}</strong>
                               <small>{agent.role}</small>
                             </span>
-                          </Button>
+                          </div>
                           <span
                             className={`agent-state ${agent.status.toLowerCase()}`}
                           >

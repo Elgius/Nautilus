@@ -14,6 +14,7 @@ import { UniverSheetsDataValidationPreset } from '@univerjs/preset-sheets-data-v
 import ValidationEnUS from '@univerjs/preset-sheets-data-validation/locales/en-US';
 import { UniverSheetsConditionalFormattingPreset } from '@univerjs/preset-sheets-conditional-formatting';
 import FormattingEnUS from '@univerjs/preset-sheets-conditional-formatting/locales/en-US';
+import { belongsToOfficeUnit } from '@/lib/office-mutations';
 import type { OfficeContent } from '@/lib/office-content';
 import '@univerjs/preset-docs-core/lib/index.css';
 import '@univerjs/preset-sheets-core/lib/index.css';
@@ -69,7 +70,7 @@ export default function UniverEditor({ initialContent, onReady, onDirty, onError
         return { format: 'univer', kind: 'SPREADSHEET', snapshot: structuredClone(workbook.save()) };
       } });
       subscription = univerAPI.addEvent(univerAPI.Event.CommandExecuted, (event) => {
-        if (event.type === CommandType.MUTATION && !event.id.startsWith('formula.') && !event.options?.applyFormulaCalculationResult) dirty();
+        if (event.type === CommandType.MUTATION && !event.id.startsWith('formula.') && !event.options?.applyFormulaCalculationResult && belongsToOfficeUnit(event.params, initialContent.snapshot.id)) dirty();
       });
     } catch (error) {
       reportError(error instanceof Error ? error.message : 'Could not open the editor.');

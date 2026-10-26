@@ -24,5 +24,8 @@
     "sharp",
     "unrs-resolver",
     "workerd"
-  ]
+  ],
+  "patchedDependencies": {
+    "@univerjs/ui@1.2.0": "patches/@univerjs%2Fui@1.2.0.patch"
+  }
 }
