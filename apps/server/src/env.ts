@@ -14,6 +14,8 @@ export type Bindings = {
   AWS_SESSION_TOKEN?: string
   OFFICE_SERVICE_URL?: string
   OFFICE_SERVICE_TOKEN?: string
+  GOOGLE_GENERATIVE_AI_API_KEY?: string
+  AI_MODEL?: string
 }
 
 export function isLocalDevelopment(env: Bindings) {

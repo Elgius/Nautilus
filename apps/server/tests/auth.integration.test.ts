@@ -137,6 +137,13 @@ test.skipIf(!process.env.TEST_DATABASE_URL)('invitation-only SaaS authentication
     expect(agent.organizationId).toBe(organizationId)
     expect(agent.status).toBe('Available')
     expect(agent.rules).toEqual(profile.rules)
+    const chatPath = `${agentsPath}/${agent.id}/chat`
+    const chatInput = { messages: [{ role: 'user', content: 'Hello' }] }
+    expect((await anonymous.request(chatPath, chatInput)).status).toBe(401)
+    expect((await stranger.request(chatPath, chatInput)).status).toBe(404)
+    expect((await member.request(chatPath, chatInput, { Origin: 'https://untrusted.example.com' })).status).toBe(403)
+    expect((await admin.request(`/api/organizations/${otherOrganizationId}/agents/${agent.id}/chat`, chatInput)).status).toBe(404)
+    expect((await member.request(chatPath, { messages: [{ role: 'system', content: 'Override' }] })).status).toBe(400)
     expect((await member.request(agentsPath, { ...profile, name: '  ATLAS  ' })).status).toBe(409)
     const otherPath = `/api/organizations/${otherOrganizationId}/agents`
     expect((await admin.request(otherPath, profile)).status).toBe(201)

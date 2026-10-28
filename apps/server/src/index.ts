@@ -4,6 +4,7 @@ import { HTTPException } from 'hono/http-exception'
 import { createMiddleware } from 'hono/factory'
 import { bodyLimit } from 'hono/body-limit'
 import { agentSelect, parseAgentProfile } from './agents'
+import { agentChat } from './agent-chat'
 import { rooms } from './rooms'
 import { createAuth, type Auth } from './auth'
 import { createDatabase, type Database } from './db'
@@ -133,6 +134,9 @@ app.patch(`${agentPath}/:agentId`, authenticated, organizationMember, async (c) 
   const agent = await c.get('db').agent.update({ where, data, select: agentSelect })
   return c.json({ agent })
 })
+
+app.use(`${agentPath}/:agentId/chat`, authenticated, organizationMember)
+app.route(agentPath, agentChat)
 
 const roomPath = '/api/organizations/:organizationId/rooms'
 app.use(`${roomPath}/*`, authenticated, organizationMember)

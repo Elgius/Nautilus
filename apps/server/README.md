@@ -123,6 +123,44 @@ Set runtime secrets through Wrangler secrets or Cloudflare's dashboard, includin
 `DATABASE_URL` and `BETTER_AUTH_SECRET`; set the actual HTTPS API URL and web origin.
 `DATABASE_URL_UNPOOLED` is an operator/CI migration credential, not a Worker binding.
 
+## Agent LLM communication
+
+The backend uses Vercel AI SDK 7 (`ai`) and its `ToolLoopAgent` abstraction.
+`src/ai.ts` creates reusable agents with both `generate()` and `stream()` methods.
+Their instructions come from the saved agent name, purpose, and ordered rules.
+Calls use the AI SDK Google provider (`@ai-sdk/google`) directly, configured per
+request from Cloudflare bindings:
+
+- `GOOGLE_GENERATIVE_AI_API_KEY`: Gemini API key; add it to the local `.env` when
+  ready and use `bunx wrangler secret put GOOGLE_GENERATIVE_AI_API_KEY` from
+  `apps/server` for production.
+- `AI_MODEL`: Gemini model ID, currently `gemini-3.6-flash` in the environment
+  files. The model remains configurable without changing application code.
+
+Both bindings are optional until an agent is invoked. Missing configuration
+returns 503 for chat while the rest of the API continues working.
+
+`POST /api/organizations/:organizationId/agents/:agentId/chat` requires a signed-in
+member and the trusted `Origin`, with the same tenant isolation as agent profiles.
+Send JSON, for example:
+
+```json
+{
+  "messages": [{ "role": "user", "content": "Help me plan this research." }],
+  "stream": false
+}
+```
+
+The JSON response contains `{ agentId, text, finishReason, usage }`. Set `stream`
+to `true` for an AI SDK UI message SSE response, including sanitized error events.
+The request still uses text `messages`, not the SDK UIMessage `parts` format.
+Only user and assistant text messages are accepted, with up to 50 messages and
+32,000 total characters. The caller supplies history for each request; messages
+are not persisted or automatically added to rooms. Client-supplied models,
+system instructions, and tools are ignored. Each call has a 60-second timeout,
+a 4,096 output-token limit, and at most one retry. Disconnects abort generation.
+No tools, file uploads, or background agent execution are enabled by this endpoint.
+
 ## Validation
 
 ```sh
