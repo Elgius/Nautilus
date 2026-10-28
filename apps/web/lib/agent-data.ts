@@ -22,3 +22,7 @@ export type AgentProfile = Pick<
   "name" | "role" | "color" | "avatarIcon" | "avatarUrl" | "rules"
 >;
 
+
+export type AgentCreationInput = Pick<AgentProfile, "name" | "color" | "avatarIcon" | "avatarUrl"> & {
+  description: string;
+};

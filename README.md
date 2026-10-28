@@ -66,9 +66,11 @@ Apply checked-in database migrations before running the updated API:
 bun run --cwd apps/server db:deploy
 ```
 
-Use `DATABASE_URL_UNPOOLED` for migrations. Agent creation and customization save
-through `/api/organizations/:organizationId/agents`; model configuration and
-execution are not yet implemented. Uploaded avatars currently retain the existing
+Use `DATABASE_URL_UNPOOLED` for migrations. The creation dialog sends a description
+to `/api/organizations/:organizationId/agent_creator_agent`, which generates a
+purpose and rules with the AI SDK before saving the profile. Customization saves
+through `/api/organizations/:organizationId/agents/:agentId`. Creation and chat
+require the backend Gemini bindings described in `apps/server/README.md`. Uploaded avatars currently retain the existing
 2 MB limit and are stored as image data URLs in the agent row.
 
 For Next.js hosting, set the project root directory to `apps/web` and include the
