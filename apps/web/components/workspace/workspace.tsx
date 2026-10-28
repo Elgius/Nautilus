@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { type Room } from "@/lib/room-data";
 import { roomRequest, toRoom, type RoomRecord } from "@/lib/room-client";
-import { type Agent, type AgentProfile } from "@/lib/agent-data";
-import { persistAgent } from "@/lib/agent-client";
+import { type Agent, type AgentProfile, type AgentCreationInput } from "@/lib/agent-data";
+import { createAgentFromDescription, persistAgent } from "@/lib/agent-client";
 import { AgentPortrait } from "@/components/agents/agent-portrait";
 import { AgentProfileDialog } from "@/components/agents/agent-profile-dialog";
 import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
@@ -191,13 +191,13 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
     } catch (error) { setNotice(errorMessage(error)); }
     finally { setStarringRooms((previous) => previous.filter((id) => id !== room.id)); }
   }
-  async function createAgent(profile: AgentProfile): Promise<string | null> {
+  async function createAgent(profile: AgentCreationInput): Promise<string | null> {
     if (!session.activeOrganization) return "Choose an organisation first.";
     if (agents.some((agent) => agent.name.toLowerCase() === profile.name.toLowerCase())) {
       return "An agent with that name already exists.";
     }
     try {
-      const agent = await persistAgent(session.activeOrganization.id, profile);
+      const agent = await createAgentFromDescription(session.activeOrganization.id, profile);
       setAgents((previous) => [...previous, agent]);
       addEvent("You", "added agent", agent.name);
       setModal(null);

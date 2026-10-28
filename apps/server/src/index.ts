@@ -5,6 +5,7 @@ import { createMiddleware } from 'hono/factory'
 import { bodyLimit } from 'hono/body-limit'
 import { agentSelect, parseAgentProfile } from './agents'
 import { agentChat } from './agent-chat'
+import { agentCreator } from './agent-creator-route'
 import { rooms } from './rooms'
 import { createAuth, type Auth } from './auth'
 import { createDatabase, type Database } from './db'
@@ -104,6 +105,10 @@ const organizationMember = createMiddleware<AppEnv>(async (c, next) => {
   await next()
 })
 
+const creatorPath = '/api/organizations/:organizationId/agent_creator_agent'
+app.use(creatorPath, authenticated, organizationMember)
+app.route(creatorPath, agentCreator)
+
 app.get(agentPath, authenticated, organizationMember, async (c) => {
   const agents = await c.get('db').agent.findMany({
     where: { organizationId: c.get('organizationId') },
@@ -159,7 +164,7 @@ app.get('/api/admin/email-outbox', authenticated, platformAdmin, async (c) => {
 app.onError((error, c) => {
   if (error instanceof HTTPException) return c.json({ error: error.message }, error.status)
   if ('code' in error && error.code === 'P2002') {
-    return c.json({ error: c.req.path.includes('/agents')
+    return c.json({ error: (c.req.path.includes('/agents') || c.req.path.includes('/agent_creator_agent'))
       ? 'Choose a name that isn’t already used by another agent.'
       : 'This record changed. Reload and try again.' }, 409)
   }
