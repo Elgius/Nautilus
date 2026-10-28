@@ -1,0 +1,15 @@
+ALTER TYPE "AgentColor" ADD VALUE 'brown';
+ALTER TYPE "AgentColor" ADD VALUE 'red';
+ALTER TYPE "AgentColor" ADD VALUE 'orange';
+ALTER TYPE "AgentColor" ADD VALUE 'amber';
+ALTER TYPE "AgentColor" ADD VALUE 'teal';
+ALTER TYPE "AgentColor" ADD VALUE 'pink';
+ALTER TYPE "AgentColor" ADD VALUE 'gray';
+ALTER TYPE "AgentIcon" ADD VALUE 'circle';
+ALTER TYPE "AgentIcon" ADD VALUE 'oval';
+ALTER TYPE "AgentIcon" ADD VALUE 'square';
+ALTER TYPE "AgentIcon" ADD VALUE 'pill';
+ALTER TYPE "AgentIcon" ADD VALUE 'triangle';
+ALTER TYPE "AgentIcon" ADD VALUE 'hexagon';
+ALTER TYPE "AgentIcon" ADD VALUE 'cloud';
+ALTER TYPE "AgentIcon" ADD VALUE 'drop';

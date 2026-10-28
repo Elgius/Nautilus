@@ -1,7 +1,7 @@
 import { HTTPException } from 'hono/http-exception'
 
-const colors = ['violet', 'coral', 'blue', 'green'] as const
-const icons = ['bot', 'sparkles', 'compass', 'code', 'book', 'chart'] as const
+const colors = ['violet', 'coral', 'blue', 'green', 'brown', 'red', 'orange', 'amber', 'teal', 'pink', 'gray'] as const
+const icons = ['bot', 'sparkles', 'compass', 'code', 'book', 'chart', 'circle', 'oval', 'square', 'pill', 'triangle', 'hexagon', 'cloud', 'drop'] as const
 
 // Only profile fields are accepted; tenant, IDs, and runtime status are server-owned.
 export function parseAgentProfile(value: unknown) {

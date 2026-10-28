@@ -140,6 +140,13 @@ enum AgentColor {
   coral
   blue
   green
+  brown
+  red
+  orange
+  amber
+  teal
+  pink
+  gray
 }
 
 enum AgentIcon {
@@ -149,6 +156,14 @@ enum AgentIcon {
   code
   book
   chart
+  circle
+  oval
+  square
+  pill
+  triangle
+  hexagon
+  cloud
+  drop
 }
 
 enum AgentStatus {

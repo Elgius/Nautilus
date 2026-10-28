@@ -12,15 +12,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { AgentPortrait, avatarIcons } from "@/components/agents/agent-portrait";
+import { AgentPortrait, AgentShape } from "@/components/agents/agent-portrait";
+import { avatarColors, avatarShapes } from "@/lib/agent-data";
 import type {
   Agent,
   AgentProfile,
   AvatarColor,
-  AvatarIcon,
 } from "@/lib/agent-data";
 
-const colors: AvatarColor[] = ["violet", "coral", "blue", "green"];
+const colors: AvatarColor[] = [...avatarColors, "coral"];
 
 export function AgentProfileDialog({
   agent,
@@ -129,11 +129,11 @@ export function AgentProfileDialog({
               aria-labelledby="avatar-heading"
             >
               <div className="agent-avatar-preview">
-                <AgentPortrait agent={profile} />
+                <AgentPortrait agent={profile} animated />
               </div>
               <div>
                 <h3 id="avatar-heading">Agent avatar</h3>
-                <p>Choose an icon or upload your own image.</p>
+                <p>Choose a shape or upload your own image.</p>
                 <div className="agent-upload-actions">
                   <Button
                     variant="outline"
@@ -183,30 +183,15 @@ export function AgentProfileDialog({
               </p>
             )}
             <fieldset className="agent-avatar-presets">
-              <legend>Avatar icon</legend>
+              <legend>Avatar shape</legend>
               <div>
-                {(
-                  Object.entries(avatarIcons) as [
-                    AvatarIcon,
-                    typeof avatarIcons.bot,
-                  ][]
-                ).map(([key, Icon]) => (
-                  <Button variant="ghost" size="sm"
-                    type="button"
-                    key={key}
-                    aria-label={`${key} avatar`}
-                    aria-pressed={
-                      !profile.avatarUrl && profile.avatarIcon === key
-                    }
-                    onClick={() =>
-                      setProfile((previous) => ({
-                        ...previous,
-                        avatarIcon: key,
-                        avatarUrl: undefined,
-                      }))
-                    }
+                {avatarShapes.map((shape) => (
+                  <Button variant="ghost" size="sm" type="button" key={shape}
+                    aria-label={`${shape} avatar`}
+                    aria-pressed={!profile.avatarUrl && profile.avatarIcon === shape}
+                    onClick={() => setProfile((previous) => ({ ...previous, avatarIcon: shape, avatarUrl: undefined }))}
                   >
-                    <Icon size={18} />
+                    <AgentShape shape={shape} />
                   </Button>
                 ))}
               </div>

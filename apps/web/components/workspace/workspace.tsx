@@ -9,6 +9,7 @@ import { type Agent, type AgentProfile } from "@/lib/agent-data";
 import { persistAgent } from "@/lib/agent-client";
 import { AgentPortrait } from "@/components/agents/agent-portrait";
 import { AgentProfileDialog } from "@/components/agents/agent-profile-dialog";
+import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
 import {
   Accordion,
   AccordionItem,
@@ -119,7 +120,6 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
   );
   const canManage = canManageOrganization(membership?.role);
   const [savingSettings, setSavingSettings] = useState(false);
-  const [creatingAgent, setCreatingAgent] = useState(false);
   const [creatingRoom, setCreatingRoom] = useState(false);
   const [starringRooms, setStarringRooms] = useState<string[]>([]);
   const [view, setView] = useState<View>("Overview");
@@ -191,37 +191,22 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
     } catch (error) { setNotice(errorMessage(error)); }
     finally { setStarringRooms((previous) => previous.filter((id) => id !== room.id)); }
   }
-  async function createAgent(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (creatingAgent || !session.activeOrganization) return;
-    const data = new FormData(event.currentTarget);
-    const name = String(data.get("name")).trim();
-    if (!name) return;
-    if (
-      agents.some((agent) => agent.name.toLowerCase() === name.toLowerCase())
-    ) {
-      setNotice("An agent with that name already exists.");
-      return;
+  async function createAgent(profile: AgentProfile): Promise<string | null> {
+    if (!session.activeOrganization) return "Choose an organisation first.";
+    if (agents.some((agent) => agent.name.toLowerCase() === profile.name.toLowerCase())) {
+      return "An agent with that name already exists.";
     }
-    setCreatingAgent(true);
-    setNotice("");
     try {
-      const agent = await persistAgent(session.activeOrganization.id, {
-        name,
-        avatarIcon: "bot",
-        rules: [],
-        role: String(data.get("role")).trim(),
-        color: "green",
-      });
+      const agent = await persistAgent(session.activeOrganization.id, profile);
       setAgents((previous) => [...previous, agent]);
       addEvent("You", "added agent", agent.name);
       setModal(null);
+      setNotice("");
       setView("Agents");
       setEditingAgentId(agent.id);
+      return null;
     } catch (error) {
-      setNotice(errorMessage(error));
-    } finally {
-      setCreatingAgent(false);
+      return errorMessage(error);
     }
   }
   async function saveAgent(agentId: string, oldName: string, profile: AgentProfile): Promise<string | null> {
@@ -874,37 +859,33 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
           </main>
         </SidebarInset>
         <Dialog
-          open={modal !== null}
+          open={modal !== null && modal !== "agent"}
           onOpenChange={(open) => {
-            if (!open && !creatingAgent && !creatingRoom) {
+            if (!open && !creatingRoom) {
               setModal(null);
               setNotice("");
             }
           }}
         >
-          <DialogContent className="workspace-dialog sm:max-w-lg" showCloseButton={!creatingAgent && !creatingRoom}>
+          <DialogContent className="workspace-dialog sm:max-w-lg" showCloseButton={!creatingRoom}>
             <DialogHeader>
               <DialogTitle>
                 {modal === "room"
                   ? "Make room for something great."
-                  : modal === "agent"
-                    ? "Meet your next collaborator."
-                    : modal === "invite"
-                      ? "Bring your team together."
-                      : modal === "notifications"
-                        ? "You’re all caught up."
-                        : "Welcome to Agents hub."}
+                  : modal === "invite"
+                    ? "Bring your team together."
+                    : modal === "notifications"
+                      ? "You’re all caught up."
+                      : "Welcome to Agents hub."}
               </DialogTitle>
               <DialogDescription>
                 {modal === "room"
                   ? "Give your team and agents a shared goal and a place to work."
-                  : modal === "agent"
-                    ? "Create an agent profile for your workspace."
-                    : modal === "invite"
-                      ? "Invite a teammate to this organisation. They’ll verify their email before joining."
-                      : modal === "notifications"
-                        ? "Recent workspace updates appear below. These are sample notifications."
-                        : "Your shared workspace for people and AI agents."}
+                  : modal === "invite"
+                    ? "Invite a teammate to this organisation. They’ll verify their email before joining."
+                    : modal === "notifications"
+                      ? "Recent workspace updates appear below. These are sample notifications."
+                      : "Your shared workspace for people and AI agents."}
               </DialogDescription>
             </DialogHeader>
             {modal === "room" && (
@@ -973,33 +954,6 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
                 </fieldset>
               </form>
             )}
-            {modal === "agent" && (
-              <form className="dialog-form" onSubmit={createAgent} aria-busy={creatingAgent}>
-                <fieldset disabled={creatingAgent} className="contents">
-                  <label htmlFor="agent-name">Agent name</label>
-                  <Input
-                    id="agent-name"
-                    name="name"
-                    required
-                    maxLength={30}
-                    placeholder="e.g. Scout"
-                  />
-                  <label htmlFor="agent-role">Purpose</label>
-                  <Input
-                    id="agent-role"
-                    name="role"
-                    required
-                    maxLength={70}
-                    placeholder="e.g. Customer support & success"
-                  />
-                  <p className="form-note">
-                    This creates a profile. Model configuration and agent
-                    execution will follow.
-                  </p>
-                  <Button type="submit" disabled={creatingAgent}>{creatingAgent ? "Creating…" : "Create agent"}</Button>
-                </fieldset>
-              </form>
-            )}
             {modal === "invite" && <InviteMembers />}
             {modal === "help" && (
               <div className="getting-started">
@@ -1053,6 +1007,12 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
             )}
           </DialogContent>
         </Dialog>
+        {modal === "agent" && (
+          <CreateAgentDialog
+            onClose={() => { setModal(null); setNotice(""); }}
+            onCreate={createAgent}
+          />
+        )}
         {editingAgent && (
           <AgentProfileDialog
             key={editingAgent.id}
