@@ -6,7 +6,7 @@ Bun workspace monorepo containing the Next.js frontend and Hono API.
 apps/
   web/       Next.js frontend (@nautilus/web)
   server/    Hono API on Cloudflare Workers (@nautilus/server)
-  office/    Private Bun service for Univer Word/Excel conversion (@nautilus/office)
+  office/    Private Bun service for Univer Word/Excel conversion and editing (@nautilus/office)
 ```
 
 ## Getting started
@@ -50,6 +50,33 @@ Worker deployment requires Cloudflare credentials.
 - Both apps extend `tsconfig.base.json` and retain their runtime-specific settings.
 - CI should run `bun install --frozen-lockfile`, `bun run lint`,
   `bun run typecheck`, and `bun run build` from the root.
+
+## Document editing modules
+
+`apps/office/src/editing/docs.ts` and `spreadsheets.ts` expose read functions,
+individual edits and sequential batch editing. They use an isolated Univer 1.2.0
+runtime and return native snapshots, preserving formatting and formula references.
+The function reference and future agent prompts are in [skills/docs.md](skills/docs.md)
+and [skills/spreadsheets.md](skills/spreadsheets.md).
+
+Trusted server callers use `createDocumentService` in
+`apps/server/src/documents/document-service.ts` to read saved contents, save
+versions, or apply an edit batch through the Office service's authenticated
+`POST /edit` endpoint. The API owns organization/room access and version checks;
+the Office service only transforms snapshots. An agent author must already be
+assigned to the room. Existing UI read/save routes share the persistence service.
+
+Editing requires the Office service and saved Univer content. Legacy content must
+first be opened and saved in the editor. Unknown plugin resources are retained;
+structural edits are rejected if populated resources require unloaded plugins.
+Formula references are maintained, but calculated values are not guaranteed to be
+refreshed until the workbook recalculates. Input snapshots are never modified,
+and only a successful complete batch is eligible for saving.
+
+These functions are not registered with any agent. Local file uploads remain
+browser-local, and unsaved browser drafts are not read or overwritten by the
+editing service. Live viewing, screen synchronization and WebSocket broadcasting
+are deferred; an open editor must reload to see a saved external version.
 
 ## Deployments
 

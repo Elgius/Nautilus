@@ -4,9 +4,10 @@ import { HTTPException } from 'hono/http-exception'
 import type { AppEnv } from './index'
 import type { Database } from './db'
 import { createStorage, storageConfigured } from './storage'
-import { object, parseContent, parseRoom, text } from './room-validation'
+import { object, parseRoom, text } from './room-validation'
 import { MAX_OFFICE_BYTES, validateOfficeContent } from './office-content'
 import { officeConfigured, officeRequest } from './office-service'
+import { createDocumentService, versionSelect } from './documents/document-service'
 
 export const rooms = new Hono<AppEnv>()
 rooms.use('*', bodyLimit({ maxSize: MAX_OFFICE_BYTES + 1024 * 1024 }))
@@ -20,8 +21,6 @@ const roomInclude = (userId: string) => ({
     id: true, title: true, kind: true, category: true, status: true, currentVersionId: true, updatedAt: true,
   } },
 })
-const versionSelect = { id: true, versionNumber: true, sizeBytes: true, mimeType: true, checksum: true,
-  changeSummary: true, createdAt: true, authorUser: { select: { name: true } }, authorAgent: { select: { name: true } } } as const
 const messageInclude = {
   authorUser: { select: { name: true } }, authorAgent: { select: { name: true } },
   documents: { select: { documentId: true, documentVersionId: true, document: { select: { title: true, kind: true } } } },
@@ -191,17 +190,10 @@ rooms.get('/:roomId/documents/:documentId/versions', async (c) => {
 })
 
 rooms.get('/:roomId/documents/:documentId/content', async (c) => {
-  const document = await c.get('db').document.findFirstOrThrow({ where: { id: c.req.param('documentId'), roomId: c.req.param('roomId'), organizationId: c.get('organizationId') },
-    include: { currentVersion: { select: { objectKey: true, checksum: true, sizeBytes: true } } } })
-  if (!document.currentVersion) return c.json({ content: null, currentVersionId: null })
-  const payload = await createStorage(c.env).get(document.currentVersion.objectKey)
-  const bytes = new TextEncoder().encode(payload)
-  const checksum = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map((byte) => byte.toString(16).padStart(2, '0')).join('')
-  if (checksum !== document.currentVersion.checksum || bytes.byteLength !== document.currentVersion.sizeBytes) {
-    throw new HTTPException(502, { message: 'The stored document failed its integrity check.' })
-  }
-  const content = JSON.parse(payload)
-  return c.json({ content, currentVersionId: document.currentVersionId })
+  const { content, currentVersionId } = await createDocumentService(c.get('db'), c.env).readDocument({
+    organizationId: c.get('organizationId'), roomId: c.req.param('roomId'), documentId: c.req.param('documentId'),
+  })
+  return c.json({ content, currentVersionId })
 })
 
 // Room/document middleware and the parent organization middleware enforce access
@@ -235,26 +227,12 @@ rooms.get('/:roomId/documents/:documentId/versions/:versionId/url', async (c) =>
 })
 
 rooms.post('/:roomId/documents/:documentId/versions', async (c) => {
-  const input = await body(c.req), db = c.get('db'), organizationId = c.get('organizationId'), roomId = c.req.param('roomId'), documentId = c.req.param('documentId')
-  const document = await db.document.findFirstOrThrow({ where: { id: documentId, organizationId, roomId }, include: { currentVersion: { select: { versionNumber: true } } } })
-  if (input.expectedVersionId !== document.currentVersionId) throw new HTTPException(409, { message: 'A newer document version exists. Reload before saving.' })
-  const payload = parseContent(document.kind, input.content)
-  const bytes = new TextEncoder().encode(payload)
-  if (bytes.byteLength > MAX_OFFICE_BYTES) throw new HTTPException(413, { message: 'Keep document versions within 10 MB.' })
-  const checksum = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map((byte) => byte.toString(16).padStart(2, '0')).join('')
-  const id = crypto.randomUUID(), objectKey = `organizations/${organizationId}/rooms/${roomId}/documents/${documentId}/versions/${id}.json`
-  const changeSummary = input.changeSummary == null ? null : text(input.changeSummary, 'Change summary', 500, true)
-  await createStorage(c.env).put(objectKey, payload)
-  // S3 and Postgres cannot share a transaction. An unsuccessful DB commit can leave an
-  // unreferenced object; keep it for reconciliation rather than risking a committed version.
-  const version = await db.$transaction(async (tx) => {
-    const result = await tx.documentVersion.create({ data: { id, organizationId, roomId, documentId, objectKey,
-      versionNumber: (document.currentVersion?.versionNumber ?? 0) + 1, mimeType: 'application/json', sizeBytes: bytes.byteLength,
-      checksum, authorUserId: c.get('session').user.id, changeSummary }, select: versionSelect })
-    const updated = await tx.document.updateMany({ where: { id: documentId, organizationId, roomId, currentVersionId: document.currentVersionId }, data: { currentVersionId: id } })
-    if (updated.count !== 1) throw new HTTPException(409, { message: 'A newer document version exists. Reload before saving.' })
-    await tx.room.update({ where: { id: roomId, organizationId }, data: { lastActivityAt: new Date() } })
-    return result
-  })
+  const input = await body(c.req)
+  const version = await createDocumentService(c.get('db'), c.env).saveVersion({
+    organizationId: c.get('organizationId'), roomId: c.req.param('roomId'), documentId: c.req.param('documentId'),
+  }, {
+    expectedVersionId: input.expectedVersionId as string | null, content: input.content,
+    changeSummary: input.changeSummary as string | null | undefined,
+  }, { userId: c.get('session').user.id })
   return c.json({ version }, 201)
 })
