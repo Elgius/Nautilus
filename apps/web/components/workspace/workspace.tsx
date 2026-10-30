@@ -757,7 +757,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
                               <Button
                                 variant="ghost"
                                 onClick={() => {
-                                  setSelectedAgents([agent.name]);
+                                  setSelectedAgents([agent.id]);
                                   setModal("room");
                                 }}
                               >

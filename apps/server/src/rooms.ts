@@ -8,6 +8,7 @@ import { object, parseRoom, text } from './room-validation'
 import { MAX_OFFICE_BYTES, validateOfficeContent } from './office-content'
 import { officeConfigured, officeRequest } from './office-service'
 import { createDocumentService, versionSelect } from './documents/document-service'
+import { roomAgentChat } from './room-agent-chat'
 
 export const rooms = new Hono<AppEnv>()
 rooms.use('*', bodyLimit({ maxSize: MAX_OFFICE_BYTES + 1024 * 1024 }))
@@ -68,6 +69,8 @@ rooms.use('/:roomId/*', async (c, next) => {
   if (!await c.get('db').room.findUnique({ where: { id: c.req.param('roomId'), organizationId: c.get('organizationId') }, select: { id: true } })) throw new HTTPException(404, { message: 'Room not found.' })
   await next()
 })
+
+rooms.route('/', roomAgentChat)
 
 rooms.get('/:roomId', async (c) => {
   const organizationId = c.get('organizationId'), roomId = c.req.param('roomId'), db = c.get('db')

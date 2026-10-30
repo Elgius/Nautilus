@@ -161,6 +161,19 @@ system instructions, and tools are ignored. Each call has a 60-second timeout,
 a 4,096 output-token limit, and at most one retry. Disconnects abort generation.
 No tools, file uploads, or background agent execution are enabled by this endpoint.
 
+Room conversations use `POST /api/organizations/:organizationId/rooms/:roomId/messages`
+to save the user message first, then `POST /api/organizations/:organizationId/rooms/:roomId/messages/:messageId/reply`
+with `{ "agentId": "..." }`. The reply endpoint checks the agent's room assignment
+and that the requesting user authored the saved message. It loads up to 50 saved
+messages ending at that message, within 32,000 characters, and uses the agent's
+current name, role, and rules. Other participants are labeled in the context;
+only the selected agent's messages use the assistant role. Replies are saved as
+agent-authored room messages and returned as `{ message }` after generation.
+The room UI selects a sole assigned agent automatically, offers a selector for
+multiple agents, and supports team-only messages. Failed replies can be retried
+without reposting the user message. Room chat uses the same AI bindings above;
+it does not include document contents or browser-local files in model requests.
+
 ## Validation
 
 ```sh
