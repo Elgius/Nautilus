@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/accordion";
 import { RoomDocumentLibrary } from "@/components/workspace/room-document-library";
 import "@/app/documents.css";
+import { ThemeSettings } from "@/components/theme-settings";
 import { BrandMark } from "@/components/brand-mark";
 import { useWorkspaceSession } from "@/components/auth/workspace-session";
 import { InviteMembers } from "@/components/auth/invite-members";
@@ -819,6 +820,8 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
               </section>
             )}
             {view === "Settings" && (
+              <>
+              <ThemeSettings />
               <section className="settings-panel">
                 <h2>Workspace details</h2>
                 <p>The home for your people, agents, and shared work.</p>
@@ -846,6 +849,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
                   </Button>
                 </form>
               </section>
+              </>
             )}
             <footer className="page-footer">
               <span>
