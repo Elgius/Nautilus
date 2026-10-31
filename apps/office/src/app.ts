@@ -5,6 +5,8 @@ import { timingSafeEqual } from 'node:crypto'
 import { UniverInstanceType, type IDocumentData, type IWorkbookData } from '@univerjs/core'
 import { ExchangeError, ExchangeFormat, exportToBuffer, importBuffer, type ISheetImportOptions } from '@univerjs-pro/exchange-node'
 import { MAX_OFFICE_BYTES, validateOfficeContent } from '../../server/src/office-content'
+import { applyDocumentEdits, type DocumentEdit } from './editing/docs'
+import { applySpreadsheetEdits, type SpreadsheetEdit } from './editing/spreadsheets'
 
 export function createOfficeApp(secret: string) {
   const app = new Hono()
@@ -33,6 +35,15 @@ export function createOfficeApp(secret: string) {
       snapshot = await importBuffer(buffer, { type: UniverInstanceType.UNIVER_SHEET, format: formats[extension as keyof typeof formats], fileName: file.name } as ISheetImportOptions & { fileName: string })
     }
     return c.json({ content: validateOfficeContent(kind, { format: 'univer', kind, snapshot }) })
+  })
+  // Internal transport only. Room authorization and persistence belong to the API service.
+  app.post('/edit', async (c) => {
+    const input = await c.req.json().catch(() => { throw new HTTPException(400, { message: 'Provide valid JSON.' }) })
+    if (input?.content?.kind !== 'DOCUMENT' && input?.content?.kind !== 'SPREADSHEET') throw new HTTPException(400, { message: 'Invalid document type.' })
+    const content = input.content.kind === 'DOCUMENT'
+      ? applyDocumentEdits(input.content, input.edits as DocumentEdit[])
+      : applySpreadsheetEdits(input.content, input.edits as SpreadsheetEdit[])
+    return c.json({ content })
   })
   app.post('/export', async (c) => {
     const input = await c.req.json().catch(() => { throw new HTTPException(400, { message: 'Provide valid JSON.' }) })

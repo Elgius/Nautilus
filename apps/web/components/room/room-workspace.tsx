@@ -26,6 +26,9 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
   const [messages, setMessages] = useState(initialData.messages);
   const [nextCursor, setNextCursor] = useState(initialData.nextCursor);
   const [draft, setDraft] = useState("");
+  const [agentId, setAgentId] = useState(room.agents.length === 1 ? room.agents[0].agent.id : "");
+  const [failedReply, setFailedReply] = useState<{ messageId: string; agentId: string } | null>(null);
+  const [replying, setReplying] = useState(false);
   const [sending, setSending] = useState(false), [loadingOlder, setLoadingOlder] = useState(false);
   const [notice, setNotice] = useState("");
   const [mobilePanel, setMobilePanel] = useState<"chat" | "document">("chat");
@@ -52,15 +55,27 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
   }, [organizationId, path]);
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (sending || !draft.trim()) return;
+    if (sending || replying || !draft.trim()) return;
     setSending(true); setNotice('');
     try {
       const { message } = await roomRequest<{ message: RoomMessage }>(organizationId, `${path}/messages`, 'POST', {
         text: draft,
       });
       setMessages((previous) => [...previous, message]); setDraft('');
+      if (agentId) await requestReply(message.id, agentId);
     } catch (error) { setNotice(errorMessage(error)); }
     finally { setSending(false); }
+  }
+  async function requestReply(messageId: string, selectedAgentId: string) {
+    setReplying(true); setFailedReply(null); setNotice('');
+    try {
+      const { message } = await roomRequest<{ message: RoomMessage }>(organizationId,
+        `${path}/messages/${encodeURIComponent(messageId)}/reply`, 'POST', { agentId: selectedAgentId });
+      setMessages((previous) => [...previous, message]);
+    } catch (error) {
+      setFailedReply({ messageId, agentId: selectedAgentId });
+      setNotice(`Your message is saved. ${errorMessage(error)}`);
+    } finally { setReplying(false); }
   }
   async function loadOlder() {
     if (!nextCursor || loadingOlder) return;
@@ -115,10 +130,19 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
             </article>;
           })}
         </div>
-        <div className="room-composer-area"><form className="room-composer" onSubmit={sendMessage} aria-busy={sending}>
+        <div className="room-composer-area">
+          {replying && <p className="room-local-note" role="status">Agent is replying…</p>}
+          {failedReply && <Button variant="outline" size="sm" disabled={sending || replying} onClick={() => requestReply(failedReply.messageId, failedReply.agentId)}>Retry agent reply</Button>}
+          <form className="room-composer" onSubmit={sendMessage} aria-busy={sending || replying}>
+          {room.agents.length > 0 && <label className="room-agent-picker">Reply from
+            <select aria-label="Agent to reply" value={agentId} disabled={sending || replying} onChange={(event) => setAgentId(event.target.value)}>
+              <option value="">Team only</option>
+              {room.agents.map(({ agent }) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+            </select>
+          </label>}
           <textarea aria-label="Message to room" placeholder="Share an idea or add some context…" value={draft} disabled={sending} onChange={(event) => setDraft(event.target.value)} rows={3} maxLength={20000}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
-          <div className="room-composer-footer"><span>Enter to send · Shift + Enter for a new line</span><Button size="icon" type="submit" disabled={sending || !draft.trim()} aria-label="Send message"><ArrowUp size={17} /></Button></div>
+          <div className="room-composer-footer"><span>Enter to send · Shift + Enter for a new line</span><Button size="icon" type="submit" disabled={sending || replying || !draft.trim()} aria-label="Send message"><ArrowUp size={17} /></Button></div>
         </form><p className="room-local-note">Messages are saved to your organisation.</p></div>
       </section>
       <div className="room-panel-resizer" role="separator" tabIndex={chatLayout.collapsed ? -1 : 0} aria-label="Resize room chat" aria-orientation="vertical" aria-valuemin={18} aria-valuemax={45} aria-valuenow={Math.round(dragWidth ?? chatLayout.width)}
