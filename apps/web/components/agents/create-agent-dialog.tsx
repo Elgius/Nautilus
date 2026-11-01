@@ -3,7 +3,7 @@
 import { useState, type CSSProperties, type FormEvent } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { AgentShape } from "@/components/agents/agent-portrait";
-import { avatarColors, avatarShapes, type AgentProfile, type AvatarColor, type AvatarShape } from "@/lib/agent-data";
+import { avatarColors, avatarShapes, type AgentCreationInput, type AvatarColor, type AvatarShape } from "@/lib/agent-data";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ const avatarColorValues: Record<AvatarColor, string> = {
 
 export function CreateAgentDialog({ onClose, onCreate }: {
   onClose: () => void;
-  onCreate: (profile: AgentProfile) => Promise<string | null>;
+  onCreate: (input: AgentCreationInput) => Promise<string | null>;
 }) {
   const [name, setName] = useState("");
   const [color, setColor] = useState<AvatarColor>("blue");
@@ -38,7 +38,7 @@ export function CreateAgentDialog({ onClose, onCreate }: {
     setCreating(true);
     setError("");
     try {
-      const message = await onCreate({ name: name.trim(), color, avatarIcon: shape, role: "General assistant", rules: [work.trim()] });
+      const message = await onCreate({ name: name.trim(), color, avatarIcon: shape, description: work.trim() });
       if (message) setError(message);
     } catch {
       setError("Couldn’t create this agent. Please try again.");
@@ -109,13 +109,14 @@ export function CreateAgentDialog({ onClose, onCreate }: {
                 />
               </div>
             )}
+            {creating && <p role="status">Preparing your agent’s purpose and rules…</p>}
             {error && <p id="create-agent-error" className="create-agent-error" role="alert">{error}</p>}
             <div className="create-agent-actions">
               {step === "work" && (
                 <Button type="button" variant="ghost" onClick={() => { setStep("identity"); setError(""); }}>Back</Button>
               )}
               <Button type="submit" className="create-agent-submit" disabled={creating || !name.trim() || (step === "work" && !work.trim())}>
-                {creating ? "Creating…" : step === "identity" ? "Next" : "Create agent"}
+                {creating ? "Creating agent…" : step === "identity" ? "Next" : "Create agent"}
               </Button>
             </div>
           </fieldset>

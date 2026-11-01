@@ -137,8 +137,8 @@ request from Cloudflare bindings:
 - `AI_MODEL`: Gemini model ID, currently `gemini-3.6-flash` in the environment
   files. The model remains configurable without changing application code.
 
-Both bindings are optional until an agent is invoked. Missing configuration
-returns 503 for chat while the rest of the API continues working.
+Both bindings are required for AI creation and chat. Missing configuration
+returns 503 for those requests while other endpoints continue working.
 
 `POST /api/organizations/:organizationId/agents/:agentId/chat` requires a signed-in
 member and the trusted `Origin`, with the same tenant isolation as agent profiles.
@@ -189,3 +189,31 @@ on `dev-auth-implementation` and through the running Worker.
 `bun run build:server` is a local Wrangler dry run. `bun run deploy:server`
 publishes to Cloudflare and is a separate operation. No deployment is performed
 by migration, generation, build, or test commands.
+
+### Agent creator
+
+`POST /api/organizations/:organizationId/agent_creator_agent` accepts the user’s
+work description and chosen identity:
+
+```json
+{
+  "name": "Scout",
+  "color": "blue",
+  "avatarIcon": "circle",
+  "description": "Research vendors, compare pricing, and cite reliable sources."
+}
+```
+
+The route requires a session, live organization membership, and the trusted
+`Origin`. Descriptions are trimmed and limited to 6,000 characters. The creator
+uses AI SDK `generateText` with `Output.object` to generate validated JSON
+`{ purpose, rules }`. The purpose is saved as `agent.role` (up to 70 characters),
+and ordered rules are saved as `agent.rules` (up to 6,000 characters combined).
+The selected name and avatar remain user-controlled; tenant and status are server-owned.
+
+Validation, structured generation, and persistence are separate functions in
+`src/agent-creator.ts`; `src/agent-creator-route.ts` orchestrates them. The response
+is HTTP 201 with `{ agent }`, used immediately by the frontend to show the new
+agent and open its profile. Invalid input returns 400, duplicate names 409,
+missing AI configuration 503, and provider or structured-output failures 502.
+No profile is saved if generation fails. Existing profile CRUD routes remain available.
