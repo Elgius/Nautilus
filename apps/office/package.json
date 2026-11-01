@@ -10,8 +10,13 @@
     "test": "bun test tests"
   },
   "dependencies": {
-    "@univerjs/core": "1.2.0",
     "@univerjs-pro/exchange-node": "1.2.0",
+    "@univerjs/core": "1.2.0",
+    "@univerjs/docs": "1.2.0",
+    "@univerjs/engine-formula": "1.2.0",
+    "@univerjs/engine-render": "1.2.0",
+    "@univerjs/sheets": "1.2.0",
+    "@univerjs/sheets-formula": "1.2.0",
     "hono": "^4.13.13"
   },
   "devDependencies": {

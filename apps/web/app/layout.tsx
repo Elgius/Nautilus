@@ -1,3 +1,4 @@
+import { ThemeController } from "@/components/theme-settings";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
@@ -21,8 +22,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${inter.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html suppressHydrationWarning lang="en" className={`${inter.variable} h-full antialiased`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `(function(){var t="system";try{var v=localStorage.getItem("nautilus-theme-v1");if(v==="light"||v==="dark")t=v}catch(e){}var d=t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.dataset.theme=t;document.documentElement.classList.toggle("dark",d);document.documentElement.style.colorScheme=d?"dark":"light"})()` }} />
+      </head>
+      <body className="min-h-full flex flex-col"><ThemeController />{children}</body>
     </html>
   );
 }
