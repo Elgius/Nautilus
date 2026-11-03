@@ -1013,6 +1013,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
         </Dialog>
         {modal === "agent" && (
           <CreateAgentDialog
+            organizationId={session.activeOrganization?.id}
             onClose={() => { setModal(null); setNotice(""); }}
             onCreate={createAgent}
           />

@@ -11,6 +11,7 @@ import {
   ChartNoAxesCombined,
 } from "lucide-react";
 import { avatarShapes, type Agent, type AvatarIcon, type AvatarShape } from "@/lib/agent-data";
+import type { AvatarDesign } from "@/lib/avatar-generation";
 
 export const avatarIcons = {
   bot: Bot,
@@ -36,7 +37,7 @@ export function isAvatarShape(icon: AvatarIcon): icon is AvatarShape {
   return (avatarShapes as readonly string[]).includes(icon);
 }
 
-export function AgentShape({ shape, animated = false }: { shape: AvatarShape; animated?: boolean }) {
+export function AgentShape({ shape, design, animated = false }: { shape: AvatarShape; design?: AvatarDesign; animated?: boolean }) {
   const motion = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
@@ -112,13 +113,16 @@ export function AgentShape({ shape, animated = false }: { shape: AvatarShape; an
   }, [animated]);
 
   const avatar = (
-    <svg viewBox="0 0 100 100" fill="none" aria-hidden="true" className="agent-shape">
+    <svg viewBox="0 0 100 100" fill="none" aria-hidden="true" className="agent-shape" style={design ? { color: design.color } : undefined}>
       <g className="agent-shape-body">
-        <path d={shapePaths[shape]} fill="currentColor" />
+        <path d={design?.bodyPath ?? shapePaths[shape]} fill="currentColor" />
         <g className="agent-shape-gaze">
-          <g fill="#050505" className="agent-shape-eyes">
-            <ellipse cx="38" cy="56" rx="5" ry="7" />
-            <ellipse cx="64" cy="56" rx="5" ry="7" />
+          <g fill="#050505" className="agent-shape-eyes" style={design ? {
+            transformOrigin: `${(design.eyes[0].cx + design.eyes[1].cx) / 2}px ${(design.eyes[0].cy + design.eyes[1].cy) / 2}px`,
+          } : undefined}>
+            {(design?.eyes ?? [{ cx: 38, cy: 56, rx: 5, ry: 7 }, { cx: 64, cy: 56, rx: 5, ry: 7 }]).map((eye, index) => (
+              <ellipse key={index} cx={eye.cx} cy={eye.cy} rx={eye.rx} ry={eye.ry} />
+            ))}
           </g>
         </g>
       </g>

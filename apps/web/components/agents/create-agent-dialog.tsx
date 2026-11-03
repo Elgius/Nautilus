@@ -7,6 +7,8 @@ import { avatarColors, avatarShapes, type AgentCreationInput, type AvatarColor, 
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
+import { AvatarGenerator } from "@/components/agents/avatar-generator";
 
 const avatarColorValues: Record<AvatarColor, string> = {
   brown: "#a77943", red: "#ff2c4b", orange: "#ff7900", amber: "#ffb500",
@@ -14,7 +16,8 @@ const avatarColorValues: Record<AvatarColor, string> = {
   pink: "#fa2ca4", gray: "#898989", coral: "#c66e5c",
 };
 
-export function CreateAgentDialog({ onClose, onCreate }: {
+export function CreateAgentDialog({ organizationId, onClose, onCreate }: {
+  organizationId: string | undefined;
   onClose: () => void;
   onCreate: (input: AgentCreationInput) => Promise<string | null>;
 }) {
@@ -25,6 +28,7 @@ export function CreateAgentDialog({ onClose, onCreate }: {
   const [work, setWork] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const [avatarGeneratorOpen, setAvatarGeneratorOpen] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -54,11 +58,13 @@ export function CreateAgentDialog({ onClose, onCreate }: {
         showCloseButton={!creating}
         style={{ "--avatar-color": avatarColorValues[color] } as CSSProperties}
       >
-        <DialogTitle className="sr-only">Create agent</DialogTitle>
+        <DialogTitle className="sr-only">{avatarGeneratorOpen ? "Generate an avatar" : "Create agent"}</DialogTitle>
         <DialogDescription className="sr-only">
-          {step === "identity" ? "Choose your agent’s color, shape, and name to get started." : "Describe the work you want your agent to do."}
+          {avatarGeneratorOpen ? "Describe an avatar to generate a temporary preview." : step === "identity" ? "Choose your agent’s color, shape, and name to get started." : "Describe the work you want your agent to do."}
         </DialogDescription>
-        <form onSubmit={submit} aria-busy={creating}>
+        {avatarGeneratorOpen && organizationId ? (
+          <AvatarGenerator key={organizationId} organizationId={organizationId} shape={shape} onBack={() => setAvatarGeneratorOpen(false)} />
+        ) : <form onSubmit={submit} aria-busy={creating}>
           <fieldset disabled={creating} className="create-agent-fields">
             <div className="create-agent-preview"><AgentShape key={`${shape}-${color}`} shape={shape} animated /></div>
             {step === "identity" ? (
@@ -86,6 +92,10 @@ export function CreateAgentDialog({ onClose, onCreate }: {
                         <AgentShape shape={option} />
                       </button>
                     ))}
+                    <button type="button" className="create-agent-custom" aria-label="Generate a custom avatar"
+                      disabled={!organizationId} onClick={() => setAvatarGeneratorOpen(true)}>
+                      <Plus size={22} aria-hidden="true" />
+                    </button>
                   </div>
                 </fieldset>
                 <div className="create-agent-name">
@@ -120,7 +130,7 @@ export function CreateAgentDialog({ onClose, onCreate }: {
               </Button>
             </div>
           </fieldset>
-        </form>
+        </form>}
       </DialogContent>
     </Dialog>
   );

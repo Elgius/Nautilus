@@ -6,6 +6,9 @@ import { ArrowLeft, ArrowUp, Bot, FileText, Link2, MessageSquare, Users, PanelLe
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
+import { MessageScrollerProvider, MessageScroller, MessageScrollerViewport, MessageScrollerContent, MessageScrollerItem, MessageScrollerButton } from "@/components/ui/message-scroller";
+import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
 import { useWorkspaceSession } from "@/components/auth/workspace-session";
 import { initials } from "@/lib/auth-types";
 import { errorMessage } from "@/lib/auth-client";
@@ -43,13 +46,6 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
       return next;
     });
   }, []);
-  const messageList = useRef<HTMLDivElement>(null);
-  const previousLatest = useRef(messages.at(-1)?.id);
-  useEffect(() => {
-    const latest = messages.at(-1)?.id;
-    if (latest !== previousLatest.current) messageList.current?.scrollTo({ top: messageList.current.scrollHeight, behavior: "smooth" });
-    previousLatest.current = latest;
-  }, [messages]);
   useEffect(() => {
     roomRequest(organizationId, `${path}/read`, 'POST', {}).catch(() => {});
   }, [organizationId, path]);
@@ -116,33 +112,43 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
       {chatLayout.collapsed && <div className="room-chat-rail"><Button variant="ghost" size="icon" aria-label="Expand room chat" title="Expand room chat" aria-controls="room-chat" aria-expanded={false} onClick={() => updateChatLayout({ ...chatLayout, collapsed: false })}><PanelLeftOpen size={16} /></Button></div>}
       <section className="room-chat-panel" id="room-chat" aria-label="Room chat">
         <div className="room-panel-heading"><div><MessageSquare size={16} /><h2>Room chat</h2></div><div className="room-chat-heading-actions"><span><Users size={13} />{room.members.length + room.agents.length} participants</span><Button className="room-chat-collapse" variant="ghost" size="icon-sm" aria-label="Collapse room chat" title="Collapse room chat" aria-controls="room-chat" aria-expanded={!chatLayout.collapsed} onClick={() => updateChatLayout({ ...chatLayout, collapsed: true })}><PanelLeftClose size={16} /></Button></div></div>
-        <div className="room-messages" ref={messageList} role="log" aria-label="Conversation" aria-live="polite">
+        <MessageScrollerProvider autoScroll>
+        <MessageScroller className="room-chat-scroller">
+        <MessageScrollerViewport className="room-messages" aria-label="Conversation" tabIndex={0}>
+        <MessageScrollerContent className="room-chat-content" aria-label="Conversation messages" aria-live="polite">
           {nextCursor && <Button variant="ghost" size="sm" onClick={loadOlder} disabled={loadingOlder}>{loadingOlder ? 'Loading…' : 'Load earlier messages'}</Button>}
-          {!messages.length && <p className="room-local-note">Start the conversation with your team.</p>}
+          {!messages.length && <div className="room-conversation-intro"><div className="room-intro-icon"><MessageSquare size={20} /></div><h3>A space to think together</h3><p>Share an idea, ask your agent a question, or work through a document with your team.</p></div>}
           {messages.map((message) => {
             const own = message.authorUserId === session.user.id, author = message.authorUser?.name || message.authorAgent?.name || 'Unknown author';
-            return <article key={message.id} className={`room-message ${own ? 'is-own' : ''}`} aria-label={`${author}, ${new Date(message.createdAt).toLocaleString()}`}>
+            return <MessageScrollerItem key={message.id} messageId={message.id} scrollAnchor={Boolean(message.authorUserId)}>
+              <Message align={own ? 'end' : 'start'} className={`room-message ${own ? 'is-own' : ''}`} aria-label={`${author}, ${new Date(message.createdAt).toLocaleString()}`}>
               <div className={`room-message-avatar ${message.authorAgent ? 'is-agent' : ''}`}>{message.authorAgent ? <Bot size={17} /> : initials(author)}</div>
-              <div className="room-message-body"><div className="room-message-meta"><strong>{own ? 'You' : author}</strong>{message.authorAgent && <span className="room-agent-label">Agent</span>}<time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>
-                <Bubble variant={own ? 'default' : 'secondary'} align={own ? 'end' : 'start'}><BubbleContent className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</BubbleContent></Bubble>
+              <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>{own ? 'You' : author}</strong>{message.authorAgent && <span className="room-agent-label">Agent</span>}<time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></MessageHeader>
+                <Bubble variant={own ? 'muted' : 'ghost'} align={own ? 'end' : 'start'}><BubbleContent className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</BubbleContent></Bubble>
                 {message.documents.map((attachment) => <Button variant="ghost" size="sm" key={attachment.documentId} className="room-document-reference" onClick={() => { dispatchFiles({ type: 'select', id: attachment.documentId }); setMobilePanel('document'); }}><FileText size={15} />{attachment.document.title}</Button>)}
-              </div>
-            </article>;
+              </MessageContent>
+            </Message></MessageScrollerItem>;
           })}
-        </div>
+          {replying && <MessageScrollerItem messageId="agent-reply-pending"><Message><div className="room-message-avatar is-agent"><Bot size={17} /></div><MessageContent><p className="room-reply-status" role="status"><span className="room-reply-dots" aria-hidden="true"><i /><i /><i /></span>Agent is replying…</p></MessageContent></Message></MessageScrollerItem>}
+        </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton />
+        </MessageScroller>
+        </MessageScrollerProvider>
         <div className="room-composer-area">
-          {replying && <p className="room-local-note" role="status">Agent is replying…</p>}
           {failedReply && <Button variant="outline" size="sm" disabled={sending || replying} onClick={() => requestReply(failedReply.messageId, failedReply.agentId)}>Retry agent reply</Button>}
-          <form className="room-composer" onSubmit={sendMessage} aria-busy={sending || replying}>
-          {room.agents.length > 0 && <label className="room-agent-picker">Reply from
+          <form onSubmit={sendMessage} aria-busy={sending || replying}>
+          <InputGroup className="room-composer">
+          {room.agents.length > 0 && <InputGroupAddon align="block-start"><label className="room-agent-picker">Reply from
             <select aria-label="Agent to reply" value={agentId} disabled={sending || replying} onChange={(event) => setAgentId(event.target.value)}>
               <option value="">Team only</option>
               {room.agents.map(({ agent }) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
             </select>
-          </label>}
-          <textarea aria-label="Message to room" placeholder="Share an idea or add some context…" value={draft} disabled={sending} onChange={(event) => setDraft(event.target.value)} rows={3} maxLength={20000}
+          </label></InputGroupAddon>}
+          <InputGroupTextarea aria-label="Message to room" placeholder="Share an idea or add some context…" value={draft} disabled={sending} onChange={(event) => setDraft(event.target.value)} rows={3} maxLength={20000}
             onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
-          <div className="room-composer-footer"><span>Enter to send · Shift + Enter for a new line</span><Button size="icon" type="submit" disabled={sending || replying || !draft.trim()} aria-label="Send message"><ArrowUp size={17} /></Button></div>
+          <InputGroupAddon align="block-end" className="room-composer-footer"><span>Enter to send · Shift + Enter for a new line</span><InputGroupButton variant="default" size="icon-sm" type="submit" disabled={sending || replying || !draft.trim()} aria-label="Send message"><ArrowUp size={17} /></InputGroupButton></InputGroupAddon>
+          </InputGroup>
         </form><p className="room-local-note">Messages are saved to your organisation.</p></div>
       </section>
       <div className="room-panel-resizer" role="separator" tabIndex={chatLayout.collapsed ? -1 : 0} aria-label="Resize room chat" aria-orientation="vertical" aria-valuemin={18} aria-valuemax={45} aria-valuenow={Math.round(dragWidth ?? chatLayout.width)}

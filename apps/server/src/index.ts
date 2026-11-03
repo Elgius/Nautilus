@@ -6,6 +6,7 @@ import { bodyLimit } from 'hono/body-limit'
 import { agentSelect, parseAgentProfile } from './agents'
 import { agentChat } from './agent-chat'
 import { agentCreator } from './agent-creator-route'
+import { avatarGeneration } from './avatar-generation-route'
 import { rooms } from './rooms'
 import { createAuth, type Auth } from './auth'
 import { createDatabase, type Database } from './db'
@@ -108,6 +109,10 @@ const organizationMember = createMiddleware<AppEnv>(async (c, next) => {
 const creatorPath = '/api/organizations/:organizationId/agent_creator_agent'
 app.use(creatorPath, authenticated, organizationMember)
 app.route(creatorPath, agentCreator)
+
+const avatarPreviewPath = '/api/organizations/:organizationId/avatar-preview'
+app.use(avatarPreviewPath, authenticated, organizationMember)
+app.route(avatarPreviewPath, avatarGeneration)
 
 app.get(agentPath, authenticated, organizationMember, async (c) => {
   const agents = await c.get('db').agent.findMany({
