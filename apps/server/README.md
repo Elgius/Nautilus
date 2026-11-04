@@ -44,7 +44,11 @@ The schema includes Better Auth's `user`, `account`, `session`, `verification`,
 `organization`, `member`, and `invitation` tables, plus database-backed `rateLimit`
 and a local-only `emailMessage` outbox. Both the Worker client (`workerd`) and the
 Bun operator/test client are generated from the same schema. Generate before
-starting development; the dev script does this automatically.
+starting development; the dev script does this automatically after a read-only
+`prisma migrate status` check. Pending migrations stop startup before Wrangler
+accepts requests. Run `bun run --filter @nautilus/server db:deploy`, then restart
+development. Use `bun run --filter @nautilus/server db:status` to inspect migration
+state without changing the database. Builds still do not apply migrations.
 
 For future changes, create a migration with `db:migrate --name <name>` against a
 Neon development branch, review the migration, test it there, then apply the

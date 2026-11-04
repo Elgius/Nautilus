@@ -12,6 +12,7 @@ import { rooms } from './rooms'
 import { createAuth, type Auth } from './auth'
 import { createDatabase, type Database } from './db'
 import { isLocalDevelopment, validateBindings, type Bindings } from './env'
+import { handleApiError } from './api-error'
 
 export type AppEnv = {
   Bindings: Bindings
@@ -176,18 +177,6 @@ app.get('/api/admin/email-outbox', authenticated, platformAdmin, async (c) => {
   return c.json({ messages })
 })
 
-app.onError((error, c) => {
-  if (error instanceof HTTPException) return c.json({ error: error.message }, error.status)
-  if ('code' in error && error.code === 'P2002') {
-    return c.json({ error: (c.req.path.includes('/agents') || c.req.path.includes('/agent_creator_agent'))
-      ? 'Choose a name that isn’t already used by another agent.'
-      : 'This record changed. Reload and try again.' }, 409)
-  }
-  if ('code' in error && error.code === 'P2025') return c.json({ error: 'Record not found.' }, 404)
-  if ('code' in error && error.code === 'P2003') return c.json({ error: 'A related record is unavailable.' }, 400)
-  // Database/provider exception messages can contain secrets.
-  console.error('API request failed', { path: c.req.path, errorType: error.name })
-  return c.json({ error: 'Internal server error.' }, 500)
-})
+app.onError(handleApiError)
 
 export default app

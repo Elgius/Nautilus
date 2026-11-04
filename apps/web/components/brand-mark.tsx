@@ -11,6 +11,7 @@ export function BrandMark({ className }: { className?: string }) {
         alt="Current N logo"
         fill
         sizes="96px"
+        loading="eager"
         className="scale-200 object-contain"
       />
     </span>
