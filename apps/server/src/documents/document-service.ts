@@ -7,9 +7,10 @@ import { MAX_OFFICE_BYTES, validateOfficeContent } from '../office-content'
 import { officeRequest } from '../office-service'
 import type { DocumentEdit } from '../../../office/src/editing/docs'
 import type { SpreadsheetEdit } from '../../../office/src/editing/spreadsheets'
+import { guardRoomWrite } from './room-write-lock'
 
 export type DocumentScope = { organizationId: string; roomId: string; documentId: string }
-export type DocumentActor = { userId: string; agentId?: never } | { agentId: string; userId?: never }
+export type DocumentActor = { userId: string; agentId?: never; workToken?: never } | { agentId: string; userId?: never; workToken: string }
 export const versionSelect = { id: true, versionNumber: true, sizeBytes: true, mimeType: true, checksum: true,
   changeSummary: true, createdAt: true, authorUser: { select: { name: true } }, authorAgent: { select: { name: true } } } as const
 type Storage = Pick<ReturnType<typeof createStorage>, 'get' | 'put'>
@@ -26,6 +27,7 @@ export function createDocumentService(db: Database, env: Bindings, storage?: Sto
   }
   async function checkActor(scope: DocumentScope, actor: DocumentActor) {
     if (actor.agentId !== undefined) {
+      if (!actor.workToken) throw new HTTPException(423, { message: 'Agent edits require an active room work lease.' })
       if (actor.userId !== undefined || !await db.roomAgent.findFirst({ where: { organizationId: scope.organizationId, roomId: scope.roomId, agentId: actor.agentId }, select: { agentId: true } })) {
         throw new HTTPException(403, { message: 'Choose an agent assigned to this room.' })
       }
@@ -58,6 +60,7 @@ export function createDocumentService(db: Database, env: Bindings, storage?: Sto
       signal?.throwIfAborted()
       return await db.$transaction(async (tx) => {
         signal?.throwIfAborted()
+        await guardRoomWrite(tx, scope, actor.workToken)
         // A concurrent writer is detected by the unique version number or the head comparison.
         const version = await tx.documentVersion.create({ data: { id, ...scope, objectKey,
           versionNumber: (found.currentVersion?.versionNumber ?? 0) + 1, mimeType: 'application/json', sizeBytes: bytes.byteLength, checksum,

@@ -9,7 +9,7 @@ import type { SkillBackend } from './skills'
 type WithDatabase = <T>(action: (db: Database) => Promise<T>) => Promise<T>
 
 /** Identity is supplied by the authenticated socket, never by tool arguments. */
-export function createRoomSkillBackend(env: Bindings, identity: ChatIdentity, agentId: string, withDatabase: WithDatabase): SkillBackend {
+export function createRoomSkillBackend(env: Bindings, identity: ChatIdentity, agentId: string, withDatabase: WithDatabase, workToken: string): SkillBackend {
   const scope = (documentId: string) => ({ organizationId: identity.organizationId, roomId: identity.roomId, documentId })
   return {
     authorize: () => withDatabase(async (db) => {
@@ -42,7 +42,7 @@ export function createRoomSkillBackend(env: Bindings, identity: ChatIdentity, ag
       const service = createDocumentService(db, env)
       const saved = await service.readDocument(scope(id))
       if (saved.kind !== kind) throw new HTTPException(422, { message: 'Choose tools matching this document type.' })
-      const { version } = await service.editDocument(scope(id), { expectedVersionId, edits, changeSummary }, { agentId }, signal)
+      const { version } = await service.editDocument(scope(id), { expectedVersionId, edits, changeSummary }, { agentId, workToken }, signal)
       return { documentId: id, versionId: version.id, versionNumber: version.versionNumber, changeSummary: version.changeSummary }
     }),
   }

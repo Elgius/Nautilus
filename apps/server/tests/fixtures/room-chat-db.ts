@@ -40,7 +40,11 @@ export function createDatabase() {
         return row
       },
     },
-    room: { update: async () => ({}) },
+    room: {
+      update: async () => ({}),
+      updateMany: async () => ({ count: 1 }),
+      findUnique: async () => ({ agentWorkToken: null, agentWorkExpiresAt: null, documents: [] }),
+    },
     $transaction: async <T>(fn: (tx: unknown) => T) => fn(db),
     $disconnect: async () => {},
   }

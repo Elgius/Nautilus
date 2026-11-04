@@ -77,7 +77,7 @@ test('skill schemas reject unknown edits and malformed spreadsheet values', () =
 test('room skill document discovery uses only the trusted room and organization', async () => {
   const lookups: unknown[] = []
   const db = { document: { findMany: async (query: unknown) => { lookups.push(query); return [] } } } as unknown as Database
-  const backend = createRoomSkillBackend({} as Bindings, { userId: 'u1', organizationId: 'o1', roomId: 'r1', sessionId: 'session-1' }, 'a1', async (action) => action(db))
+  const backend = createRoomSkillBackend({} as Bindings, { userId: 'u1', organizationId: 'o1', roomId: 'r1', sessionId: 'session-1' }, 'a1', async (action) => action(db), 'lease-1')
   await backend.list()
   expect(lookups).toEqual([{ where: { organizationId: 'o1', roomId: 'r1' }, select: { id: true, title: true, kind: true, currentVersionId: true }, orderBy: { id: 'asc' }, take: 101 }])
 })
@@ -112,7 +112,7 @@ test('document discovery follows pages past 100 and scopes title searches', asyn
     queries.push(query)
     return documents.filter((doc) => !query.where.id || doc.id > query.where.id.gt).slice(0, query.take)
   } } } as unknown as Database
-  const backend = createRoomSkillBackend({} as Bindings, { userId: 'u1', organizationId: 'o1', roomId: 'r1', sessionId: 's1' }, 'a1', async (action) => action(db))
+  const backend = createRoomSkillBackend({} as Bindings, { userId: 'u1', organizationId: 'o1', roomId: 'r1', sessionId: 's1' }, 'a1', async (action) => action(db), 'lease-1')
   const found: string[] = []
   let after: string | undefined
   do {

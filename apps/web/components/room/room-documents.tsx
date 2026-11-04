@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type Dispatch } from 'react';
 import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
-import { Download, Plus, Save, Upload, FileText, Sheet, FileImage, File, FolderOpen, X, History, ChevronDown } from 'lucide-react';
+import { Download, Plus, Save, Upload, FileText, Sheet, FileImage, File, FolderOpen, X, History, ChevronDown, MousePointer2, LockKeyhole } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,6 +17,8 @@ import type { OfficeEditorHandle } from './univer-editor';
 import { addLocalRoomFiles, MAX_LOCAL_FILES } from '@/lib/local-room-files';
 import type { RoomFileState, RoomFileAction } from '@/lib/room-file-state';
 import { LocalRoomFilePreview } from './local-room-file';
+import { useRoomWork } from './use-room-work';
+import { avatarColorValues } from '../../../../shared/agent-appearance';
 
 const UniverEditor = dynamic(() => import('./univer-editor'), {
   ssr: false, loading: () => <p role="status" className="p-6 text-sm">Loading editor…</p>,
@@ -35,6 +37,7 @@ export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsCo
   onDirtyChange: (id: string, dirty: boolean) => void;
 }) {
   const [documents, setDocuments] = useState(initialDocuments);
+  const work = useRoomWork(organizationId, roomId);
   const { files: localFiles, selectedId, uploadOpen, error: uploadError } = fileState;
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [fileSearch, setFileSearch] = useState('');
@@ -55,7 +58,7 @@ export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsCo
   }
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (creating) return;
+    if (creating || work.readOnly) return;
     const data = new FormData(event.currentTarget);
     setCreating(true); setError('');
     try {
@@ -95,7 +98,7 @@ export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsCo
           </div>)}
       </div>
       <Button type="button" variant="ghost" size="sm" aria-label="Browse room files" onClick={() => { setFileSearch(''); setLibraryOpen(true); }}><FolderOpen size={15} /><span className="room-nav-button-label">Files</span></Button>
-      <Button type="button" variant="ghost" size="sm" onClick={() => { setError(''); setCreateOpen(true); }}><Plus size={14} />New</Button>
+      <Button type="button" variant="ghost" size="sm" disabled={work.readOnly} onClick={() => { setError(''); setCreateOpen(true); }}><Plus size={14} />New</Button>
       <Button type="button" variant="ghost" size="sm" onClick={() => { dispatchFiles({ type: 'upload-dialog', open: true }); }} disabled={localFiles.length >= MAX_LOCAL_FILES}><Upload size={14} />Upload files</Button>
     </>, navigationContainer)}
     <Dialog open={libraryOpen} onOpenChange={setLibraryOpen}>
@@ -126,14 +129,22 @@ export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsCo
             <SelectTrigger aria-label="Document type"><SelectValue /></SelectTrigger>
             <SelectContent><SelectItem value="DOCUMENT">Document</SelectItem><SelectItem value="SPREADSHEET">Spreadsheet</SelectItem></SelectContent>
           </Select>
-          <Button type="submit" size="sm" variant="outline" disabled={creating}><Plus size={14} />{creating ? 'Creating…' : 'Create'}</Button>
+          <Button type="submit" size="sm" variant="outline" disabled={creating || work.readOnly}><Plus size={14} />{creating ? 'Creating…' : 'Create'}</Button>
         </form>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       </DialogContent>
     </Dialog>
+    {(work.readOnly || work.queued > 0) && <div className="room-agent-work" role="status">
+      <p><LockKeyhole size={14} />{!work.available ? 'Checking room activity. Documents are read-only.' : work.locked ? 'Agents are working. Room documents are read-only until they finish.' : 'Requests are queued.'}{work.queued > 0 ? ` ${work.queued} queued.` : ''}</p>
+      {work.activities.map((activity) => <button type="button" key={activity.agentId} className="room-agent-work-target" disabled={!activity.documentId}
+        onClick={() => { if (activity.documentId) onSelect(activity.documentId); }}>
+        <MousePointer2 size={15} fill="currentColor" style={{ color: avatarColorValues[activity.color ?? 'violet'] }} />
+        <strong>{activity.agentName}</strong><span>{activity.phase} · {documents.find((document) => document.id === activity.documentId)?.title ?? 'Planning'}{activity.target ? ` · ${activity.target}` : ''}</span>
+      </button>)}
+    </div>}
     {documents.filter((document) => document.id === selectedId || visitedIds.includes(document.id)).map((document) =>
       <div key={document.id} id={`file-panel-${document.id}`} role="tabpanel" aria-labelledby={`file-tab-${document.id}`} className="min-h-0 flex-1 flex-col" style={{ display: document.id === selectedId ? 'flex' : 'none' }}>
-        <RoomDocumentEditor actionsContainer={actionsContainer} active={document.id === selectedId} organizationId={organizationId} roomId={roomId} document={document} storageConfigured={storageConfigured} officeConfigured={officeConfigured} onLoaded={markLoaded} onDirtyChange={onDirtyChange} />
+        <RoomDocumentEditor readOnly={work.readOnly} remoteVersionId={work.versions?.[document.id]} actionsContainer={actionsContainer} active={document.id === selectedId} organizationId={organizationId} roomId={roomId} document={document} storageConfigured={storageConfigured} officeConfigured={officeConfigured} onLoaded={markLoaded} onDirtyChange={onDirtyChange} />
       </div>)}
     {localFiles.filter((entry) => fileState.visitedIds.includes(entry.id)).map((entry) =>
       <div key={entry.id} id={`file-panel-${entry.id}`} role="tabpanel" aria-labelledby={`file-tab-${entry.id}`} className="min-h-0 flex-1 flex-col" style={{ display: entry.id === selectedId ? 'flex' : 'none' }}>
@@ -143,7 +154,8 @@ export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsCo
   </>;
 }
 
-function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, document, storageConfigured, officeConfigured, onLoaded, onDirtyChange }: {
+function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, document, storageConfigured, officeConfigured, onLoaded, onDirtyChange, readOnly, remoteVersionId }: {
+  readOnly: boolean; remoteVersionId?: string | null;
   actionsContainer: HTMLDivElement | null;
   active: boolean;
   organizationId: string; roomId: string; document: RoomDocument; storageConfigured: boolean; officeConfigured: boolean;
@@ -154,6 +166,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
   const endpoint = `/api/organizations/${encodeURIComponent(organizationId)}/rooms${path}`;
   const [content, setContent] = useState<OfficeContent | null>(null);
   const [versionId, setVersionId] = useState<string | null>(document.currentVersionId);
+  const [supersededVersions, setSupersededVersions] = useState<(string | null)[]>([document.currentVersionId]);
   const [versions, setVersions] = useState<DocumentVersion[]>([]);
   const [nextVersionCursor, setNextVersionCursor] = useState<string | null>(null);
   const [loadingVersions, setLoadingVersions] = useState(false);
@@ -164,6 +177,8 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
   const [importOpen, setImportOpen] = useState(false);
   const editor = useRef<OfficeEditorHandle | null>(null);
   const revision = useRef(0);
+  const newerVersion = remoteVersionId !== undefined && remoteVersionId !== versionId && !supersededVersions.includes(remoteVersionId);
+  const editingBlocked = readOnly || newerVersion;
   const onReady = useCallback((handle: OfficeEditorHandle | null) => { editor.current = handle; setEditorReady(!!handle); }, []);
   const onDirty = useCallback(() => { revision.current++; setDirty(true); setNotice(''); }, []);
   useEffect(() => {
@@ -178,6 +193,23 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     }).catch((error) => { if (active) setError(errorMessage(error)); });
     return () => { active = false; };
   }, [organizationId, path, document.id, document.kind, document.title, onLoaded]);
+  // Refresh once a run finishes, rather than remounting for every agent edit.
+  // A local draft is never replaced automatically.
+  useEffect(() => {
+    if (readOnly || !newerVersion || dirty || saving || !content) return;
+    let cancelled = false;
+    const started = revision.current;
+    Promise.all([
+      roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`),
+      roomRequest<DocumentVersionsPage>(organizationId, `${path}/versions`),
+    ]).then(([saved, history]) => {
+      if (cancelled || started !== revision.current) return;
+      setContent(officeContent(document.kind, document.id, document.title, saved.content));
+      setSupersededVersions((previous) => [...previous, versionId].slice(-50));
+      setVersionId(saved.currentVersionId); setVersions(history.versions); setNextVersionCursor(history.nextCursor);
+    }).catch((error) => { if (!cancelled) setError(errorMessage(error)); });
+    return () => { cancelled = true; };
+  }, [readOnly, newerVersion, remoteVersionId, dirty, saving, content, organizationId, path, document.kind, document.id, document.title, versionId]);
   useEffect(() => {
     onDirtyChange(document.id, dirty);
     return () => onDirtyChange(document.id, false);
@@ -189,13 +221,14 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
   async function save() {
-    if (saving || !editor.current) return;
+    if (saving || editingBlocked || !editor.current) return;
     setSaving(true); setError(''); setNotice('');
     try {
       const snapshot = await editor.current.snapshot(), savedRevision = revision.current;
       const { version } = await roomRequest<{ version: DocumentVersion }>(organizationId, `${path}/versions`, 'POST', {
         expectedVersionId: versionId, content: snapshot,
       });
+      setSupersededVersions((previous) => [...previous, versionId].slice(-50));
       setVersionId(version.id); setVersions((previous) => [version, ...previous]);
       if (revision.current === savedRevision) { setDirty(false); setNotice('Version saved.'); }
     } catch (error) { setError(errorMessage(error)); }
@@ -219,7 +252,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     return response;
   }
   async function importFile(file: File) {
-    if (converting || saving) return;
+    if (converting || saving || editingBlocked) return;
     if (file.size > 10 * 1024 * 1024) { setError('Choose a file up to 10 MB.'); return; }
     if (dirty && !window.confirm('Replace the unsaved contents with this file? Saved versions will remain in History.')) return;
     setConverting(true); setError(''); setNotice('');
@@ -260,13 +293,13 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
   return <div className="room-document-editor">
     {active && actionsContainer && createPortal(<div className="room-document-toolbar">
       <div className="room-active-file"><RoomFileIcon kind={document.kind} /><strong title={document.title}>{document.title}</strong></div>
-      <span className="room-save-status" role="status" title={!storageConfigured ? 'Room saving is unavailable. Export a copy to keep your work.' : undefined}>{saving ? 'Saving…' : dirty ? 'Unsaved changes' : versionId ? 'Saved' : 'Not saved'}</span>
+      <span className="room-save-status" role="status" title={!storageConfigured ? 'Room saving is unavailable. Export a copy to keep your work.' : undefined}>{readOnly ? 'Read-only' : saving ? 'Saving…' : dirty ? 'Unsaved changes' : versionId ? 'Saved' : 'Not saved'}</span>
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="ghost" size="sm" />} aria-label="File menu">File<ChevronDown size={12} /></DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-52">
           <DropdownMenuItem onClick={() => setHistoryOpen(true)}><History size={14} />Version history ({versions.length}{nextVersionCursor ? '+' : ''})</DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setImportOpen(true)} disabled={!officeConfigured || !editorReady || converting || saving}><Upload size={14} />Import {isDoc ? 'Word document' : 'spreadsheet'}</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setImportOpen(true)} disabled={editingBlocked || !officeConfigured || !editorReady || converting || saving}><Upload size={14} />Import {isDoc ? 'Word document' : 'spreadsheet'}</DropdownMenuItem>
           <DropdownMenuItem onClick={exportFile} disabled={!officeConfigured || !editorReady || converting || saving}><Download size={14} />Export {isDoc ? '.docx' : '.xlsx'}</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={downloadSnapshot} disabled={!content || !editorReady || converting}>
@@ -274,13 +307,13 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      {storageConfigured && <Button size="sm" onClick={save} disabled={saving || converting || !editorReady || (!dirty && !!versionId)}><Save size={14} />{saving ? 'Saving…' : 'Save'}</Button>}
+      {storageConfigured && <Button size="sm" onClick={save} disabled={editingBlocked || saving || converting || !editorReady || (!dirty && !!versionId)}><Save size={14} />{saving ? 'Saving…' : 'Save'}</Button>}
     </div>, actionsContainer)}
     <Dialog open={importOpen} onOpenChange={(open) => { if (!converting) setImportOpen(open); }}>
       <DialogContent showCloseButton={!converting} className="sm:max-w-lg">
         <DialogHeader><DialogTitle>Import {isDoc ? 'a Word document' : 'a spreadsheet'}</DialogTitle>
           <DialogDescription>Open a file in this editor. Import replaces its current contents; saved versions remain in History.</DialogDescription></DialogHeader>
-        <Dropzone busy={converting} disabled={saving} description={isDoc ? 'Word files (.doc, .docx)' : 'Excel or text files (.xls, .xlsx, .csv, .tsv)'}
+        <Dropzone busy={converting} disabled={saving || editingBlocked} description={isDoc ? 'Word files (.doc, .docx)' : 'Excel or text files (.xls, .xlsx, .csv, .tsv)'}
           accept={isDoc ? { 'application/msword': ['.doc'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] } : {
             'application/vnd.ms-excel': ['.xls'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'text/csv': ['.csv'], 'text/tab-separated-values': ['.tsv'],
           }} onFile={importFile} />
@@ -289,6 +322,17 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     </Dialog>
     {error && <p role="alert" className="p-3 text-sm text-destructive">{error}</p>}
     {notice && <p role="status" className="p-2 text-sm text-muted-foreground">{notice}</p>}
+    {newerVersion && dirty && <div role="status" className="p-3 text-sm">
+      <p>The saved document changed. Your unsaved draft is preserved. Download it before opening the latest version.</p>
+      <Button size="sm" variant="outline" onClick={downloadSnapshot}>Download my draft</Button>
+      <Button size="sm" variant="ghost" disabled={readOnly} onClick={async () => {
+        if (!window.confirm('Discard this unsaved draft and open the latest saved version? Download your draft first to keep a copy.')) return;
+        try {
+          const saved = await roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`);
+          setContent(officeContent(document.kind, document.id, document.title, saved.content)); setVersionId(saved.currentVersionId); setDirty(false);
+        } catch (error) { setError(errorMessage(error)); }
+      }}>Open latest version</Button>
+    </div>}
     {converting && <p role="status" className="p-2 text-sm">Converting file…</p>}
     <Dialog open={historyOpen} onOpenChange={setHistoryOpen}><DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Version history</DialogTitle><DialogDescription>Saved versions of {document.title}.</DialogDescription></DialogHeader><ol className="max-h-80 overflow-auto text-sm" aria-label="Document versions">
       {versions.map((version) => <li key={version.id} className="flex items-center justify-between gap-2 py-1"><span>Version {version.versionNumber} · {version.authorUser?.name || version.authorAgent?.name} · {new Date(version.createdAt).toLocaleString()}</span><Button size="sm" variant="ghost" onClick={() => download(version.id)}>Download snapshot</Button></li>)}
@@ -297,7 +341,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     </ol></DialogContent></Dialog>
     {!content && !error && <p role="status" className="p-6 text-sm">Loading document…</p>}
     {content && active && <div className="flex min-h-0 flex-1 flex-col" inert={converting} aria-busy={converting}>
-      <UniverEditor initialContent={content} onReady={onReady} onDirty={onDirty} onError={setError}
+      <UniverEditor initialContent={content} readOnly={editingBlocked} onReady={onReady} onDirty={onDirty} onError={setError}
         onSuspend={(snapshot, source) => setContent((current) => current === source ? snapshot : current)} />
     </div>}
   </div>;

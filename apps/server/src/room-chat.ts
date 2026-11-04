@@ -4,11 +4,11 @@ import type { Bindings } from './env'
 import { createDatabase, type Database } from './db'
 import { canChat, chatHistory, parseSend, saveChatMessage, type ChatIdentity } from './room-chat-service'
 import { PrivateRoomAgents } from './private-room-agents'
-import { streamPrivateRoomAgent } from './private-room-agent-stream'
+import { streamRoomModerator } from './room-moderator'
 import type { PrivateAgentEvent } from '../../../shared/room-chat'
 import { agentAppearanceSelect } from './agents'
 import { createAgentModel } from './ai'
-import { createOfficeSkills, createRoomSkillBackend } from './agent_interface'
+import { acquireRoomWork, releaseRoomWork } from './documents/room-write-lock'
 import { generateRoomSuggestions, RoomSuggestions, suggestionHistory } from './room-suggestions'
 
 type Attachment = { identity: ChatIdentity; window: number; count: number; readCount?: number }
@@ -39,15 +39,23 @@ export class RoomChat extends DurableObject<Bindings> {
     return this.privateAgents ??= new PrivateRoomAgents({
       storage: this.ctx.storage,
       profile: (identity, agentId) => this.withDatabase(async (db) => {
-        const assignment = await db.roomAgent.findFirst({ where: { organizationId: identity.organizationId, roomId: identity.roomId, agentId }, select: { agent: { select: { id: true, name: true, role: true, rules: true } } } })
+        const assignment = await db.roomAgent.findFirst({ where: { organizationId: identity.organizationId, roomId: identity.roomId, agentId }, select: { agent: { select: { ...agentAppearanceSelect, role: true, rules: true } } } })
         return assignment?.agent ?? null
       }),
       canAccess: (identity) => this.withDatabase(async (db) => Boolean(await canChat(db, identity))),
-      stream: (profile, messages, signal, identity) => streamPrivateRoomAgent(
-        this.env, profile, messages, signal, createAgentModel,
-        createOfficeSkills(createRoomSkillBackend(this.env, identity, profile.id, (action) => this.withDatabase(action)), signal),
-      ),
+      acquire: (identity, token) => this.withDatabase((db) => acquireRoomWork(db, identity, token)),
+      release: (identity, token) => this.withDatabase((db) => releaseRoomWork(db, identity, token)),
+      stream: (profile, messages, signal, identity, run) => streamRoomModerator(this.env, identity, profile, messages, signal, run, (action) => this.withDatabase(action)),
       send: (identity, event) => this.sendPrivate(identity, event),
+      changed: (identity) => this.withDatabase(async (db) => {
+        const room = await db.room.findUnique({ where: { id: identity.roomId, organizationId: identity.organizationId },
+          select: { agentWorkToken: true, agentWorkExpiresAt: true, documents: { select: { id: true, currentVersionId: true } } } })
+        const locked = !!room?.agentWorkToken && !!room.agentWorkExpiresAt && room.agentWorkExpiresAt > new Date()
+        const activity = await this.agentService.activity()
+        await this.broadcast(db, { type: 'work.update', work: { ...activity, activities: locked ? activity.activities : [],
+          locked, expiresAt: locked ? room!.agentWorkExpiresAt!.toISOString() : null,
+          versions: Object.fromEntries((room?.documents ?? []).map((document) => [document.id, document.currentVersionId])) } })
+      }),
       waitUntil: (task) => this.ctx.waitUntil(task),
     })
   }
@@ -67,6 +75,9 @@ export class RoomChat extends DurableObject<Bindings> {
   private queue: Promise<void> = Promise.resolve()
   async fetch(request: Request) {
     const url = new URL(request.url)
+    if (url.pathname === '/work' && request.method === 'GET') {
+      return Response.json(await this.agentService.activity(), { headers: { 'Cache-Control': 'no-store' } })
+    }
     if (url.pathname === '/suggestions' && request.method === 'POST') {
       const identity = await request.json<ChatIdentity>()
       try {
@@ -137,6 +148,9 @@ export class RoomChat extends DurableObject<Bindings> {
         this.send(socket, { type: 'agent.history', jobs })
       } else if (input.type === 'agent.invoke') {
         await this.agentService.invoke(state.identity, input)
+      } else if (input.type === 'agent.cancel') {
+        if (typeof input.jobId !== 'string' || input.jobId.length > 100) throw new Error('Invalid job ID.')
+        await this.agentService.cancel(state.identity, input.jobId)
       } else if (input.type === 'send') {
         const parsed = parseSend(input)
         if (/(^|\s)@/.test(parsed.text)) throw new Error('Invalid room message. Select an agent to send an @ instruction privately.')
@@ -184,6 +198,7 @@ export class RoomChat extends DurableObject<Bindings> {
     await this.broadcast(db, { type: 'presence', users: [...users.values()] })
   }
   async alarm() {
+    this.agentService.wake()
     const db = createDatabase(this.env.DATABASE_URL)
     try {
       for (const socket of this.ctx.getWebSockets()) {

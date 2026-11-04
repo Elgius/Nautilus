@@ -10,9 +10,11 @@ import { officeConfigured, officeRequest } from './office-service'
 import { createDocumentService, versionSelect } from './documents/document-service'
 import { canChat } from './room-chat-service'
 import { agentAppearanceSelect } from './agents'
+import { guardRoomWrite } from './documents/room-write-lock'
 
 export const rooms = new Hono<AppEnv>()
 rooms.use('*', bodyLimit({ maxSize: MAX_OFFICE_BYTES + 1024 * 1024 }))
+const privateRoomFields = { agentWorkToken: true, agentWorkExpiresAt: true } as const
 
 const roomInclude = (userId: string) => ({
   agents: { orderBy: { position: 'asc' as const }, select: { agent: { select: agentAppearanceSelect } } },
@@ -34,6 +36,7 @@ async function checkAgents(db: Database, organizationId: string, agentIds: strin
 }
 
 rooms.get('/', async (c) => c.json({ rooms: await c.get('db').room.findMany({
+  omit: privateRoomFields,
   where: { organizationId: c.get('organizationId') },
   include: roomInclude(c.get('session').user.id), orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }],
 }) }))
@@ -46,7 +49,7 @@ rooms.post('/', async (c) => {
   const room = await db.room.create({ data: { ...data, organizationId, createdByUserId: userId,
     members: { create: { organizationMemberId: member.id, role: 'OWNER' } },
     agents: { create: agentIds.map((agentId, position) => ({ agentId, addedByUserId: userId, position })) },
-  }, include: roomInclude(userId) })
+  }, include: roomInclude(userId), omit: privateRoomFields })
   return c.json({ room }, 201)
 })
 
@@ -82,8 +85,26 @@ rooms.post('/:roomId/socket-ticket', async (c) => {
 
 rooms.get('/:roomId', async (c) => {
   const organizationId = c.get('organizationId'), roomId = c.req.param('roomId'), db = c.get('db')
-  const room = await db.room.findUniqueOrThrow({ where: { id: roomId, organizationId }, include: roomInclude(c.get('session').user.id) })
+  const room = await db.room.findUniqueOrThrow({ where: { id: roomId, organizationId }, include: roomInclude(c.get('session').user.id), omit: privateRoomFields })
   return c.json({ room, messages: [], nextCursor: null, storageConfigured: storageConfigured(c.env), officeConfigured: officeConfigured(c.env) })
+})
+
+// Shared activity contains names and targets only, never private instructions/replies.
+rooms.get('/:roomId/work', async (c) => {
+  const organizationId = c.get('organizationId'), roomId = c.req.param('roomId')
+  const room = await c.get('db').room.findUniqueOrThrow({ where: { id: roomId, organizationId },
+    select: { agentWorkToken: true, agentWorkExpiresAt: true, documents: { select: { id: true, currentVersionId: true } } } })
+  const locked = !!room.agentWorkToken && !!room.agentWorkExpiresAt && room.agentWorkExpiresAt > new Date()
+  let activity = { queued: 0, activities: [] as import('../../../shared/room-chat').AgentWorkActivity[] }
+  if (c.env.ROOM_CHAT) {
+    const coordinator = c.env.ROOM_CHAT.get(c.env.ROOM_CHAT.idFromName(JSON.stringify([organizationId, roomId])))
+    const response = await coordinator.fetch(new Request('https://room.internal/work'))
+    if (!response.ok) throw new HTTPException(503, { message: 'Room activity is unavailable.' })
+    activity = await response.json<typeof activity>()
+  }
+  return c.json({ ...activity, activities: locked ? activity.activities : [], locked,
+    expiresAt: locked ? room.agentWorkExpiresAt!.toISOString() : null,
+    versions: Object.fromEntries(room.documents.map((document) => [document.id, document.currentVersionId])) }, 200, { 'Cache-Control': 'no-store' })
 })
 
 rooms.patch('/:roomId', async (c) => {
@@ -91,10 +112,11 @@ rooms.patch('/:roomId', async (c) => {
   const organizationId = c.get('organizationId'), roomId = c.req.param('roomId'), db = c.get('db')
   await checkAgents(db, organizationId, agentIds)
   const room = await db.$transaction(async (tx) => {
+    await guardRoomWrite(tx, { organizationId, roomId })
     await tx.roomAgent.deleteMany({ where: { organizationId, roomId } })
     return tx.room.update({ where: { id: roomId, organizationId }, data: { ...data, lastActivityAt: new Date(),
       agents: { create: agentIds.map((agentId, position) => ({ agentId, addedByUserId: c.get('session').user.id, position })) },
-    }, include: roomInclude(c.get('session').user.id) })
+    }, include: roomInclude(c.get('session').user.id), omit: privateRoomFields })
   })
   return c.json({ room })
 })
@@ -124,6 +146,7 @@ rooms.post('/:roomId/documents', async (c) => {
   const kind = (['DOCUMENT', 'SPREADSHEET'] as const).find((kind) => kind === input.kind)
   if (!kind) throw new HTTPException(400, { message: 'Choose a document or spreadsheet.' })
   const document = await c.get('db').$transaction(async (tx) => {
+    await guardRoomWrite(tx, { organizationId: c.get('organizationId'), roomId: c.req.param('roomId') })
     const document = await tx.document.create({ data: { organizationId: c.get('organizationId'), roomId: c.req.param('roomId'),
       title: text(input.title, 'Document title', 150), category: text(input.category ?? 'Notes', 'Category', 70), kind } })
     await tx.room.update({ where: { id: c.req.param('roomId'), organizationId: c.get('organizationId') }, data: { lastActivityAt: new Date() } })
@@ -143,8 +166,12 @@ rooms.patch('/:roomId/documents/:documentId', async (c) => {
   const input = await body(c.req)
   const status = (['DRAFT', 'IN_REVIEW', 'READY'] as const).find((status) => status === input.status)
   if (!status) throw new HTTPException(400, { message: 'Choose a valid document status.' })
-  return c.json({ document: await c.get('db').document.update({ where: { id: c.req.param('documentId'), roomId: c.req.param('roomId'), organizationId: c.get('organizationId') },
-    data: { title: text(input.title, 'Document title', 150), category: text(input.category ?? 'Notes', 'Category', 70), status } }) })
+  const document = await c.get('db').$transaction(async (tx) => {
+    await guardRoomWrite(tx, { organizationId: c.get('organizationId'), roomId: c.req.param('roomId') })
+    return tx.document.update({ where: { id: c.req.param('documentId'), roomId: c.req.param('roomId'), organizationId: c.get('organizationId') },
+      data: { title: text(input.title, 'Document title', 150), category: text(input.category ?? 'Notes', 'Category', 70), status } })
+  })
+  return c.json({ document })
 })
 
 rooms.get('/:roomId/documents/:documentId/versions', async (c) => {
@@ -172,6 +199,7 @@ rooms.get('/:roomId/documents/:documentId/content', async (c) => {
 // Room/document middleware and the parent organization middleware enforce access
 // before any file is passed to the private conversion service.
 rooms.post('/:roomId/documents/:documentId/import', async (c) => {
+  await c.get('db').$transaction((tx) => guardRoomWrite(tx, { organizationId: c.get('organizationId'), roomId: c.req.param('roomId') }))
   const document = await c.get('db').document.findFirstOrThrow({ where: { id: c.req.param('documentId'), roomId: c.req.param('roomId'), organizationId: c.get('organizationId') } })
   const form = await c.req.formData(), file = form.get('file')
   if (!(file instanceof File) || !file.size || file.size > MAX_OFFICE_BYTES) throw new HTTPException(400, { message: 'Choose a non-empty file up to 10 MB.' })

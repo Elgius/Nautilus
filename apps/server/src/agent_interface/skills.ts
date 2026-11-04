@@ -30,7 +30,7 @@ export function createOfficeSkills(backend: SkillBackend, signal: AbortSignal): 
     }
     catch (error) {
       // Database/storage exceptions may include credentials or internal URLs.
-      throw new Error(error instanceof HTTPException && [403, 404, 409, 422].includes(error.status)
+      throw new Error(error instanceof HTTPException && [403, 404, 409, 422, 423].includes(error.status)
         ? error.message : 'The skill could not complete this operation. Try again or narrow the request.')
     }
   }

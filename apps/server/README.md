@@ -325,19 +325,50 @@ replies are sent only to the owner's currently authorized connections in this ro
 including their other tabs. They never pass through the shared broadcast function
 or `RoomMessage`, and are excluded from shared history and reconnect replay.
 
-Private jobs are stored in the room Durable Object's SQLite-backed storage under
-user-scoped keys. The latest 50 turns per user/room are retained; this is also the
-idempotency window for private request IDs. Reconnecting restores private history
-and retries unacknowledged invocations with their original ID. An accepted request
-is not automatically rerun. Interrupted jobs become failed; “Retry privately” starts
-a new request. One private generation per user/room may run at a time, independently
-of other users and the human room-message queue. Model output is bounded and errors
-are sanitized. AI requires the existing `OPENAI_API_KEY` and `LLM_MODEL`
-Worker bindings; room messaging and agent selection still work without AI configured.
+Private jobs and the room FIFO are stored in the room Durable Object's SQLite-backed
+storage. Up to 20 pending requests per user and 100 per room can be accepted. The
+latest 50 private turns are retained (pending entries are protected from pruning).
+Request IDs deduplicate invocations within that retention window. Acceptance saves
+the queue entry and alarm together; queued requests survive coordinator eviction.
 
-This private-agent addition uses the existing Durable Object binding and requires
-no additional database migration. The room chat migration described above is still
-required if it has not already been applied.
+One moderator run owns the room at a time. Simple requests use its existing Office
+tools directly. `delegateWork` runs up to three assigned specialists concurrently,
+with six assignments and twenty bounded proposals per request. Specialists can read
+only their assigned document IDs and prepare typed proposals; only the moderator
+can apply shared edits. Proposals are checkpointed before application, and obsolete
+base versions are rejected. Independent batches run sequentially through the writer.
+The moderator has 32 model steps and a 180-second run deadline; specialists retain
+their bounded eight-step/60-second runtime.
+
+A token-scoped 240-second database lease makes **all persisted room documents
+read-only for humans** during an active run, including planning and specialist work.
+Every document save, creation, and metadata update locks/checks the room row in the
+same database transaction as the mutation. Agent writes require the owning token;
+expired and replaced runs cannot commit. Room settings/agent assignment changes
+are also guarded. Explicit file import is rejected while locked; local file picker
+and preview behavior is unchanged. Original browser Files are never enrolled in
+agent work or uploaded by this queue.
+
+`agent.cancel` cancels only the caller's own queued/running request. Cancellation
+preserves any committed batches. If a process dies mid-run, recovery waits until
+its lease deadline, reports interruption, and retains confirmed commit references.
+It does not automatically replay an active run with possibly committed edits.
+Queued work then continues. A user may review the saved state and retry explicitly.
+Model/provider errors are sanitized. Private instructions and replies never enter
+shared activity or another user's model context.
+
+`GET /api/organizations/:organizationId/rooms/:roomId/work` and shared `work.update`
+notifications expose only lock state, queue count, agent names/colors, document
+targets, and saved version heads. The UI polls as a reconnect fallback, fails closed
+when activity is unavailable, and shows colored cursor icons with target labels.
+These markers describe agent targets rather than simulated typing positions.
+The editor refreshes clean snapshots after a run; unsaved drafts remain available
+for download and require an explicit discard before opening a changed saved version.
+
+Apply `20261104130000_room_agent_work_lock` with the normal database deployment
+procedure **before deploying this server version**. The existing `ROOM_CHAT`
+Durable Object binding is reused; no new Cloudflare queue binding is required.
+AI still uses the existing `OPENAI_API_KEY` and `LLM_MODEL` bindings.
 
 Additional checks:
 
@@ -379,7 +410,7 @@ Checks: `bun test apps/server/tests/room-suggestions.test.ts` and
 ## Agent interface and skills
 
 Room `@` instructions follow `agent.invoke` → `PrivateRoomAgents` →
-`agent_interface` → AI SDK `ToolLoopAgent`. The SDK handles all model calls,
+`room-moderator` → `agent_interface` → AI SDK `ToolLoopAgent`. The SDK handles all model calls,
 validates function arguments and executes skill handlers before returning their
 results to the model. Existing private job delivery and text history are retained;
 this module adds no memory system or changes to private-response visibility.
@@ -403,8 +434,12 @@ Every tool call rechecks membership and agent assignment. Reads and writes remai
 room scoped; writes require a version read during the current run and use the
 existing optimistic concurrency checks. Tool cancellation propagates to Office requests
 and is checked before storage writes and inside the version transaction. Range reads
-include only the workbook styles referenced by returned cells. Tool execution is sequential, with eight
-model steps and the existing request timeout. Storage/database error details are
+include only the workbook styles referenced by returned cells. Moderator tool execution is sequential; delegated specialists prepare work in parallel.
+The limits and recovery behavior are described above. Storage/database error details are
 not returned to the model. Local uploads and unsaved browser changes are not tool
-inputs. Only saved Univer documents can be edited, and an open editor does not
-automatically refresh after an agent saves a new version.
+inputs. Only saved Univer documents can be edited. Clean open editors refresh after the
+room run ends; local drafts are preserved when the saved document has changed.
+
+Moderator/lease checks: `bun test apps/server/tests/room-moderator.test.ts
+apps/server/tests/room-write-lock.test.ts apps/server/tests/private-room-agents.test.ts`.
+Room activity UI checks: `bun run --filter @nautilus/web test:room-work`.

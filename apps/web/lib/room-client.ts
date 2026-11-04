@@ -38,9 +38,9 @@ export class RoomRequestError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
 
-export async function roomRequest<T>(organizationId: string, path = '', method = 'GET', body?: unknown): Promise<T> {
+export async function roomRequest<T>(organizationId: string, path = '', method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api/organizations/${encodeURIComponent(organizationId)}/rooms${path}`, {
-    method, credentials: 'include', cache: 'no-store',
+    method, credentials: 'include', cache: 'no-store', signal,
     ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   });
   const result = await response.json().catch(() => null);

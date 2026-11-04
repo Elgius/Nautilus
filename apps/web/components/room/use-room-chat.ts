@@ -116,6 +116,8 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
             mergeAgentJobs(event.jobs);
           } else if (event.type === "agent.update") {
             mergeAgentJobs([event.job]);
+          } else if (event.type === "work.update") {
+            window.dispatchEvent(new window.CustomEvent('room-work-update', { detail: { organizationId, roomId, work: event.work } }));
           } else if (event.type === "presence") {
             setOnline(event.users);
           } else if (event.type === "typing") {
@@ -199,7 +201,7 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
   }
   function invokeAgent(agent: RoomAgentOption, instruction: string) {
     if (!enabled || blocked || !instruction.trim()) return false;
-    if (agentJobs.some((job) => job.status === "queued" || job.status === "running")) { setNotice("Wait for your current agent response."); return false; }
+    if (agentJobs.filter((job) => job.status === "queued" || job.status === "running").length >= 20) { setNotice("Wait for some queued requests to finish."); return false; }
     const id = crypto.randomUUID(), now = new Date().toISOString();
     agentOutbox.current.set(id, { agentId: agent.id, instruction: instruction.trim() });
     setAgentJobs((previous) => [...previous, { id, agentId: agent.id, agentName: agent.name, instruction: instruction.trim(), reply: "", status: "queued", createdAt: now, updatedAt: now, revision: -1 }]);
@@ -211,5 +213,8 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
     lastTyping.current = Date.now();
     connection.current.send(JSON.stringify({ type: "typing" }));
   }
-  return { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, canSend: enabled && !blocked, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage };
+  function cancelAgent(jobId: string) {
+    if (connection.current?.readyState === WebSocket.OPEN) connection.current.send(JSON.stringify({ type: 'agent.cancel', jobId }));
+  }
+  return { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, cancelAgent, canSend: enabled && !blocked, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage };
 }

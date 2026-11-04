@@ -1185,3 +1185,9 @@
 .room-private-turn-heading > span, .room-private-status { font-size: 11px; color: var(--muted-foreground); }
 .room-private-instruction, .room-private-reply { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
 .room-private-instruction { color: var(--muted-foreground); }
+
+.room-agent-work { flex-shrink: 0; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--muted); font-size: 12px; }
+.room-agent-work p, .room-agent-work-target { display: flex; align-items: center; gap: 8px; }
+.room-agent-work-target { margin-top: 6px; padding: 4px 0; text-align: left; }
+.room-agent-work-target:not(:disabled) { cursor: pointer; }
+.room-agent-work-target span { color: var(--muted-foreground); }

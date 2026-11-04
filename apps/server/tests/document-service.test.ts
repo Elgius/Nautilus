@@ -22,11 +22,11 @@ async function harness(options: { assigned?: boolean; found?: boolean; changed?:
       return { id: input.data.id, versionNumber: 2 }
     } },
     document: { updateMany: async () => ({ count: options.changed ? 0 : 1 }) },
-    room: { update: async () => ({}) },
+    room: { update: async () => ({}), updateMany: async () => ({ count: 1 }) },
   }
   const db = {
     document: { findFirst: async (query: unknown) => { lookups.push(query); return options.found === false ? null : found } },
-    roomAgent: { findFirst: async (query: unknown) => { lookups.push(query); return options.assigned === false ? null : { agentId: 'agent-1' } } },
+    roomAgent: { findFirst: async (query: unknown) => { lookups.push(query); return options.assigned === false ? null : { agentId: 'agent-1', workToken: 'lease-1' } } },
     $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(tx),
   } as unknown as Database
   const env = { OFFICE_SERVICE_URL: 'https://office.internal', OFFICE_SERVICE_TOKEN: 'x'.repeat(32) } as Bindings
@@ -49,7 +49,7 @@ test('shared reads scope the document to its organization and room and check sto
 
 test('shared saves preserve version metadata, trusted actor attribution and storage scope', async () => {
   const { service, versions, writes } = await harness()
-  await service.saveVersion(scope, { content, expectedVersionId: 'v1', changeSummary: 'Updated brief' }, { agentId: 'agent-1' })
+  await service.saveVersion(scope, { content, expectedVersionId: 'v1', changeSummary: 'Updated brief' }, { agentId: 'agent-1', workToken: 'lease-1' })
   expect(versions[0]).toMatchObject({ ...scope, versionNumber: 2, authorAgentId: 'agent-1', changeSummary: 'Updated brief', mimeType: 'application/json' })
   expect(versions[0].authorUserId).toBeUndefined()
   expect(writes[0].key).toStartWith('organizations/org-1/rooms/room-1/documents/doc-1/versions/')
@@ -61,7 +61,7 @@ test('stale versions and unassigned agents are rejected before uploading any con
   await expect(stale.service.saveVersion(scope, { content, expectedVersionId: 'old' }, { userId: 'user-1' })).rejects.toThrow('newer document version')
   expect(stale.writes).toHaveLength(0)
   const unassigned = await harness({ assigned: false })
-  await expect(unassigned.service.editDocument(scope, { expectedVersionId: 'v1', edits: [] }, { agentId: 'agent-1' })).rejects.toThrow('assigned to this room')
+  await expect(unassigned.service.editDocument(scope, { expectedVersionId: 'v1', edits: [] }, { agentId: 'agent-1', workToken: 'lease-1' })).rejects.toThrow('assigned to this room')
   expect(unassigned.writes).toHaveLength(0)
 })
 
@@ -80,7 +80,7 @@ test('document edit service calls private editing transport then saves one valid
   try {
     const result = await service.editDocument(scope, { expectedVersionId: 'v1', edits: [
       { type: 'replaceText', start: 0, end: 5, expectedText: 'Hello', text: 'World' },
-    ] }, { agentId: 'agent-1' })
+    ] }, { agentId: 'agent-1', workToken: 'lease-1' })
     expect(fetch.mock.calls[0][0]).toBe('https://office.internal/edit')
     expect(result.content).toEqual(edited)
     expect(versions).toHaveLength(1)
@@ -99,10 +99,26 @@ test('cancelling during conversion prevents storage writes and version persisten
   try {
     await expect(service.editDocument(scope, { expectedVersionId: 'v1', edits: [
       { type: 'insertText', index: 0, text: 'New' },
-    ] }, { agentId: 'agent-1' }, controller.signal)).rejects.toThrow()
+    ] }, { agentId: 'agent-1', workToken: 'lease-1' }, controller.signal)).rejects.toThrow()
     expect(writes).toHaveLength(0)
     expect(versions).toHaveLength(0)
     const options = fetch.mock.calls[0][1]!
     expect(options.signal?.aborted).toBe(true)
   } finally { fetch.mockRestore() }
+})
+
+test('a lock acquired while a human snapshot uploads rejects the database commit', async () => {
+  let locked = false, created = false
+  const db = {
+    document: { findFirst: async () => ({ kind: 'DOCUMENT', currentVersionId: null, currentVersion: null }) },
+    $transaction: async (action: (tx: unknown) => Promise<unknown>) => action({
+      room: { updateMany: async () => ({ count: locked ? 0 : 1 }) },
+      documentVersion: { create: async () => { created = true; return {} } },
+    }),
+  } as unknown as Database
+  const service = createDocumentService(db, {} as Bindings, {
+    get: async () => '', put: async () => { locked = true },
+  })
+  await expect(service.saveVersion(scope, { content, expectedVersionId: null }, { userId: 'human' })).rejects.toMatchObject({ status: 423 })
+  expect(created).toBe(false)
 })

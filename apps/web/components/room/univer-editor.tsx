@@ -26,14 +26,17 @@ import './univer-editor.css';
 
 export type OfficeEditorHandle = { snapshot: () => Promise<OfficeContent> };
 
-export default function UniverEditor({ initialContent, onReady, onDirty, onError, onSuspend }: {
+export default function UniverEditor({ initialContent, onReady, onDirty, onError, onSuspend, readOnly = false }: {
   initialContent: OfficeContent;
   onReady: (handle: OfficeEditorHandle | null) => void;
   onDirty: () => void;
   onError: (message: string) => void;
   onSuspend: (snapshot: OfficeContent, source: OfficeContent) => void;
+  readOnly?: boolean;
 }) {
   const container = useRef<HTMLDivElement>(null);
+  const permission = useRef<((value: boolean) => Promise<void>) | null>(null);
+  const currentReadOnly = useEffectEvent(() => readOnly);
   const ready = useEffectEvent(onReady);
   const dirty = useEffectEvent(onDirty);
   const reportError = useEffectEvent(onError);
@@ -56,6 +59,12 @@ export default function UniverEditor({ initialContent, onReady, onDirty, onError
     try {
       if (initialContent.kind === 'DOCUMENT') univerAPI.createDocument(structuredClone(initialContent.snapshot));
       else univerAPI.createWorkbook(structuredClone(initialContent.snapshot));
+      permission.current = async (value) => {
+        if (value && container.current?.contains(document.activeElement)) (document.activeElement as HTMLElement)?.blur();
+        if (isDoc) await univerAPI.getActiveDocument()?.getPermission().setEditable(!value);
+        else univerAPI.getActiveWorkbook()?.setEditable(!value);
+      };
+      void permission.current(currentReadOnly()).catch(() => reportError('Could not update editor permissions. Reload this document.'));
       ready({ snapshot: async () => {
         // Read at save/export time, including the latest committed cell editor value.
         container.current?.querySelector<HTMLElement>(':focus')?.blur();
@@ -83,9 +92,13 @@ export default function UniverEditor({ initialContent, onReady, onDirty, onError
       if (document) suspend({ format: 'univer', kind: 'DOCUMENT', snapshot: structuredClone(document.save()) }, initialContent);
       if (workbook) suspend({ format: 'univer', kind: 'SPREADSHEET', snapshot: structuredClone(workbook.save()) }, initialContent);
       subscription?.dispose(); ready(null); mount.remove();
+      permission.current = null;
       // Univer owns a separate React root. Dispose after the host's commit.
       queueMicrotask(() => univer.dispose());
     };
   }, [initialContent]);
-  return <div ref={container} className="nautilus-office-editor" aria-label={initialContent.kind === 'DOCUMENT' ? 'Word document editor' : 'Spreadsheet editor'} />;
+  useEffect(() => {
+    void permission.current?.(readOnly).catch(() => reportError('Could not update editor permissions. Reload this document.'));
+  }, [readOnly]);
+  return <div ref={container} inert={readOnly} className="nautilus-office-editor" aria-label={initialContent.kind === 'DOCUMENT' ? 'Word document editor' : 'Spreadsheet editor'} />;
 }
