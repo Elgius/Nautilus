@@ -77,3 +77,20 @@ test('internal read transport requires authentication and routes document and sh
   expect((await read({ content, operation: 'readWorkbook' })).status).toBe(400)
   expect((await read({ content, operation: 'unknown' })).status).toBe(400)
 })
+
+
+test('one-cell reads return only referenced styles from a large workbook style table', async () => {
+  const content = officeContent('SPREADSHEET', 'styles-book', 'Budget', { format: 'spreadsheet', sheets: [{ id: 1, name: 'Sheet', cells: [['42', 'Other']] }], styles: {} })
+  const snapshot = content.snapshot as any
+  snapshot.styles = Object.fromEntries(Array.from({ length: 2000 }, (_, i) => [`style${i}`, { ff: 'Arial', fs: 12, cl: { rgb: '#123456' } }]))
+  const sheetId = snapshot.sheetOrder[0]
+  snapshot.sheets[sheetId].cellData[0][0].s = 'style5'
+  snapshot.sheets[sheetId].cellData[0][1].s = { bl: 1 }
+  const response = await app.request('/read', { method: 'POST', headers, body: JSON.stringify({ content, operation: 'readRange', sheetId, row: 0, column: 0, rows: 1, columns: 2 }) })
+  expect(response.status).toBe(200)
+  const result = await response.json()
+  expect(result.styles).toEqual({ style5: snapshot.styles.style5 })
+  expect(result.cells[0][1].s).toEqual({ bl: 1 })
+  expect(JSON.stringify(result).length).toBeLessThan(60_000)
+  expect(Object.keys(snapshot.styles)).toHaveLength(2000)
+})

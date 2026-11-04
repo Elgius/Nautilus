@@ -41,7 +41,8 @@ export function createDocumentService(db: Database, env: Bindings, storage?: Sto
     }
     return { content: JSON.parse(payload) as unknown, currentVersionId: found.currentVersionId, kind: found.kind }
   }
-  async function saveVersion(scope: DocumentScope, input: { expectedVersionId: string | null; content: unknown; changeSummary?: string | null }, actor: DocumentActor) {
+  async function saveVersion(scope: DocumentScope, input: { expectedVersionId: string | null; content: unknown; changeSummary?: string | null }, actor: DocumentActor, signal?: AbortSignal) {
+    signal?.throwIfAborted()
     await checkActor(scope, actor)
     const found = await document(scope)
     if (input.expectedVersionId !== found.currentVersionId) throw new HTTPException(409, { message: 'A newer document version exists. Reload before saving.' })
@@ -50,17 +51,22 @@ export function createDocumentService(db: Database, env: Bindings, storage?: Sto
     const checksum = await digest(bytes), id = crypto.randomUUID()
     const objectKey = `organizations/${scope.organizationId}/rooms/${scope.roomId}/documents/${scope.documentId}/versions/${id}.json`
     const changeSummary = input.changeSummary == null ? null : text(input.changeSummary, 'Change summary', 500, true)
+    signal?.throwIfAborted()
     await store().put(objectKey, payload)
     // Preserve unreferenced objects for reconciliation if the DB commit fails.
     try {
+      signal?.throwIfAborted()
       return await db.$transaction(async (tx) => {
+        signal?.throwIfAborted()
         // A concurrent writer is detected by the unique version number or the head comparison.
         const version = await tx.documentVersion.create({ data: { id, ...scope, objectKey,
           versionNumber: (found.currentVersion?.versionNumber ?? 0) + 1, mimeType: 'application/json', sizeBytes: bytes.byteLength, checksum,
           ...(actor.agentId !== undefined ? { authorAgentId: actor.agentId } : { authorUserId: actor.userId }), changeSummary }, select: versionSelect })
+        signal?.throwIfAborted()
         const updated = await tx.document.updateMany({ where: { id: scope.documentId, organizationId: scope.organizationId, roomId: scope.roomId, currentVersionId: found.currentVersionId }, data: { currentVersionId: id } })
         if (updated.count !== 1) throw new HTTPException(409, { message: 'A newer document version exists. Reload before saving.' })
         await tx.room.update({ where: { id: scope.roomId, organizationId: scope.organizationId }, data: { lastActivityAt: new Date() } })
+        signal?.throwIfAborted()
         return version
       })
     } catch (error) {
@@ -68,17 +74,18 @@ export function createDocumentService(db: Database, env: Bindings, storage?: Sto
       throw error
     }
   }
-  async function editDocument(scope: DocumentScope, input: { expectedVersionId: string | null; edits: DocumentEdit[] | SpreadsheetEdit[]; changeSummary?: string }, actor: DocumentActor) {
+  async function editDocument(scope: DocumentScope, input: { expectedVersionId: string | null; edits: DocumentEdit[] | SpreadsheetEdit[]; changeSummary?: string }, actor: DocumentActor, signal?: AbortSignal) {
+    signal?.throwIfAborted()
     await checkActor(scope, actor)
     const saved = await readDocument(scope)
     if (saved.currentVersionId !== input.expectedVersionId) throw new HTTPException(409, { message: 'A newer document version exists. Reload before editing.' })
     if (!saved.content || typeof saved.content !== 'object' || !('format' in saved.content) || saved.content.format !== 'univer') {
       throw new HTTPException(422, { message: 'Open and save this document in the Univer editor before editing it with tools.' })
     }
-    const response = await officeRequest(env, '/edit', JSON.stringify({ content: saved.content, edits: input.edits }), true)
+    const response = await officeRequest(env, '/edit', JSON.stringify({ content: saved.content, edits: input.edits }), true, signal)
     const result = await response.json() as { content: unknown }
     const content = validateOfficeContent(saved.kind, result.content)
-    const version = await saveVersion(scope, { expectedVersionId: input.expectedVersionId, content, changeSummary: input.changeSummary }, actor)
+    const version = await saveVersion(scope, { expectedVersionId: input.expectedVersionId, content, changeSummary: input.changeSummary }, actor, signal)
     return { content, version }
   }
   return { readDocument, saveVersion, editDocument }

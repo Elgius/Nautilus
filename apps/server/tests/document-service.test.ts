@@ -86,3 +86,23 @@ test('document edit service calls private editing transport then saves one valid
     expect(versions).toHaveLength(1)
   } finally { fetch.mockRestore() }
 })
+
+
+test('cancelling during conversion prevents storage writes and version persistence', async () => {
+  const { service, writes, versions } = await harness()
+  const controller = new AbortController()
+  const fetch = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(async () => {
+    controller.abort()
+    // A response may finish arriving at the same time as cancellation.
+    return Response.json({ content })
+  }, { preconnect: globalThis.fetch.preconnect }))
+  try {
+    await expect(service.editDocument(scope, { expectedVersionId: 'v1', edits: [
+      { type: 'insertText', index: 0, text: 'New' },
+    ] }, { agentId: 'agent-1' }, controller.signal)).rejects.toThrow()
+    expect(writes).toHaveLength(0)
+    expect(versions).toHaveLength(0)
+    const options = fetch.mock.calls[0][1]!
+    expect(options.signal?.aborted).toBe(true)
+  } finally { fetch.mockRestore() }
+})

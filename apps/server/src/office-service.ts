@@ -5,15 +5,17 @@ export function officeConfigured(env: Bindings) {
   return !!env.OFFICE_SERVICE_URL && (env.OFFICE_SERVICE_TOKEN?.length ?? 0) >= 32
 }
 
-export async function officeRequest(env: Bindings, path: string, body: BodyInit, json = false) {
+export async function officeRequest(env: Bindings, path: string, body: BodyInit, json = false, signal?: AbortSignal) {
   if (!officeConfigured(env)) throw new HTTPException(503, { message: 'Word and Excel import/export requires the Office conversion service.' })
+  signal?.throwIfAborted()
   let response: Response
   try {
     response = await fetch(`${env.OFFICE_SERVICE_URL!.replace(/\/$/, '')}${path}`, {
-      method: 'POST', body, redirect: 'manual', signal: AbortSignal.timeout(60_000),
+      method: 'POST', body, redirect: 'manual', signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(signal ? [signal] : [])]),
       headers: { Authorization: `Bearer ${env.OFFICE_SERVICE_TOKEN}`, ...(json ? { 'Content-Type': 'application/json' } : {}) },
     })
   } catch (error) {
+    signal?.throwIfAborted()
     console.error('Office service request failed:', error instanceof Error ? error.message : 'Unknown network error')
     throw new HTTPException(502, { message: 'The Office conversion service could not be reached. Please try again.' })
   }

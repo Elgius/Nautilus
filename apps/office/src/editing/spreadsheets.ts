@@ -56,12 +56,12 @@ export function readRange(content: unknown, range: CellRange) {
   const sheet = snapshot.sheets[range.sheetId]
   requireEdit(sheet && snapshot.sheetOrder.includes(range.sheetId), 'Sheet not found.')
   validateRange(range, sheet.rowCount!, sheet.columnCount!)
-  return {
-    ...range,
-    cells: Array.from({ length: range.rows }, (_, r) => Array.from({ length: range.columns }, (_, c) =>
-      structuredClone(sheet.cellData?.[range.row + r]?.[range.column + c] ?? null))),
-    styles: structuredClone(snapshot.styles ?? {}),
-  }
+  const cells = Array.from({ length: range.rows }, (_, r) => Array.from({ length: range.columns }, (_, c) =>
+    structuredClone(sheet.cellData?.[range.row + r]?.[range.column + c] ?? null)))
+  // Workbook style tables can dwarf a tiny range; include only referenced entries.
+  const styleIds = new Set(cells.flat().map((cell) => cell?.s).filter((style): style is string => typeof style === 'string'))
+  const styles = Object.fromEntries([...styleIds].filter((id) => Object.hasOwn(snapshot.styles ?? {}, id)).map((id) => [id, structuredClone(snapshot.styles![id])]))
+  return { ...range, cells, styles }
 }
 
 function sheetName(workbook: FWorkbook, name: string, ownId?: string) {

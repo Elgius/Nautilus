@@ -390,7 +390,8 @@ map. Duplicate tool names fail at construction. New skills should provide typed
 schemas and execute handlers instead of interpreting arbitrary model text.
 
 Room agents receive document and spreadsheet skills through `createOfficeSkills`.
-They can list saved room files, read document bodies, find text, read workbook
+They can list saved room files (100 per page, with `nextCursor` passed as `after`
+and an optional case-insensitive `title` filter), read document bodies, find text, read workbook
 metadata and ranges, and apply atomic edit batches as agent-authored versions.
 Each batch supports the operations documented in `skills/docs.md` and
 `skills/spreadsheets.md`. The private Office service handles snapshot reads via
@@ -400,7 +401,9 @@ Configure the existing Office service and storage bindings before using these to
 Trusted socket context supplies organization, room, user and agent identity.
 Every tool call rechecks membership and agent assignment. Reads and writes remain
 room scoped; writes require a version read during the current run and use the
-existing optimistic concurrency checks. Tool execution is sequential, with eight
+existing optimistic concurrency checks. Tool cancellation propagates to Office requests
+and is checked before storage writes and inside the version transaction. Range reads
+include only the workbook styles referenced by returned cells. Tool execution is sequential, with eight
 model steps and the existing request timeout. Storage/database error details are
 not returned to the model. Local uploads and unsaved browser changes are not tool
 inputs. Only saved Univer documents can be edited, and an open editor does not

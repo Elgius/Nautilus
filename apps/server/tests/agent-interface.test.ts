@@ -17,8 +17,8 @@ function harness() {
   const backend: SkillBackend = {
     authorize: async () => { if (!allowed) throw new Error('access revoked') },
     list: async () => [{ id: 'doc-1', kind: 'DOCUMENT' }],
-    read: async (...args) => { reads.push(args); return { currentVersionId: 'v1', kind: 'DOCUMENT', result: { body: { dataStream: 'Hello\r\n' } } } },
-    edit: async (...args) => { edits.push(args); return { documentId: args[0], versionId: 'v2' } },
+    read: async (...args) => { reads.push(args.slice(0, 3)); return { currentVersionId: 'v1', kind: 'DOCUMENT', result: { body: { dataStream: 'Hello\r\n' } } } },
+    edit: async (...args) => { edits.push(args.slice(0, 5)); return { documentId: args[0], versionId: 'v2' } },
   }
   return { backend, edits, reads, revoke: () => { allowed = false } }
 }
@@ -79,7 +79,7 @@ test('room skill document discovery uses only the trusted room and organization'
   const db = { document: { findMany: async (query: unknown) => { lookups.push(query); return [] } } } as unknown as Database
   const backend = createRoomSkillBackend({} as Bindings, { userId: 'u1', organizationId: 'o1', roomId: 'r1', sessionId: 'session-1' }, 'a1', async (action) => action(db))
   await backend.list()
-  expect(lookups).toEqual([{ where: { organizationId: 'o1', roomId: 'r1' }, select: { id: true, title: true, kind: true, currentVersionId: true }, orderBy: { createdAt: 'asc' }, take: 100 }])
+  expect(lookups).toEqual([{ where: { organizationId: 'o1', roomId: 'r1' }, select: { id: true, title: true, kind: true, currentVersionId: true }, orderBy: { id: 'asc' }, take: 101 }])
 })
 
 test('spreadsheet function calls use the spreadsheet skill and versioned edit backend', async () => {
@@ -101,4 +101,49 @@ test('skill errors redact backend details before returning tool results to the m
   await createAgentInterface(profile, model, createOfficeSkills(h.backend, new AbortController().signal)).generate({ prompt: 'Read' })
   expect(JSON.stringify(model.doGenerateCalls[1].prompt)).not.toContain('SECRET_DATABASE_CREDENTIALS')
   expect(JSON.stringify(model.doGenerateCalls[1].prompt)).toContain('The skill could not complete')
+})
+
+
+test('document discovery follows pages past 100 and scopes title searches', async () => {
+  const documents = Array.from({ length: 205 }, (_, i) => ({ id: `doc-${String(i).padStart(3, '0')}` }))
+  type Query = { where: { id?: { gt: string }; organizationId: string; roomId: string; title?: { contains: string; mode: string } }; take: number }
+  const queries: Query[] = []
+  const db = { document: { findMany: async (query: Query) => {
+    queries.push(query)
+    return documents.filter((doc) => !query.where.id || doc.id > query.where.id.gt).slice(0, query.take)
+  } } } as unknown as Database
+  const backend = createRoomSkillBackend({} as Bindings, { userId: 'u1', organizationId: 'o1', roomId: 'r1', sessionId: 's1' }, 'a1', async (action) => action(db))
+  const found: string[] = []
+  let after: string | undefined
+  do {
+    const page = await backend.list({ after, title: 'Budget' }) as { documents: { id: string }[]; nextCursor: string | null }
+    found.push(...page.documents.map((doc) => doc.id))
+    after = page.nextCursor ?? undefined
+  } while (after)
+  expect(found).toEqual(documents.map((doc) => doc.id))
+  expect(queries).toHaveLength(3)
+  for (const query of queries) expect(query.where).toMatchObject({ organizationId: 'o1', roomId: 'r1', title: { contains: 'Budget', mode: 'insensitive' } })
+})
+
+test('SDK cancellation reaches an edit already in progress', async () => {
+  const h = harness(), controller = new AbortController()
+  let started!: () => void
+  const editing = new Promise<void>((resolve) => { started = resolve })
+  let release!: () => void
+  const pending = new Promise<void>((resolve) => { release = resolve })
+  h.backend.edit = async (_id, _version, _kind, _edits, _summary, signal) => {
+    started()
+    await pending
+    signal!.throwIfAborted()
+    h.edits.push('saved')
+    return {}
+  }
+  const model = new MockLanguageModelV4({ doGenerate: [call('readDocument', { documentId: 'doc-1' }, 'read'), call('applyDocumentEdits', edit, 'edit'), done] })
+  const generation = createAgentInterface(profile, model, createOfficeSkills(h.backend, new AbortController().signal)).generate({ prompt: 'Edit', abortSignal: controller.signal })
+  const cancelled = generation.then(() => false, () => true)
+  await editing
+  controller.abort()
+  release()
+  expect(await cancelled).toBe(true)
+  expect(h.edits).toHaveLength(0)
 })
