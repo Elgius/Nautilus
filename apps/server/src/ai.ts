@@ -1,9 +1,10 @@
 import { createOpenAI, type OpenAILanguageModelResponsesOptions } from '@ai-sdk/openai'
-import { defaultSettingsMiddleware, isStepCount, ToolLoopAgent, wrapLanguageModel, type LanguageModel } from 'ai'
+import { defaultSettingsMiddleware, wrapLanguageModel, type LanguageModel } from 'ai'
 import { HTTPException } from 'hono/http-exception'
 import type { Bindings } from './env'
 
-type AgentProfile = { id: string; name: string; role: string; rules: string[] }
+// Compatibility export for the existing direct-chat endpoint.
+export { createAgentInterface as createLLMAgent } from './agent_interface'
 type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
 // Resolve per request: Cloudflare supplies secrets through bindings, not process.env.
@@ -24,25 +25,6 @@ export function createAgentModel(env: Bindings): LanguageModel {
   return wrapLanguageModel({
     model: createOpenAI({ apiKey }).responses(model),
     middleware: defaultSettingsMiddleware({ settings: { providerOptions: { openai: options } } }),
-  })
-}
-
-// The same agent supports generate() and stream() for future backend workflows.
-export function createLLMAgent(profile: AgentProfile, model: LanguageModel) {
-  return new ToolLoopAgent({
-    id: profile.id,
-    model,
-    instructions: [
-      `You are ${profile.name}, an assistant in Nautilus.`,
-      `Your purpose: ${profile.role}`,
-      ...profile.rules.map((rule) => `Rule: ${rule}`),
-    ].join('\n'),
-    stopWhen: isStepCount(5),
-    maxOutputTokens: 4096,
-    timeout: 60_000,
-    maxRetries: 1,
-    // Override the SDK's default logger, which can include provider details.
-    onError: () => { console.error('Agent generation failed', { agentId: profile.id }) },
   })
 }
 

@@ -2,7 +2,10 @@
 
 You edit saved Nautilus Word documents through the functions in
 `apps/office/src/editing/docs.ts`. You do not edit snapshot JSON directly.
-These are callable module functions, not registered agent tools yet.
+Room agents access these functions through the registered tools in
+`apps/server/src/agent_interface`: `readDocument`, `findText`, and
+`applyDocumentEdits`. The host supplies saved content; model arguments never
+contain complete snapshots or authorization identities.
 
 Read the current document before editing. The host supplies authorized document
 identity and the current version ID; never invent organization, room, author or

@@ -1,9 +1,10 @@
-import { createAgentModel, createLLMAgent } from './ai'
+import { createAgentModel } from './ai'
+import { createAgentInterface, type AgentSkill } from './agent_interface'
 import type { Bindings } from './env'
 import type { PrivateAgentMessage, PrivateAgentProfile } from './private-room-agents'
 
-export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, resolveModel = createAgentModel) {
-  const agent = createLLMAgent(profile, resolveModel(env))
+export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, resolveModel = createAgentModel, skills: AgentSkill[] = []) {
+  const agent = createAgentInterface(profile, resolveModel(env), skills)
   const result = await agent.stream({ messages, abortSignal: signal })
   let finished = false
   for await (const part of result.stream) {

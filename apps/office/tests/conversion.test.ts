@@ -59,3 +59,21 @@ test('conversion rejects wrong file types, empty files and malformed snapshots',
   expect((await app.request('/import/DOCUMENT', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form })).status).toBe(400)
   expect((await app.request('/export', { method: 'POST', headers, body: JSON.stringify({ format: 'univer', kind: 'DOCUMENT', snapshot: {} }) })).status).toBe(400)
 })
+
+test('internal read transport requires authentication and routes document and sheet reads', async () => {
+  expect((await app.request('/read', { method: 'POST', body: '{}' })).status).toBe(401)
+  const content = officeContent('DOCUMENT', 'read-doc', 'Brief', { format: 'markdown', text: 'Hello' })
+  const read = (input: unknown) => app.request('/read', { method: 'POST', headers, body: JSON.stringify(input) })
+  const document = await read({ content, operation: 'readDocument' })
+  expect(document.status).toBe(200)
+  expect((await document.json()).body.dataStream).toContain('Hello')
+  const matches = await read({ content, operation: 'findText', text: 'Hello' })
+  expect((await matches.json())[0]).toMatchObject({ start: 0, end: 5 })
+  const workbook = officeContent('SPREADSHEET', 'book', 'Budget', { format: 'spreadsheet', sheets: [{ id: 1, name: 'Sheet', cells: [['42']] }], styles: {} })
+  const metadata = await read({ content: workbook, operation: 'readWorkbook' })
+  const sheetId = (await metadata.json()).sheets[0].id
+  const range = await read({ content: workbook, operation: 'readRange', sheetId, row: 0, column: 0, rows: 1, columns: 1 })
+  expect((await range.json()).cells[0][0].v).toBe(42)
+  expect((await read({ content, operation: 'readWorkbook' })).status).toBe(400)
+  expect((await read({ content, operation: 'unknown' })).status).toBe(400)
+})

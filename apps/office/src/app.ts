@@ -5,8 +5,8 @@ import { timingSafeEqual } from 'node:crypto'
 import { UniverInstanceType, type IDocumentData, type IWorkbookData } from '@univerjs/core'
 import { ExchangeError, ExchangeFormat, exportToBuffer, importBuffer, type ISheetImportOptions } from '@univerjs-pro/exchange-node'
 import { MAX_OFFICE_BYTES, validateOfficeContent } from '../../server/src/office-content'
-import { applyDocumentEdits, type DocumentEdit } from './editing/docs'
-import { applySpreadsheetEdits, type SpreadsheetEdit } from './editing/spreadsheets'
+import { applyDocumentEdits, readDocument, findText, type DocumentEdit } from './editing/docs'
+import { applySpreadsheetEdits, readWorkbook, readRange, type CellRange, type SpreadsheetEdit } from './editing/spreadsheets'
 
 export function createOfficeApp(secret: string) {
   const app = new Hono()
@@ -37,6 +37,18 @@ export function createOfficeApp(secret: string) {
     return c.json({ content: validateOfficeContent(kind, { format: 'univer', kind, snapshot }) })
   })
   // Internal transport only. Room authorization and persistence belong to the API service.
+  app.post('/read', async (c) => {
+    const input = await c.req.json().catch(() => { throw new HTTPException(400, { message: 'Provide valid JSON.' }) })
+    if (!input || typeof input !== 'object') throw new HTTPException(400, { message: 'Provide a read operation.' })
+    if (input.operation === 'readDocument') return c.json(readDocument(input.content, input.segmentId))
+    if (input.operation === 'findText') return c.json(findText(input.content, input.text, input.segmentId))
+    if (input.operation === 'readWorkbook') return c.json(readWorkbook(input.content))
+    if (input.operation === 'readRange') {
+      const { sheetId, row, column, rows, columns } = input as CellRange
+      return c.json(readRange(input.content, { sheetId, row, column, rows, columns }))
+    }
+    throw new HTTPException(400, { message: 'Unknown read operation.' })
+  })
   app.post('/edit', async (c) => {
     const input = await c.req.json().catch(() => { throw new HTTPException(400, { message: 'Provide valid JSON.' }) })
     if (input?.content?.kind !== 'DOCUMENT' && input?.content?.kind !== 'SPREADSHEET') throw new HTTPException(400, { message: 'Invalid document type.' })

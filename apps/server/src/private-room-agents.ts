@@ -7,7 +7,7 @@ type Dependencies = {
   storage: DurableObjectStorage
   profile: (identity: ChatIdentity, agentId: string) => Promise<PrivateAgentProfile | null>
   canAccess: (identity: ChatIdentity) => Promise<boolean>
-  stream: (profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal) => AsyncIterable<string>
+  stream: (profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, identity: ChatIdentity) => AsyncIterable<string>
   send: (identity: ChatIdentity, event: PrivateAgentEvent) => Promise<void>
   waitUntil: (task: Promise<void>) => void
 }
@@ -94,7 +94,7 @@ export class PrivateRoomAgents {
       }
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(65_000)])
       let lastSent = 0
-      for await (const delta of this.deps.stream(profile, messages, signal)) {
+      for await (const delta of this.deps.stream(profile, messages, signal, identity)) {
         signal.throwIfAborted()
         job.reply += delta
         if (job.reply.length > 32_000) throw new Error('Response too long')
