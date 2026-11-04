@@ -1022,6 +1022,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
           <AgentProfileDialog
             key={editingAgent.id}
             agent={editingAgent}
+            organizationId={session.activeOrganization?.id}
             onClose={() => setEditingAgentId(null)}
             onSave={(profile) => saveAgent(editingAgent.id, editingAgent.name, profile)}
           />

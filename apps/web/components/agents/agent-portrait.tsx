@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { avatarShapes, type Agent, type AvatarIcon, type AvatarShape } from "@/lib/agent-data";
 import type { AvatarDesign } from "@/lib/avatar-generation";
+import { parseAvatarDesign } from '../../../../shared/avatar-design';
+import type { AgentAppearance } from '../../../../shared/agent-appearance';
 
 export const avatarIcons = {
   bot: Bot,
@@ -136,17 +138,21 @@ export function AgentPortrait({
   small = false,
   animated = false,
 }: {
-  agent?: Pick<Agent, "name" | "color" | "avatarIcon" | "avatarUrl">;
+  agent?: Pick<Agent, "name"> & AgentAppearance;
   small?: boolean;
   animated?: boolean;
 }) {
   const icon = agent?.avatarIcon ?? "bot";
   const shape = isAvatarShape(icon) ? icon : null;
+  let design: AvatarDesign | undefined;
+  if (agent?.avatarDesign != null) {
+    try { design = parseAvatarDesign(agent.avatarDesign); } catch { /* Fall back to the preset. */ }
+  }
   const Icon = avatarIcons[icon as keyof typeof avatarIcons] ?? Bot;
   return (
     <span
       title={agent?.name}
-      className={`agent-avatar agent-portrait ${agent?.color ?? "green"} ${shape && !agent?.avatarUrl ? "agent-shape-portrait" : ""} ${small ? "avatar-small" : ""}`}
+      className={`agent-avatar agent-portrait ${agent?.color ?? "green"} ${(shape || design) && !agent?.avatarUrl ? "agent-shape-portrait" : ""} ${small ? "avatar-small" : ""}`}
     >
       {agent?.avatarUrl ? (
         <Image
@@ -157,8 +163,8 @@ export function AgentPortrait({
           unoptimized
           className="object-cover"
         />
-      ) : shape ? (
-        <AgentShape key={`${shape}-${agent?.color}`} shape={shape} animated={animated && !small} />
+      ) : design || shape ? (
+        <AgentShape key={`${shape}-${agent?.color}`} shape={shape ?? "circle"} design={design} animated={animated && !small} />
       ) : (
         <Icon size={small ? 13 : 18} />
       )}

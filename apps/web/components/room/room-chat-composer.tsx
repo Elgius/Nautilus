@@ -1,7 +1,8 @@
 "use client";
 
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { ArrowUp, Bot, LockKeyhole, X } from "lucide-react";
+import { ArrowUp, LockKeyhole, X } from "lucide-react";
+import { AgentPortrait } from "@/components/agents/agent-portrait";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
 import { agentMention, selectAgentMention } from "@/lib/agent-mention";
@@ -60,12 +61,12 @@ export function RoomChatComposer({ canSend, agents, agentsLoading, agentBusy, lo
     {pickerOpen && <div id={listId} role="listbox" aria-label="Choose an agent" className="room-agent-options">
       {agentsLoading ? <p role="status">Loading room agents…</p> : matches.length ? matches.map((agent, index) =>
         <button key={agent.id} id={`${listId}-${index}`} type="button" role="option" aria-selected={index === activeIndex} onMouseDown={(event) => event.preventDefault()} onClick={() => select(agent)}>
-          <Bot size={15} /><span><strong>{agent.name}</strong><small>{agent.role}</small></span><LockKeyhole size={13} />
+          <AgentPortrait agent={agent} small /><span><strong>{agent.name}</strong><small>{agent.role}</small></span><LockKeyhole size={13} />
         </button>) : <p role="status">{agents.length ? 'No matching agents. Edit the name after @.' : 'No agents are assigned to this room.'}</p>}
       <p className="room-local-note">Instructions and replies are visible only to you.</p>
     </div>}
     <InputGroup className="room-composer">
-      {selected && <InputGroupAddon align="block-start" className="room-private-target"><Bot size={15} /><strong>@{selected.name}</strong><span><LockKeyhole size={12} /> Only you</span><Button type="button" size="icon-sm" variant="ghost" aria-label="Return to room chat" onClick={() => {
+      {selected && <InputGroupAddon align="block-start" className="room-private-target"><AgentPortrait agent={selected} small /><strong>@{selected.name}</strong><span><LockKeyhole size={12} /> Only you</span><Button type="button" size="icon-sm" variant="ghost" aria-label="Return to room chat" onClick={() => {
         // Never move private instruction text into the public room draft.
         setSelected(null); textarea.current?.focus();
       }}><X size={14} /></Button></InputGroupAddon>}

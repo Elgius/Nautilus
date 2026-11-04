@@ -7,13 +7,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { AvatarGenerationError, generateAvatarPreview, type AvatarDesign } from "@/lib/avatar-generation";
 import type { AvatarShape } from "@/lib/agent-data";
 
-export function AvatarGenerator({ organizationId, shape, onBack }: {
+export function AvatarGenerator({ organizationId, shape, initialDesign, onBack, onUse }: {
   organizationId: string;
   shape: AvatarShape;
+  initialDesign?: AvatarDesign;
   onBack: () => void;
+  onUse: (design: AvatarDesign) => void;
 }) {
   const [description, setDescription] = useState("");
-  const [design, setDesign] = useState<AvatarDesign | null>(null);
+  const [design, setDesign] = useState<AvatarDesign | null>(initialDesign ?? null);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState("");
   const [retryAt, setRetryAt] = useState(0);
@@ -74,7 +76,7 @@ export function AvatarGenerator({ organizationId, shape, onBack }: {
         aria-describedby={`avatar-preview-note${error ? " avatar-preview-error" : ""}`}
         onChange={(event) => { setDescription(event.target.value); if (!retryAt) setError(""); }}
       />
-      <p id="avatar-preview-note" className="avatar-preview-note">Preview only. This avatar won’t be saved. Return to the presets to continue creating your agent.</p>
+      <p id="avatar-preview-note" className="avatar-preview-note">Choose Use avatar to keep this design, then save your agent.</p>
       {generating && <p role="status" className="avatar-preview-note">Designing your avatar…</p>}
       {error && <p id="avatar-preview-error" className="create-agent-error" role="alert">{error}</p>}
       {!!retryAt && <p className="avatar-preview-note">You can retry after {new Date(retryAt).toLocaleString()}.</p>}
@@ -83,6 +85,7 @@ export function AvatarGenerator({ organizationId, shape, onBack }: {
         <Button type="submit" disabled={generating || !!retryAt || !description.trim()}>
           {generating ? "Generating…" : retryAt ? quotaExhausted ? "Quota reached" : "Try again later" : design ? "Regenerate" : "Generate"}
         </Button>
+        {design && <Button type="button" disabled={generating} onClick={() => onUse(design)}>Use avatar</Button>}
       </div>
     </form>
   );

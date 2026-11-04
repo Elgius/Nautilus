@@ -180,6 +180,7 @@ model Agent {
   color          AgentColor   @default(violet)
   avatarIcon     AgentIcon    @default(bot)
   avatarUrl      String?
+  avatarDesign   Json?
   rules          String[]     @default([])
   status         AgentStatus  @default(Available)
   createdAt      DateTime     @default(now())

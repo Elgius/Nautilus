@@ -9,7 +9,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests",
-    "test:room-composer": "bun tests/room-chat-composer.ui.tsx"
+    "test:room-composer": "bun tests/room-chat-composer.ui.tsx",
+    "test:agent-avatar": "bun tests/agent-avatar.ui.tsx"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

@@ -1,4 +1,6 @@
 import { HTTPException } from 'hono/http-exception'
+import { Prisma } from './generated/prisma/browser'
+import { parseAvatarDesign, type AvatarDesign } from '../../../shared/avatar-design'
 
 const colors = ['violet', 'coral', 'blue', 'green', 'brown', 'red', 'orange', 'amber', 'teal', 'pink', 'gray'] as const
 const icons = ['bot', 'sparkles', 'compass', 'code', 'book', 'chart', 'circle', 'oval', 'square', 'pill', 'triangle', 'hexagon', 'cloud', 'drop'] as const
@@ -31,12 +33,25 @@ export function parseAgentProfile(value: unknown) {
     const bytes = image[2].length * 3 / 4 - (image[2].endsWith('==') ? 2 : image[2].endsWith('=') ? 1 : 0)
     if (bytes > 2 * 1024 * 1024) throw new HTTPException(400, { message: 'Choose an avatar image up to 2 MB.' })
   }
-  return { name, nameKey: name.toLowerCase(), role, color, avatarIcon, avatarUrl, rules }
+  let avatarDesign: AvatarDesign | null = null
+  if (input.avatarDesign != null) {
+    try { avatarDesign = parseAvatarDesign(input.avatarDesign) }
+    catch { throw new HTTPException(400, { message: 'Choose a valid custom avatar.' }) }
+  }
+  if (avatarUrl && avatarDesign) throw new HTTPException(400, { message: 'Choose one avatar image or custom design.' })
+  return { name, nameKey: name.toLowerCase(), role, color, avatarIcon, avatarUrl, avatarDesign, rules }
+}
+
+export function agentProfileData(profile: ReturnType<typeof parseAgentProfile>) {
+  return { ...profile, avatarDesign: profile.avatarDesign ?? Prisma.DbNull }
 }
 
 // Keep normalized uniqueness keys out of the public API.
+export const agentAppearanceSelect = {
+  id: true, name: true, color: true, avatarIcon: true, avatarUrl: true, avatarDesign: true,
+} as const
+
 export const agentSelect = {
-  id: true, organizationId: true, name: true, role: true, color: true,
-  avatarIcon: true, avatarUrl: true, rules: true, status: true,
+  ...agentAppearanceSelect, organizationId: true, role: true, rules: true, status: true,
   createdAt: true, updatedAt: true,
 } as const

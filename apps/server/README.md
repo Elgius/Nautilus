@@ -223,6 +223,13 @@ uses AI SDK `generateText` with `Output.object` to generate validated JSON
 `{ purpose, rules }`. The purpose is saved as `agent.role` (up to 70 characters),
 and ordered rules are saved as `agent.rules` (up to 6,000 characters combined).
 The selected name and avatar remain user-controlled; tenant and status are server-owned.
+Both creation and profile updates accept an optional `avatarDesign` containing
+`bodyPath`, a hex `color`, and two `eyes` with `cx`, `cy`, `rx`, and `ry`. The shared
+validator rejects markup, external references, unsupported path commands, and
+out-of-bounds geometry. The validated design is stored in `agent.avatarDesign`
+(JSONB) and included in agent lists, room details, and WebSocket agent options.
+Send `avatarDesign: null` to return to a preset. A custom design and an uploaded
+`avatarUrl` cannot be selected together. Generating a preview alone does not save it.
 
 Validation, structured generation, and persistence are separate functions in
 `src/agent-creator.ts`; `src/agent-creator-route.ts` orchestrates them. The response

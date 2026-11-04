@@ -12,8 +12,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { AgentPortrait, AgentShape } from "@/components/agents/agent-portrait";
-import { avatarColors, avatarShapes } from "@/lib/agent-data";
+import { AgentPortrait, AgentShape, isAvatarShape } from "@/components/agents/agent-portrait";
+import { AvatarGenerator } from "@/components/agents/avatar-generator";
+import { avatarColors, avatarColorValues, avatarShapes } from "@/lib/agent-data";
 import type {
   Agent,
   AgentProfile,
@@ -24,10 +25,12 @@ const colors: AvatarColor[] = [...avatarColors, "coral"];
 
 export function AgentProfileDialog({
   agent,
+  organizationId,
   onClose,
   onSave,
 }: {
   agent: Agent;
+  organizationId?: string;
   onClose: () => void;
   onSave: (profile: AgentProfile) => Promise<string | null>;
 }) {
@@ -37,10 +40,12 @@ export function AgentProfileDialog({
     color: agent.color,
     avatarIcon: agent.avatarIcon,
     avatarUrl: agent.avatarUrl,
+    avatarDesign: agent.avatarDesign,
     rules: agent.rules,
   });
   const [saveError, setSaveError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [avatarGeneratorOpen, setAvatarGeneratorOpen] = useState(false);
   const [rules, setRules] = useState(() =>
     agent.rules
       .filter((rule) => rule.trim())
@@ -102,6 +107,7 @@ export function AgentProfileDialog({
         setProfile((previous) => ({
           ...previous,
           avatarUrl: reader.result as string,
+          avatarDesign: undefined,
         }));
     };
     reader.onerror = () =>
@@ -122,7 +128,14 @@ export function AgentProfileDialog({
             Give your agent an identity and clear instructions for how to work.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={save} className="agent-profile-form" aria-busy={saving}>
+        {avatarGeneratorOpen && organizationId ? (
+          <AvatarGenerator organizationId={organizationId} shape={isAvatarShape(profile.avatarIcon) ? profile.avatarIcon : "circle"}
+            initialDesign={profile.avatarDesign} onBack={() => setAvatarGeneratorOpen(false)}
+            onUse={(avatarDesign) => {
+              setProfile((previous) => ({ ...previous, avatarDesign, avatarUrl: undefined }));
+              setAvatarError(""); setAvatarGeneratorOpen(false);
+            }} />
+        ) : <form onSubmit={save} className="agent-profile-form" aria-busy={saving}>
           <fieldset disabled={saving} className="contents">
             <section
               className="agent-avatar-editor"
@@ -133,7 +146,7 @@ export function AgentProfileDialog({
               </div>
               <div>
                 <h3 id="avatar-heading">Agent avatar</h3>
-                <p>Choose a shape or upload your own image.</p>
+                <p>Choose a shape, generate an avatar, or upload your own image.</p>
                 <div className="agent-upload-actions">
                   <Button
                     variant="outline"
@@ -144,7 +157,10 @@ export function AgentProfileDialog({
                     <Upload size={14} />
                     Upload image
                   </Button>
-                  {profile.avatarUrl && (
+                  {organizationId && <Button type="button" variant="outline" size="sm" onClick={() => setAvatarGeneratorOpen(true)}>
+                    <Plus size={14} /> Generate avatar
+                  </Button>}
+                  {(profile.avatarUrl || profile.avatarDesign) && (
                     <Button
                       type="button"
                       variant="ghost"
@@ -153,6 +169,7 @@ export function AgentProfileDialog({
                         setProfile((previous) => ({
                           ...previous,
                           avatarUrl: undefined,
+                          avatarDesign: undefined,
                         }))
                       }
                     >
@@ -188,8 +205,8 @@ export function AgentProfileDialog({
                 {avatarShapes.map((shape) => (
                   <Button variant="ghost" size="sm" type="button" key={shape}
                     aria-label={`${shape} avatar`}
-                    aria-pressed={!profile.avatarUrl && profile.avatarIcon === shape}
-                    onClick={() => setProfile((previous) => ({ ...previous, avatarIcon: shape, avatarUrl: undefined }))}
+                    aria-pressed={!profile.avatarUrl && !profile.avatarDesign && profile.avatarIcon === shape}
+                    onClick={() => setProfile((previous) => ({ ...previous, avatarIcon: shape, avatarUrl: undefined, avatarDesign: undefined }))}
                   >
                     <AgentShape shape={shape} />
                   </Button>
@@ -207,7 +224,7 @@ export function AgentProfileDialog({
                     aria-pressed={profile.color === color}
                     className={`agent-avatar ${color}`}
                     onClick={() =>
-                      setProfile((previous) => ({ ...previous, color }))
+                      setProfile((previous) => ({ ...previous, color, avatarDesign: previous.avatarDesign ? { ...previous.avatarDesign, color: avatarColorValues[color] } : undefined }))
                     }
                   >
                     {profile.color === color && <span aria-hidden="true">✓</span>}
@@ -319,7 +336,7 @@ export function AgentProfileDialog({
               </div>
             </div>
           </fieldset>
-        </form>
+        </form>}
       </DialogContent>
     </Dialog>
   );

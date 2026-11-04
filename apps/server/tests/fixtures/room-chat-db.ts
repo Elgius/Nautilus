@@ -2,6 +2,8 @@
 type Row = { id: string; roomId: string; organizationId: string; authorUserId: string; clientMessageId: string; createdAt: Date; text: string }
 const rows: Row[] = []
 let revoked = false
+let nextHistory: (() => Promise<void>) | undefined
+export function pauseNextHistory(operation: () => Promise<void>) { nextHistory = operation }
 export function seed() {
   const time = Math.max(Date.now(), rows.at(-1)?.createdAt.getTime() ?? 0) + 1
   for (let index = 0; index < 205; index++) rows.push({ id: `seed-${index}`, roomId: 'room', organizationId: 'org', authorUserId: 'alice', clientMessageId: crypto.randomUUID(), createdAt: new Date(time + index), text: `missed-${index}` })
@@ -25,6 +27,9 @@ export function createDatabase() {
         return orderBy ? matches.at(-1) ?? null : matches[0] ?? null
       },
       findMany: async ({ where, orderBy, take }: { where: { roomId: string; organizationId: string; OR?: Array<{ createdAt: { gt?: Date; lt?: Date } }> }; orderBy: Array<{ createdAt?: string }>; take: number }) => {
+        const pause = nextHistory
+        nextHistory = undefined
+        await pause?.()
         const direction = orderBy[0].createdAt === 'asc' ? 1 : -1
         const result = rows.filter((row) => row.roomId === where.roomId && row.organizationId === where.organizationId && (!where.OR || (direction === 1 ? row.createdAt > where.OR[0].createdAt.gt! : row.createdAt < where.OR[0].createdAt.lt!)))
         return result.sort((a, b) => direction * (a.createdAt.getTime() - b.createdAt.getTime())).slice(0, take)

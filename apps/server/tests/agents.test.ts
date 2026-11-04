@@ -1,13 +1,27 @@
 import { expect, test } from 'bun:test'
-import { parseAgentProfile } from '../src/agents'
+import { agentProfileData, parseAgentProfile } from '../src/agents'
+import type { AvatarDesign } from '../../../shared/avatar-design'
+import { Prisma } from '../src/generated/prisma/browser'
 
 const profile = { name: ' Scout ', role: ' Research ', color: 'blue', avatarIcon: 'compass', rules: [' Ask first. ', '', 'Cite sources.'] }
 
 test('normalizes profile fields while preserving rule order', () => {
   expect(parseAgentProfile({ ...profile, id: 'injected', organizationId: 'other', status: 'Working' })).toEqual({
     name: 'Scout', nameKey: 'scout', role: 'Research', color: 'blue', avatarIcon: 'compass',
-    rules: ['Ask first.', 'Cite sources.'], avatarUrl: null,
+    rules: ['Ask first.', 'Cite sources.'], avatarUrl: null, avatarDesign: null,
   })
+})
+
+test('custom avatars retain only validated geometry and can be replaced with presets', () => {
+  const avatarDesign: AvatarDesign = { bodyPath: 'M10 10 L90 10 L50 90 Z', color: '#ffb500', eyes: [{ cx: 38, cy: 40, rx: 5, ry: 7 }, { cx: 64, cy: 40, rx: 5, ry: 7 }] }
+  const parsed = parseAgentProfile({ ...profile, avatarDesign: { ...avatarDesign, onload: 'evil' } })
+  expect(parsed.avatarDesign).toEqual({ ...avatarDesign, bodyPath: 'M 10 10 L 90 10 L 50 90 Z' })
+  expect(agentProfileData(parsed).avatarDesign).toEqual(parsed.avatarDesign!)
+  expect(agentProfileData(parseAgentProfile({ ...parsed, avatarDesign: null })).avatarDesign).toBe(Prisma.DbNull)
+  for (const invalid of [{ ...avatarDesign, bodyPath: '<svg onload="alert(1)">' }, { ...avatarDesign, eyes: [] }, { ...avatarDesign, color: 'url(evil)' }]) {
+    expect(() => parseAgentProfile({ ...profile, avatarDesign: invalid })).toThrow('Choose a valid custom avatar.')
+  }
+  expect(() => parseAgentProfile({ ...profile, avatarDesign, avatarUrl: 'data:image/png;base64,AAAA' })).toThrow('Choose one avatar')
 })
 
 test('rejects malformed profiles and limits rules and uploaded avatars', () => {

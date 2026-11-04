@@ -6,7 +6,7 @@ import path from 'node:path'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const bundle = await build({
-  stdin: { contents: `import app, { RoomChat } from './src/index'; import { revoke, seed } from './tests/fixtures/room-chat-db'; import { privateAgentCalls } from './tests/fixtures/private-agent-stream'; export { RoomChat }; export default { fetch(request, env, ctx) { const url = new URL(request.url); if (url.pathname === '/agent-calls') return Response.json({ calls: privateAgentCalls() }); if (url.pathname === '/seed') { seed(); return new Response('ok'); } if (url.pathname === '/revoke') { revoke(); return new Response('ok'); } const room = url.searchParams.get('room') || 'room'; if (url.pathname === '/socket') { url.pathname = '/api/room-sockets/org/' + room; return app.fetch(new Request(url, request), env, ctx); } return env.ROOM_CHAT.get(env.ROOM_CHAT.idFromName(JSON.stringify(['org', room]))).fetch(request); } };`, resolveDir: root, loader: 'ts' },
+  stdin: { contents: `import app from './src/index'; import { RoomChat } from './tests/fixtures/room-chat-lifecycle'; import { revoke, seed } from './tests/fixtures/room-chat-db'; import { privateAgentCalls } from './tests/fixtures/private-agent-stream'; export { RoomChat }; export default { fetch(request, env, ctx) { const url = new URL(request.url); if (url.pathname === '/agent-calls') return Response.json({ calls: privateAgentCalls() }); if (url.pathname === '/seed') { seed(); return new Response('ok'); } if (url.pathname === '/revoke') { revoke(); return new Response('ok'); } const room = url.searchParams.get('room') || 'room'; if (url.pathname === '/socket') { url.pathname = '/api/room-sockets/org/' + room; return app.fetch(new Request(url, request), env, ctx); } return env.ROOM_CHAT.get(env.ROOM_CHAT.idFromName(JSON.stringify(['org', room]))).fetch(request); } };`, resolveDir: root, loader: 'ts' },
   bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', external: ['cloudflare:workers', 'node:*'],
   plugins: [{ name: 'test-database', setup(builder) { builder.onResolve({ filter: /^\.\/private-room-agent-stream$/ }, () => ({ path: path.join(root, 'tests/fixtures/private-agent-stream.ts') })); builder.onResolve({ filter: /^\.\/db$/ }, () => ({ path: path.join(root, 'tests/fixtures/room-chat-db.ts') })) } }],
 })
@@ -47,6 +47,8 @@ async function receive(socket, type) {
 }
 const send = (socket, event) => socket.send(JSON.stringify(event))
 try {
+  const lifecycle = await mf.dispatchFetch('https://api.test/lifecycle-regression')
+  assert.equal(lifecycle.status, 200, await lifecycle.text())
   assert.equal((await upgrade(await ticket('alice'), 'room', 'https://evil.test')).status, 403)
   assert.equal((await upgrade(await ticket('outsider'))).status, 403)
   assert.equal((await upgrade(await ticket('expired'))).status, 403)

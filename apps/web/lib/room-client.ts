@@ -1,4 +1,5 @@
 import type { Room } from './room-data';
+import type { AgentAppearance } from '../../../shared/agent-appearance';
 
 export type RoomDocument = {
   id: string; title: string; kind: 'DOCUMENT' | 'SPREADSHEET'; category: string;
@@ -7,7 +8,7 @@ export type RoomDocument = {
 export type RoomRecord = {
   id: string; name: string; description: string; category: string; color: string;
   status: 'READY' | 'WORKING' | 'NEEDS_REVIEW'; lastActivityAt: string;
-  agents: { agent: { id: string; name: string } }[];
+  agents: { agent: AgentAppearance & { id: string; name: string } }[];
   members: { organizationMemberId: string; role: string; member: { user: { id: string; name: string } } }[];
   stars: { userId: string }[]; documents: RoomDocument[];
 };

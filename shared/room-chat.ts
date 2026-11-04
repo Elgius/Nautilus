@@ -1,3 +1,5 @@
+import type { AgentAppearance } from './agent-appearance';
+
 export type ChatUser = { id: string; name: string };
 export type ChatServerEvent<Message> = PrivateAgentEvent
   | { type: 'ready' | 'pong' }
@@ -9,7 +11,7 @@ export type ChatServerEvent<Message> = PrivateAgentEvent
   | { type: 'read'; userId: string; readAt: string }
   | { type: 'error'; requestId?: string; error: string };
 
-export type RoomAgentOption = { id: string; name: string; role: string };
+export type RoomAgentOption = AgentAppearance & { id: string; name: string; role: string };
 export type PrivateAgentJob = {
   id: string;
   agentId: string;

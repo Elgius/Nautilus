@@ -9,12 +9,13 @@ import { MAX_OFFICE_BYTES, validateOfficeContent } from './office-content'
 import { officeConfigured, officeRequest } from './office-service'
 import { createDocumentService, versionSelect } from './documents/document-service'
 import { canChat } from './room-chat-service'
+import { agentAppearanceSelect } from './agents'
 
 export const rooms = new Hono<AppEnv>()
 rooms.use('*', bodyLimit({ maxSize: MAX_OFFICE_BYTES + 1024 * 1024 }))
 
 const roomInclude = (userId: string) => ({
-  agents: { orderBy: { position: 'asc' as const }, select: { agent: { select: { id: true, name: true } } } },
+  agents: { orderBy: { position: 'asc' as const }, select: { agent: { select: agentAppearanceSelect } } },
   members: { select: { organizationMemberId: true, role: true, lastReadAt: true,
     member: { select: { user: { select: { id: true, name: true } } } } } },
   stars: { where: { userId }, select: { userId: true } },

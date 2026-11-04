@@ -65,6 +65,15 @@ test('creator rejects duplicate names before spending an LLM request', async () 
   expect(writes).toHaveLength(0)
 })
 
+test('creator saves the selected custom avatar and returns it with the created agent', async () => {
+  const avatarDesign = { bodyPath: 'M 10 10 L 90 10 L 50 90 Z', color: '#ffb500', eyes: [{ cx: 38, cy: 40, rx: 5, ry: 7 }, { cx: 64, cy: 40, rx: 5, ry: 7 }] }
+  const { request, writes } = harness()
+  const response = await request({ ...input, avatarDesign })
+  expect(response.status).toBe(201)
+  expect(writes[0].data.avatarDesign).toEqual(avatarDesign)
+  expect(await response.json()).toMatchObject({ agent: { avatarDesign } })
+})
+
 test('creator rejects invalid generated instructions without saving or exposing provider output', async () => {
   for (const output of [{ purpose: '', rules: [] }, { purpose: 'x'.repeat(71), rules: ['secret-provider-output'] },
     { purpose: 'Research', rules: ['x'.repeat(6001)] }, { purpose: 'Research', rules: [7] }]) {

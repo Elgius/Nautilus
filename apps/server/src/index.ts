@@ -4,7 +4,7 @@ import { cors } from 'hono/cors'
 import { HTTPException } from 'hono/http-exception'
 import { createMiddleware } from 'hono/factory'
 import { bodyLimit } from 'hono/body-limit'
-import { agentSelect, parseAgentProfile } from './agents'
+import { agentSelect, agentProfileData, parseAgentProfile } from './agents'
 import { agentChat } from './agent-chat'
 import { agentCreator } from './agent-creator-route'
 import { avatarGeneration } from './avatar-generation-route'
@@ -137,7 +137,7 @@ app.post(agentPath, authenticated, organizationMember, async (c) => {
   const input: unknown = await c.req.json().catch(() => {
     throw new HTTPException(400, { message: 'Enter a valid agent profile.' })
   })
-  const data = parseAgentProfile(input)
+  const data = agentProfileData(parseAgentProfile(input))
   const agent = await c.get('db').agent.create({
     data: { ...data, organizationId: c.get('organizationId') }, select: agentSelect,
   })
@@ -149,7 +149,7 @@ app.patch(`${agentPath}/:agentId`, authenticated, organizationMember, async (c) 
   const input: unknown = await c.req.json().catch(() => {
     throw new HTTPException(400, { message: 'Enter a valid agent profile.' })
   })
-  const data = parseAgentProfile(input)
+  const data = agentProfileData(parseAgentProfile(input))
   // The tenant predicate stays in the mutation, not only in a preceding lookup.
   const agent = await c.get('db').agent.update({ where, data, select: agentSelect })
   return c.json({ agent })

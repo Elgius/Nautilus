@@ -1,11 +1,17 @@
 import type { Agent, AgentProfile, AgentCreationInput } from "./agent-data";
+import { parseAvatarDesign } from '../../../shared/avatar-design';
 
-export type StoredAgent = Omit<Agent, "initials" | "avatarUrl"> & {
+export type StoredAgent = Omit<Agent, "initials" | "avatarUrl" | "avatarDesign"> & {
   avatarUrl: string | null;
+  avatarDesign?: unknown;
 };
 
 export function toAgent(agent: StoredAgent): Agent {
-  return { ...agent, avatarUrl: agent.avatarUrl ?? undefined, initials: agent.name.slice(0, 2) };
+  let avatarDesign: Agent['avatarDesign'];
+  if (agent.avatarDesign != null) {
+    try { avatarDesign = parseAvatarDesign(agent.avatarDesign); } catch { /* Use the preset for invalid stored designs. */ }
+  }
+  return { ...agent, avatarUrl: agent.avatarUrl ?? undefined, avatarDesign, initials: agent.name.slice(0, 2) };
 }
 
 export async function persistAgent(organizationId: string, profile: AgentProfile, id?: string): Promise<Agent> {
@@ -15,7 +21,7 @@ export async function persistAgent(organizationId: string, profile: AgentProfile
       method: id ? "PATCH" : "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...profile, avatarUrl: profile.avatarUrl ?? null }),
+      body: JSON.stringify({ ...profile, avatarUrl: profile.avatarUrl ?? null, avatarDesign: profile.avatarDesign ?? null }),
     },
   );
   const result = await response.json().catch(() => null);

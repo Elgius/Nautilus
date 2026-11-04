@@ -2,7 +2,8 @@
 
 import { useCallback, useRef, useState, useReducer, type CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowLeft, Bot, FileText, Link2, MessageSquare, Users, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { ArrowLeft, FileText, Link2, MessageSquare, Users, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { AgentPortrait } from "@/components/agents/agent-portrait";
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -66,7 +67,7 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
       </div>
       <div className="room-header-actions"><Button className="room-chat-toggle" variant="ghost" size="sm" aria-controls="room-chat" aria-expanded={!chatLayout.collapsed} onClick={() => updateChatLayout({ ...chatLayout, collapsed: !chatLayout.collapsed })}>{chatLayout.collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}{chatLayout.collapsed ? "Show chat" : "Hide chat"}</Button><div className="room-participants" aria-label="Room participants">
         {room.members.map(({ member }) => <span key={member.user.id} title={member.user.name}>{initials(member.user.name)}</span>)}
-        {room.agents.map(({ agent }) => <span key={agent.id} title={agent.name}><Bot size={14} /></span>)}
+        {room.agents.map(({ agent }) => <AgentPortrait key={agent.id} agent={agent} small />)}
       </div><Button variant="outline" size="sm" onClick={copyLink} aria-label="Copy room link"><Link2 size={14} /><span>Copy link</span></Button></div>
       </div>
       <nav className="room-document-navbar" aria-label="Document navigation">
@@ -105,7 +106,7 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
               <p role="status">{message.status === 'pending' ? 'Sending…' : 'Message failed'}{message.status === 'failed' && <Button variant="ghost" size="sm" disabled={!canSend} onClick={() => sendMessage(message.text, message.id)}>Retry</Button>}</p>
             </MessageContent></Message>
           </MessageScrollerItem>)}
-          <PrivateAgentConversation jobs={agentJobs} canSend={canSend} busy={agentBusy} retry={invokeAgent} />
+          <PrivateAgentConversation agents={room.agents.map(({ agent }) => agent)} jobs={agentJobs} canSend={canSend} busy={agentBusy} retry={invokeAgent} />
         </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton />

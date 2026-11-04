@@ -98,7 +98,10 @@ to `/api/organizations/:organizationId/agent_creator_agent`, which generates a
 purpose and rules with the AI SDK before saving the profile. Customization saves
 through `/api/organizations/:organizationId/agents/:agentId`. Creation and chat
 require the backend Gemini bindings described in `apps/server/README.md`. Uploaded avatars currently retain the existing
-2 MB limit and are stored as image data URLs in the agent row.
+2 MB limit and are stored as image data URLs in the agent row. Generated avatars
+are selected with **Use avatar** and saved with the agent as validated SVG path,
+color, and eye geometry in `avatarDesign`. They reload in the workspace and room
+agent portraits; selecting a preset clears the custom design.
 
 For Next.js hosting, set the project root directory to `apps/web` and include the
 monorepo root in the build context so the root lockfile and workspace are available.

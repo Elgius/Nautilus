@@ -1,9 +1,7 @@
-export const avatarColors = ["brown", "red", "orange", "amber", "green", "teal", "blue", "violet", "pink", "gray"] as const;
-export type AvatarColor = (typeof avatarColors)[number] | "coral";
-export const avatarShapes = ["circle", "oval", "square", "pill", "triangle", "hexagon", "cloud", "drop"] as const;
-export type AvatarShape = (typeof avatarShapes)[number];
-export type AvatarIcon =
-  "bot" | "sparkles" | "compass" | "code" | "book" | "chart" | AvatarShape;
+import type { AvatarDesign } from '../../../shared/avatar-design';
+import type { AvatarColor, AvatarIcon } from '../../../shared/agent-appearance';
+export { avatarColors, avatarColorValues, avatarShapes } from '../../../shared/agent-appearance';
+export type { AvatarColor, AvatarIcon, AvatarShape } from '../../../shared/agent-appearance';
 
 export type Agent = {
   id: string;
@@ -13,16 +11,17 @@ export type Agent = {
   color: AvatarColor;
   avatarIcon: AvatarIcon;
   avatarUrl?: string;
+  avatarDesign?: AvatarDesign;
   rules: string[];
   status: "Working" | "Available";
 };
 
 export type AgentProfile = Pick<
   Agent,
-  "name" | "role" | "color" | "avatarIcon" | "avatarUrl" | "rules"
+  "name" | "role" | "color" | "avatarIcon" | "avatarUrl" | "avatarDesign" | "rules"
 >;
 
 
-export type AgentCreationInput = Pick<AgentProfile, "name" | "color" | "avatarIcon" | "avatarUrl"> & {
+export type AgentCreationInput = Pick<AgentProfile, "name" | "color" | "avatarIcon" | "avatarUrl" | "avatarDesign"> & {
   description: string;
 };

@@ -3,18 +3,13 @@
 import { useState, type CSSProperties, type FormEvent } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { AgentShape } from "@/components/agents/agent-portrait";
-import { avatarColors, avatarShapes, type AgentCreationInput, type AvatarColor, type AvatarShape } from "@/lib/agent-data";
+import { avatarColors, avatarColorValues, avatarShapes, type AgentCreationInput, type AvatarColor, type AvatarShape } from "@/lib/agent-data";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
 import { AvatarGenerator } from "@/components/agents/avatar-generator";
-
-const avatarColorValues: Record<AvatarColor, string> = {
-  brown: "#a77943", red: "#ff2c4b", orange: "#ff7900", amber: "#ffb500",
-  green: "#00cd82", teal: "#00bfae", blue: "#0787f9", violet: "#9c5bfa",
-  pink: "#fa2ca4", gray: "#898989", coral: "#c66e5c",
-};
+import type { AvatarDesign } from "@/lib/avatar-generation";
 
 export function CreateAgentDialog({ organizationId, onClose, onCreate }: {
   organizationId: string | undefined;
@@ -24,6 +19,7 @@ export function CreateAgentDialog({ organizationId, onClose, onCreate }: {
   const [name, setName] = useState("");
   const [color, setColor] = useState<AvatarColor>("blue");
   const [shape, setShape] = useState<AvatarShape>("circle");
+  const [avatarDesign, setAvatarDesign] = useState<AvatarDesign>();
   const [step, setStep] = useState<"identity" | "work">("identity");
   const [work, setWork] = useState("");
   const [creating, setCreating] = useState(false);
@@ -42,7 +38,7 @@ export function CreateAgentDialog({ organizationId, onClose, onCreate }: {
     setCreating(true);
     setError("");
     try {
-      const message = await onCreate({ name: name.trim(), color, avatarIcon: shape, description: work.trim() });
+      const message = await onCreate({ name: name.trim(), color, avatarIcon: shape, avatarDesign, description: work.trim() });
       if (message) setError(message);
     } catch {
       setError("Couldn’t create this agent. Please try again.");
@@ -60,13 +56,15 @@ export function CreateAgentDialog({ organizationId, onClose, onCreate }: {
       >
         <DialogTitle className="sr-only">{avatarGeneratorOpen ? "Generate an avatar" : "Create agent"}</DialogTitle>
         <DialogDescription className="sr-only">
-          {avatarGeneratorOpen ? "Describe an avatar to generate a temporary preview." : step === "identity" ? "Choose your agent’s color, shape, and name to get started." : "Describe the work you want your agent to do."}
+          {avatarGeneratorOpen ? "Describe an avatar to use for your agent." : step === "identity" ? "Choose your agent’s color, shape, and name to get started." : "Describe the work you want your agent to do."}
         </DialogDescription>
         {avatarGeneratorOpen && organizationId ? (
-          <AvatarGenerator key={organizationId} organizationId={organizationId} shape={shape} onBack={() => setAvatarGeneratorOpen(false)} />
+          <AvatarGenerator key={organizationId} organizationId={organizationId} shape={shape} initialDesign={avatarDesign}
+            onBack={() => setAvatarGeneratorOpen(false)}
+            onUse={(design) => { setAvatarDesign(design); setAvatarGeneratorOpen(false); }} />
         ) : <form onSubmit={submit} aria-busy={creating}>
           <fieldset disabled={creating} className="create-agent-fields">
-            <div className="create-agent-preview"><AgentShape key={`${shape}-${color}`} shape={shape} animated /></div>
+            <div className="create-agent-preview"><AgentShape key={`${shape}-${color}`} shape={shape} design={avatarDesign} animated /></div>
             {step === "identity" ? (
               <>
                 <fieldset className="create-agent-colors">
@@ -79,7 +77,7 @@ export function CreateAgentDialog({ organizationId, onClose, onCreate }: {
                         aria-label={`${option} avatar color`}
                         aria-pressed={color === option}
                         style={{ "--swatch-color": avatarColorValues[option] } as CSSProperties}
-                        onClick={() => setColor(option)}
+                        onClick={() => { setColor(option); setAvatarDesign((design) => design ? { ...design, color: avatarColorValues[option] } : undefined); }}
                       ><span /></button>
                     ))}
                   </div>
@@ -88,7 +86,7 @@ export function CreateAgentDialog({ organizationId, onClose, onCreate }: {
                   <legend className="sr-only">Avatar shape</legend>
                   <div>
                     {avatarShapes.map((option) => (
-                      <button key={option} type="button" aria-label={`${option} avatar`} aria-pressed={shape === option} onClick={() => setShape(option)}>
+                      <button key={option} type="button" aria-label={`${option} avatar`} aria-pressed={!avatarDesign && shape === option} onClick={() => { setShape(option); setAvatarDesign(undefined); }}>
                         <AgentShape shape={option} />
                       </button>
                     ))}

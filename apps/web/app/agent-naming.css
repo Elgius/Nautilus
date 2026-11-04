@@ -140,6 +140,7 @@
 }
 .agent-upload-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 5px;
   margin-top: 10px;
 }
@@ -488,6 +489,7 @@
 }
 .create-agent-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: 16px;

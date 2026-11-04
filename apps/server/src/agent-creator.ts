@@ -1,6 +1,6 @@
 import { generateText, jsonSchema, Output, type LanguageModel } from 'ai'
 import { HTTPException } from 'hono/http-exception'
-import { parseAgentProfile, agentSelect } from './agents'
+import { parseAgentProfile, agentProfileData, agentSelect } from './agents'
 import type { Database } from './db'
 
 export function parseAgentCreation(value: unknown) {
@@ -13,11 +13,11 @@ export function parseAgentCreation(value: unknown) {
     throw new HTTPException(400, { message: 'Describe your agent in 1–6,000 characters.' })
   }
   // Reuse identity validation; purpose and rules always come from the creator.
-  const { name, nameKey, color, avatarIcon, avatarUrl } = parseAgentProfile({
+  const { name, nameKey, color, avatarIcon, avatarUrl, avatarDesign } = parseAgentProfile({
     name: input.name, color: input.color, avatarIcon: input.avatarIcon,
-    avatarUrl: input.avatarUrl, role: 'Pending', rules: [],
+    avatarUrl: input.avatarUrl, avatarDesign: input.avatarDesign, role: 'Pending', rules: [],
   })
-  return { name, nameKey, color, avatarIcon, avatarUrl, description }
+  return { name, nameKey, color, avatarIcon, avatarUrl, avatarDesign, description }
 }
 
 type AgentCreation = ReturnType<typeof parseAgentCreation>
@@ -70,5 +70,5 @@ export async function generateAgentInstructions(description: string, model: Lang
 
 export async function saveCreatedAgent(db: Database, organizationId: string, input: AgentCreation, instructions: AgentInstructions) {
   const profile = parseAgentProfile({ ...input, role: instructions.purpose, rules: instructions.rules })
-  return db.agent.create({ data: { ...profile, organizationId }, select: agentSelect })
+  return db.agent.create({ data: { ...agentProfileData(profile), organizationId }, select: agentSelect })
 }
