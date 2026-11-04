@@ -12,7 +12,7 @@ export type RoomRecord = {
   stars: { userId: string }[]; documents: RoomDocument[];
 };
 export type RoomMessage = {
-  id: string; text: string; createdAt: string; editedAt: string | null; authorUserId: string | null;
+  id: string; clientMessageId?: string | null; text: string; createdAt: string; editedAt: string | null; authorUserId: string | null;
   authorUser: { name: string } | null; authorAgent: { name: string } | null;
   documents: { documentId: string; documentVersionId: string | null; document: { title: string; kind: string } }[];
 };
@@ -33,12 +33,16 @@ export function toRoom(room: RoomRecord): Room {
   };
 }
 
+export class RoomRequestError extends Error {
+  constructor(message: string, public status: number) { super(message); }
+}
+
 export async function roomRequest<T>(organizationId: string, path = '', method = 'GET', body?: unknown): Promise<T> {
   const response = await fetch(`/api/organizations/${encodeURIComponent(organizationId)}/rooms${path}`, {
     method, credentials: 'include', cache: 'no-store',
     ...(body === undefined ? {} : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   });
   const result = await response.json().catch(() => null);
-  if (!response.ok || !result) throw new Error(result?.error || 'Couldn’t load or save this room. Please try again.');
+  if (!response.ok || !result) throw new RoomRequestError(result?.error || 'Couldn’t load or save this room. Please try again.', response.status);
   return result;
 }

@@ -1,18 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useReducer, type FormEvent, type CSSProperties } from "react";
+import { useCallback, useRef, useState, useReducer, type CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowUp, Bot, FileText, Link2, MessageSquare, Users, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { ArrowLeft, Bot, FileText, Link2, MessageSquare, Users, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
 import { MessageScrollerProvider, MessageScroller, MessageScrollerViewport, MessageScrollerContent, MessageScrollerItem, MessageScrollerButton } from "@/components/ui/message-scroller";
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
+import { RoomChatComposer } from "./room-chat-composer";
+import { PrivateAgentConversation } from "./private-agent-conversation";
 import { useWorkspaceSession } from "@/components/auth/workspace-session";
 import { initials } from "@/lib/auth-types";
 import { errorMessage } from "@/lib/auth-client";
-import { roomRequest, type RoomDetail, type RoomMessage } from "@/lib/room-client";
+import { roomRequest, type RoomDetail } from "@/lib/room-client";
+import { useRoomChat } from "./use-room-chat";
 import { RoomDocuments } from "./room-documents";
 import { useRoomLayout } from "./use-room-layout";
 import { clampChatWidth } from "@/lib/room-layout";
@@ -25,15 +27,9 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
   const [chatLayout, updateChatLayout] = useRoomLayout(session.user.id);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const panels = useRef<HTMLElement>(null);
-  const path = `/${encodeURIComponent(room.id)}`;
-  const [messages, setMessages] = useState(initialData.messages);
-  const [nextCursor, setNextCursor] = useState(initialData.nextCursor);
-  const [draft, setDraft] = useState("");
-  const [agentId, setAgentId] = useState(room.agents.length === 1 ? room.agents[0].agent.id : "");
-  const [failedReply, setFailedReply] = useState<{ messageId: string; agentId: string } | null>(null);
-  const [replying, setReplying] = useState(false);
-  const [sending, setSending] = useState(false), [loadingOlder, setLoadingOlder] = useState(false);
-  const [notice, setNotice] = useState("");
+  const [joined, setJoined] = useState(room.members.some(({ member }) => member.user.id === session.user.id));
+  const [joining, setJoining] = useState(false);
+  const { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, canSend, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage } = useRoomChat(organizationId, room.id, session.user.id, joined);
   const [mobilePanel, setMobilePanel] = useState<"chat" | "document">("chat");
   const [fileState, dispatchFiles] = useReducer(roomFileReducer, room.documents[0]?.id, initialRoomFileState);
   const [documentNavigation, setDocumentNavigation] = useState<HTMLDivElement | null>(null);
@@ -46,46 +42,20 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
       return next;
     });
   }, []);
-  useEffect(() => {
-    roomRequest(organizationId, `${path}/read`, 'POST', {}).catch(() => {});
-  }, [organizationId, path]);
-  async function sendMessage(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (sending || replying || !draft.trim()) return;
-    setSending(true); setNotice('');
+  async function joinRoom() {
+    setJoining(true);
     try {
-      const { message } = await roomRequest<{ message: RoomMessage }>(organizationId, `${path}/messages`, 'POST', {
-        text: draft,
-      });
-      setMessages((previous) => [...previous, message]); setDraft('');
-      if (agentId) await requestReply(message.id, agentId);
+      await roomRequest(organizationId, `/${encodeURIComponent(room.id)}/members`, 'POST', {});
+      setJoined(true);
     } catch (error) { setNotice(errorMessage(error)); }
-    finally { setSending(false); }
-  }
-  async function requestReply(messageId: string, selectedAgentId: string) {
-    setReplying(true); setFailedReply(null); setNotice('');
-    try {
-      const { message } = await roomRequest<{ message: RoomMessage }>(organizationId,
-        `${path}/messages/${encodeURIComponent(messageId)}/reply`, 'POST', { agentId: selectedAgentId });
-      setMessages((previous) => [...previous, message]);
-    } catch (error) {
-      setFailedReply({ messageId, agentId: selectedAgentId });
-      setNotice(`Your message is saved. ${errorMessage(error)}`);
-    } finally { setReplying(false); }
-  }
-  async function loadOlder() {
-    if (!nextCursor || loadingOlder) return;
-    setLoadingOlder(true);
-    try {
-      const result = await roomRequest<{ messages: RoomMessage[]; nextCursor: string | null }>(organizationId, `${path}/messages?before=${encodeURIComponent(nextCursor)}`);
-      setMessages((previous) => [...result.messages, ...previous]); setNextCursor(result.nextCursor);
-    } catch (error) { setNotice(errorMessage(error)); }
-    finally { setLoadingOlder(false); }
+    finally { setJoining(false); }
   }
   async function copyLink() {
     try { await navigator.clipboard.writeText(window.location.href); setNotice('Room link copied.'); }
     catch { setNotice('Copy the room link from your address bar.'); }
   }
+  const agentBusy = agentJobs.some((job) => job.status === "queued" || job.status === "running");
+  const typingNames = Object.entries(typing).filter(([id]) => id !== session.user.id).map(([, user]) => user.name).join(', ');
   return <div className="room-workspace">
     <header className="room-topbar">
       <div className="room-topbar-main">
@@ -111,45 +81,41 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
     <main ref={panels} className="room-panels" data-mobile-panel={mobilePanel} data-chat-collapsed={chatLayout.collapsed} style={{ '--room-chat-width': `${dragWidth ?? chatLayout.width}%` } as CSSProperties}>
       {chatLayout.collapsed && <div className="room-chat-rail"><Button variant="ghost" size="icon" aria-label="Expand room chat" title="Expand room chat" aria-controls="room-chat" aria-expanded={false} onClick={() => updateChatLayout({ ...chatLayout, collapsed: false })}><PanelLeftOpen size={16} /></Button></div>}
       <section className="room-chat-panel" id="room-chat" aria-label="Room chat">
-        <div className="room-panel-heading"><div><MessageSquare size={16} /><h2>Room chat</h2></div><div className="room-chat-heading-actions"><span><Users size={13} />{room.members.length + room.agents.length} participants</span><Button className="room-chat-collapse" variant="ghost" size="icon-sm" aria-label="Collapse room chat" title="Collapse room chat" aria-controls="room-chat" aria-expanded={!chatLayout.collapsed} onClick={() => updateChatLayout({ ...chatLayout, collapsed: true })}><PanelLeftClose size={16} /></Button></div></div>
+        <div className="room-panel-heading"><div><MessageSquare size={16} /><h2>Room chat</h2></div><div className="room-chat-heading-actions"><span><Users size={13} />{online.length} online · {room.members.length + (joined && !room.members.some(({ member }) => member.user.id === session.user.id) ? 1 : 0)} members</span><Button className="room-chat-collapse" variant="ghost" size="icon-sm" aria-label="Collapse room chat" title="Collapse room chat" aria-controls="room-chat" aria-expanded={!chatLayout.collapsed} onClick={() => updateChatLayout({ ...chatLayout, collapsed: true })}><PanelLeftClose size={16} /></Button></div></div>
         <MessageScrollerProvider autoScroll>
         <MessageScroller className="room-chat-scroller">
         <MessageScrollerViewport className="room-messages" aria-label="Conversation" tabIndex={0}>
         <MessageScrollerContent className="room-chat-content" aria-label="Conversation messages" aria-live="polite">
           {nextCursor && <Button variant="ghost" size="sm" onClick={loadOlder} disabled={loadingOlder}>{loadingOlder ? 'Loading…' : 'Load earlier messages'}</Button>}
-          {!messages.length && <div className="room-conversation-intro"><div className="room-intro-icon"><MessageSquare size={20} /></div><h3>A space to think together</h3><p>Share an idea, ask your agent a question, or work through a document with your team.</p></div>}
+          {!messages.length && <div className="room-conversation-intro"><div className="room-intro-icon"><MessageSquare size={20} /></div><h3>A space to think together</h3><p>Share an idea or work through a document with the people in this room.</p></div>}
           {messages.map((message) => {
-            const own = message.authorUserId === session.user.id, author = message.authorUser?.name || message.authorAgent?.name || 'Unknown author';
+            const own = message.authorUserId === session.user.id, author = message.authorUser?.name || 'Unknown author';
             return <MessageScrollerItem key={message.id} messageId={message.id} scrollAnchor={Boolean(message.authorUserId)}>
               <Message align={own ? 'end' : 'start'} className={`room-message ${own ? 'is-own' : ''}`} aria-label={`${author}, ${new Date(message.createdAt).toLocaleString()}`}>
-              <div className={`room-message-avatar ${message.authorAgent ? 'is-agent' : ''}`}>{message.authorAgent ? <Bot size={17} /> : initials(author)}</div>
-              <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>{own ? 'You' : author}</strong>{message.authorAgent && <span className="room-agent-label">Agent</span>}<time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></MessageHeader>
+              <div className="room-message-avatar">{initials(author)}</div>
+              <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>{own ? 'You' : author}</strong><time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></MessageHeader>
                 <Bubble variant={own ? 'muted' : 'ghost'} align={own ? 'end' : 'start'}><BubbleContent className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</BubbleContent></Bubble>
+                {own && <span className="room-message-meta">{Object.entries(reads).filter(([id, readAt]) => id !== session.user.id && readAt >= message.createdAt).length ? 'Seen' : 'Sent'}</span>}
                 {message.documents.map((attachment) => <Button variant="ghost" size="sm" key={attachment.documentId} className="room-document-reference" onClick={() => { dispatchFiles({ type: 'select', id: attachment.documentId }); setMobilePanel('document'); }}><FileText size={15} />{attachment.document.title}</Button>)}
               </MessageContent>
             </Message></MessageScrollerItem>;
           })}
-          {replying && <MessageScrollerItem messageId="agent-reply-pending"><Message><div className="room-message-avatar is-agent"><Bot size={17} /></div><MessageContent><p className="room-reply-status" role="status"><span className="room-reply-dots" aria-hidden="true"><i /><i /><i /></span>Agent is replying…</p></MessageContent></Message></MessageScrollerItem>}
+          {pending.map((message) => <MessageScrollerItem key={message.id} messageId={message.id}>
+            <Message align="end"><MessageContent><Bubble variant="muted" align="end"><BubbleContent className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</BubbleContent></Bubble>
+              <p role="status">{message.status === 'pending' ? 'Sending…' : 'Message failed'}{message.status === 'failed' && <Button variant="ghost" size="sm" disabled={!canSend} onClick={() => sendMessage(message.text, message.id)}>Retry</Button>}</p>
+            </MessageContent></Message>
+          </MessageScrollerItem>)}
+          <PrivateAgentConversation jobs={agentJobs} canSend={canSend} busy={agentBusy} retry={invokeAgent} />
         </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton />
         </MessageScroller>
         </MessageScrollerProvider>
         <div className="room-composer-area">
-          {failedReply && <Button variant="outline" size="sm" disabled={sending || replying} onClick={() => requestReply(failedReply.messageId, failedReply.agentId)}>Retry agent reply</Button>}
-          <form onSubmit={sendMessage} aria-busy={sending || replying}>
-          <InputGroup className="room-composer">
-          {room.agents.length > 0 && <InputGroupAddon align="block-start"><label className="room-agent-picker">Reply from
-            <select aria-label="Agent to reply" value={agentId} disabled={sending || replying} onChange={(event) => setAgentId(event.target.value)}>
-              <option value="">Team only</option>
-              {room.agents.map(({ agent }) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
-            </select>
-          </label></InputGroupAddon>}
-          <InputGroupTextarea aria-label="Message to room" placeholder="Share an idea or add some context…" value={draft} disabled={sending} onChange={(event) => setDraft(event.target.value)} rows={3} maxLength={20000}
-            onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
-          <InputGroupAddon align="block-end" className="room-composer-footer"><span>Enter to send · Shift + Enter for a new line</span><InputGroupButton variant="default" size="icon-sm" type="submit" disabled={sending || replying || !draft.trim()} aria-label="Send message"><ArrowUp size={17} /></InputGroupButton></InputGroupAddon>
-          </InputGroup>
-        </form><p className="room-local-note">Messages are saved to your organisation.</p></div>
+          {!joined && <Button variant="outline" size="sm" disabled={joining} onClick={joinRoom}>{joining ? 'Joining…' : 'Join room chat'}</Button>}
+          <p role="status">{joined ? status : 'Join this room to chat with its members.'}{typingNames ? ` · ${typingNames} typing…` : ''}</p>
+          <RoomChatComposer canSend={canSend} agents={agents} agentsLoading={agentsLoading} agentBusy={agentBusy} loadAgents={loadAgents} sendMessage={sendMessage} invokeAgent={invokeAgent} sendTyping={sendTyping} />
+        </div>
       </section>
       <div className="room-panel-resizer" role="separator" tabIndex={chatLayout.collapsed ? -1 : 0} aria-label="Resize room chat" aria-orientation="vertical" aria-valuemin={18} aria-valuemax={45} aria-valuenow={Math.round(dragWidth ?? chatLayout.width)}
         onPointerDown={(event) => { if (event.button === 0) { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); } }}

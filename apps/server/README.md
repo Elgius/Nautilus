@@ -230,3 +230,104 @@ is HTTP 201 with `{ agent }`, used immediately by the frontend to show the new
 agent and open its profile. Invalid input returns 400, duplicate names 409,
 missing AI configuration 503, and provider or structured-output failures 502.
 No profile is saved if generation fails. Existing profile CRUD routes remain available.
+
+## Room chat
+
+Room chat is shared by human room members. Agent chat remains on the dedicated
+agent API; the former room agent-reply and HTTP message/read endpoints are removed.
+Historical agent messages remain in the database and are excluded from user chat.
+
+The `ROOM_CHAT` Durable Object binding coordinates one room per organization/room
+ID pair. Wrangler includes the `room-chat-v1` SQLite Durable Object migration.
+Apply the Prisma migration `20261103090000_room_chat_delivery` before deploying the
+new API: it adds the nullable client message ID and its unique delivery constraint.
+Use `bun run --filter @nautilus/server db:deploy` against the intended database.
+
+The browser obtains a 30-second, single-use ticket using the normal authenticated
+API, then connects directly to the backend WebSocket URL. `ROOM_SOCKET_ORIGIN`
+optionally overrides the origin of that URL; otherwise it uses `BETTER_AUTH_URL`.
+Set it to the publicly reachable backend HTTP(S) origin if auth uses a different
+host. The URL is converted to `ws:`/`wss:` automatically. `WEB_ORIGIN` must match
+the browser's origin exactly; WebSocket upgrades check it explicitly. Production
+must use HTTPS/WSS. Do not log connection ticket query strings.
+
+Only a current organization and room member with a live session can connect or
+exchange events. An existing organization member can explicitly join through the
+room's Join room chat action. Access is rechecked for every event and recipient,
+and idle connections are checked every 30 seconds. Multiple tabs count as one
+online user. Typing expires after four seconds. Read timestamps are persisted;
+live read receipts are broadcast to connected members.
+
+All message delivery, history, reconnect replay, typing, presence, and read events
+use the WebSocket. The server saves before broadcasting and acknowledging. Clients
+retry with the same UUID; the unique room/user/client-message key prevents a second
+insert. Writes are serialized per room and timestamps advance monotonically so
+resume cursors cannot skip simultaneous posts. History/replay pages contain up to
+100 user messages, with room-scoped cursors. Events are limited to 40 per ten seconds
+per connection; text is limited to 20,000 characters.
+
+The UI keeps pending sends in memory while reconnecting. Refreshing or closing the
+tab discards unsent drafts/pending sends. Saved messages survive refreshes.
+
+Validation:
+
+```sh
+bun run --filter @nautilus/server test
+bun run --filter @nautilus/server test:room-socket
+```
+
+The runtime test uses real local workerd WebSockets and Durable Objects with an
+in-memory database boundary. It needs localhost listeners and does not touch the
+configured database. It covers delivery, acknowledgements, duplicate retries,
+205-message reconnect replay, room isolation, origin/ticket/session checks,
+revocation, typing, presence, and read receipts.
+
+### Private @ agent instructions
+
+Typing a standalone `@` in the room composer loads agents assigned to that room.
+Select an agent with the mouse or Arrow/Enter keys. Text after the mention becomes
+that user's private instruction. Text before it stays as an unsent room draft.
+The selected agent chip and private conversation show “Only you.” Private mode does
+not emit the room typing indicator. An unresolved mention cannot be sent as a
+public room message; email addresses continue to work as ordinary text.
+
+Agent profiles are organization resources assigned to rooms. Each user's execution
+and conversation history are private, even when two people select the same agent.
+The server checks live room membership and the agent's room/organization assignment,
+and derives the owner from the authenticated WebSocket. Client-supplied user IDs
+are ignored. The model receives only that user's completed conversation turns with
+that agent, plus the new instruction and the saved agent profile. Room messages and
+other users' instructions are never added to that context.
+
+`agent.list`, `agent.invoke`, and `agent.history` use the room WebSocket. Results
+stream as `agent.update` snapshots with monotonic revisions. Instructions and
+replies are sent only to the owner's currently authorized connections in this room,
+including their other tabs. They never pass through the shared broadcast function
+or `RoomMessage`, and are excluded from shared history and reconnect replay.
+
+Private jobs are stored in the room Durable Object's SQLite-backed storage under
+user-scoped keys. The latest 50 turns per user/room are retained; this is also the
+idempotency window for private request IDs. Reconnecting restores private history
+and retries unacknowledged invocations with their original ID. An accepted request
+is not automatically rerun. Interrupted jobs become failed; “Retry privately” starts
+a new request. One private generation per user/room may run at a time, independently
+of other users and the human room-message queue. Model output is bounded and errors
+are sanitized. AI requires the existing `GOOGLE_GENERATIVE_AI_API_KEY` and `AI_MODEL`
+Worker bindings; room messaging and agent selection still work without AI configured.
+
+This private-agent addition uses the existing Durable Object binding and requires
+no additional database migration. The room chat migration described above is still
+required if it has not already been applied.
+
+Additional checks:
+
+```sh
+bun run --filter @nautilus/web test:room-composer
+bun run --filter @nautilus/server test:room-socket
+```
+
+The composer check runs in an isolated DOM process. Runtime tests verify private
+payload isolation across users, same-user tabs, spoofed history owners, duplicate
+invocations, unassigned agents, and nonblocking shared chat while an agent streams.
+They replace the model provider and database boundary, so they never send private
+instructions to a live provider or alter the configured database.

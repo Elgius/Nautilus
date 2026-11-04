@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "bun test tests"
+    "test": "bun test tests",
+    "test:room-composer": "bun tests/room-chat-composer.ui.tsx"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
@@ -36,8 +37,10 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@univerjs/ui": "1.2.0",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
+    "happy-dom": "20.8.4",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

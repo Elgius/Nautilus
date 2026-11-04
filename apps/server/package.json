@@ -11,7 +11,8 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:bootstrap-admin": "bun scripts/bootstrap-admin.ts",
-    "test": "bun test tests"
+    "test": "bun test tests",
+    "test:room-socket": "node tests/room-chat.runtime.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.107",
@@ -26,6 +27,8 @@
   "devDependencies": {
     "@types/bun": "^1.4.4",
     "dotenv": "^18.0.9",
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261019.2-beta",
     "prisma": "7",
     "typescript": "^5",
     "wrangler": "^4.110.0"
