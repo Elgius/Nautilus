@@ -128,17 +128,18 @@ Set runtime secrets through Wrangler secrets or Cloudflare's dashboard, includin
 The backend uses Vercel AI SDK 7 (`ai`) and its `ToolLoopAgent` abstraction.
 `src/ai.ts` creates reusable agents with both `generate()` and `stream()` methods.
 Their instructions come from the saved agent name, purpose, and ordered rules.
-Calls use the AI SDK Google provider (`@ai-sdk/google`) directly, configured per
-request from Cloudflare bindings:
+Calls use the AI SDK OpenAI provider (`@ai-sdk/openai`) directly through the
+Responses API, configured per request from Cloudflare bindings:
 
-- `GOOGLE_GENERATIVE_AI_API_KEY`: Gemini API key; add it to the local `.env` when
-  ready and use `bunx wrangler secret put GOOGLE_GENERATIVE_AI_API_KEY` from
-  `apps/server` for production.
-- `AI_MODEL`: Gemini model ID, currently `gemini-3.6-flash` in the environment
-  files. The model remains configurable without changing application code.
+- `OPENAI_API_KEY`: server-only OpenAI API key. Add it to the local `.env` and use
+  `bunx wrangler secret put OPENAI_API_KEY` from `apps/server` for production.
+- `LLM_MODEL`: an OpenAI text model ID supporting Responses and Structured Outputs.
+  Set it in the local `.env` and use `bunx wrangler secret put LLM_MODEL` for production.
+  There is no hard-coded default.
 
-Both bindings are required for AI creation and chat. Missing configuration
-returns 503 for those requests while other endpoints continue working.
+Requests set `store: false`; Nautilus supplies conversation history. Missing
+configuration returns 503 for agent requests while other endpoints continue working.
+Reasoning effort uses model defaults; the room selector remains UI-only.
 
 `POST /api/organizations/:organizationId/agents/:agentId/chat` requires a signed-in
 member and the trusted `Origin`, with the same tenant isolation as agent profiles.
@@ -312,7 +313,7 @@ and retries unacknowledged invocations with their original ID. An accepted reque
 is not automatically rerun. Interrupted jobs become failed; “Retry privately” starts
 a new request. One private generation per user/room may run at a time, independently
 of other users and the human room-message queue. Model output is bounded and errors
-are sanitized. AI requires the existing `GOOGLE_GENERATIVE_AI_API_KEY` and `AI_MODEL`
+are sanitized. AI requires the existing `OPENAI_API_KEY` and `LLM_MODEL`
 Worker bindings; room messaging and agent selection still work without AI configured.
 
 This private-agent addition uses the existing Durable Object binding and requires
@@ -331,3 +332,25 @@ payload isolation across users, same-user tabs, spoofed history owners, duplicat
 invocations, unassigned agents, and nonblocking shared chat while an agent streams.
 They replace the model provider and database boundary, so they never send private
 instructions to a live provider or alter the configured database.
+
+### Room prompt suggestions
+
+`POST /api/organizations/:organizationId/rooms/:roomId/suggestions` requires a live
+session and room membership. The server reads the latest five public user messages
+from that room, orders them chronologically, and requests three short prompts via
+OpenAI Responses with strict structured output and `store: false`. It uses the
+existing `OPENAI_API_KEY` and `LLM_MODEL` bindings. No client-supplied history,
+private agent exchanges, files, or document content enters the request.
+
+The room Durable Object shares concurrent requests, persists a cache keyed by the
+five messages (including text and edits), and permits at most one generation attempt
+per 30 seconds. Each input message is capped at 4,000 characters, generation has a
+15-second timeout, and errors return an empty suggestion list without provider details.
+Cooldown responses include `retryAfterMs`. Empty rooms skip generation entirely.
+
+The browser debounces refreshes after room messages change and retains the static
+prompts when generation is unavailable. Clicking a prompt only fills the draft.
+Reasoning effort remains a local UI preference and is not included in this endpoint.
+
+Checks: `bun test apps/server/tests/room-suggestions.test.ts` and
+`bun --cwd apps/web tests/room-suggestions.ui.tsx` from the repository root.

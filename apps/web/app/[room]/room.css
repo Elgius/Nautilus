@@ -254,14 +254,37 @@
 }
 .room-composer-footer {
   display: flex;
-  justify-content: space-between;
   gap: 8px;
   align-items: center;
 }
-.room-composer-footer > span {
-  font-size: 8px;
+.room-prompt-form { min-width: 0; }
+.room-chat-suggestions {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding: 3px 1px 10px;
+}
+.room-chat-suggestions::-webkit-scrollbar { display: none; }
+.room-chat-suggestions > button { font-size: 11px; border-radius: 999px; }
+.room-prompt-attachments {
+  overflow-x: auto;
+  max-height: 144px;
+  align-items: stretch;
+  scrollbar-width: thin;
+}
+.room-prompt-attachments > [data-slot="attachment"] { max-width: min(250px, 100%); }
+.room-reasoning-trigger {
+  min-width: 0;
+  height: 30px;
+  padding-inline: 7px;
+  border-color: transparent;
+  gap: 5px;
+  font-size: 11px;
   color: var(--muted-foreground);
 }
+.room-reasoning-trigger:hover { background: var(--muted); }
 .room-local-note {
   margin-top: 10px;
   font-size: 9px;

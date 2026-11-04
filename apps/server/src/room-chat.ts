@@ -1,4 +1,7 @@
 import { DurableObject } from 'cloudflare:workers'
+import { HTTPException } from 'hono/http-exception'
+import { createAgentModel } from './ai'
+import { generateRoomSuggestions, RoomSuggestions, suggestionHistory } from './room-suggestions'
 import type { Bindings } from './env'
 import { createDatabase, type Database } from './db'
 import { canChat, chatHistory, parseSend, saveChatMessage, type ChatIdentity } from './room-chat-service'
@@ -9,6 +12,15 @@ import type { PrivateAgentEvent } from '../../../shared/room-chat'
 type Attachment = { identity: ChatIdentity; window: number; count: number }
 export class RoomChat extends DurableObject<Bindings> {
   private privateAgents?: PrivateRoomAgents
+  private suggestions?: RoomSuggestions
+  private get suggestionService() {
+    return this.suggestions ??= new RoomSuggestions({
+      storage: this.ctx.storage,
+      canAccess: (identity) => this.withDatabase(async (db) => Boolean(await canChat(db, identity))),
+      history: (identity) => this.withDatabase((db) => suggestionHistory(db, identity)),
+      generate: (messages) => generateRoomSuggestions(messages, createAgentModel(this.env)),
+    })
+  }
   private async withDatabase<T>(operation: (db: Database) => Promise<T>) {
     const db = createDatabase(this.env.DATABASE_URL)
     try { return await operation(db) } finally { await db.$disconnect() }
@@ -42,6 +54,15 @@ export class RoomChat extends DurableObject<Bindings> {
   private queue: Promise<void> = Promise.resolve()
   async fetch(request: Request) {
     const url = new URL(request.url)
+    if (url.pathname === '/suggestions' && request.method === 'POST') {
+      const identity = await request.json<ChatIdentity>()
+      try {
+        return Response.json(await this.suggestionService.get(identity), { headers: { 'Cache-Control': 'no-store' } })
+      } catch (error) {
+        const status = error instanceof HTTPException ? error.status : 503
+        return Response.json({ error: 'Chat suggestions are unavailable.' }, { status, headers: { 'Cache-Control': 'no-store' } })
+      }
+    }
     if (url.pathname === '/ticket' && request.method === 'POST') {
       const identity = await request.json<ChatIdentity>()
       const ticket = crypto.randomUUID()

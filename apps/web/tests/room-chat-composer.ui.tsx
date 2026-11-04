@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { GlobalWindow as Window } from 'happy-dom';
 
 const dom = new Window({ url: 'http://localhost:3000' });
-for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'Node', 'Event', 'KeyboardEvent', 'MouseEvent', 'MutationObserver'] as const) {
+for (const key of ['window', 'document', 'navigator', 'Element', 'HTMLElement', 'HTMLInputElement', 'HTMLTextAreaElement', 'Node', 'Event', 'KeyboardEvent', 'MouseEvent', 'MutationObserver', 'ResizeObserver'] as const) {
   Object.defineProperty(globalThis, key, { configurable: true, value: key === 'window' ? dom : dom[key as keyof Window] });
 }
-Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom) });
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, requestAnimationFrame: dom.requestAnimationFrame.bind(dom), cancelAnimationFrame: dom.cancelAnimationFrame.bind(dom), getComputedStyle: dom.getComputedStyle.bind(dom) });
 const { act, createElement } = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { RoomChatComposer } = await import('../components/room/room-chat-composer');
@@ -34,6 +34,25 @@ async function key(key: string) {
 async function click(selector: string) { await act(async () => { (container.querySelector(selector)! as HTMLButtonElement).click(); }); }
 try {
   await act(async () => { root.render(createElement(RoomChatComposer, props)); });
+  await click('.room-chat-suggestions button');
+  assert.equal(container.querySelector('textarea')!.value, 'Summarize the discussion');
+  assert.equal(document.activeElement, container.querySelector('textarea'));
+  assert.equal(typing, 0); assert.deepEqual(publicSends, []); assert.equal(loads, 0);
+  const localFile = new dom.File(['Local preview'], 'notes.txt', { type: 'text/plain' });
+  await act(async () => {
+    const input = container.querySelector('input[type="file"]')!;
+    Object.defineProperty(input, 'files', { configurable: true, value: [localFile] });
+    input.dispatchEvent(new dom.Event('change', { bubbles: true }) as unknown as Event);
+  });
+  assert.match(container.textContent!, /notes.txt/);
+  assert.match(container.textContent!, /Local only/);
+  assert.equal((container.querySelector('button[type="submit"]') as HTMLButtonElement).disabled, true);
+  await act(async () => { container.querySelector('form')!.dispatchEvent(new dom.Event('submit', { bubbles: true, cancelable: true }) as unknown as Event); });
+  assert.equal(publicSends.length, 0); assert.equal(privateSends.length, 0); assert.equal(typing, 0); assert.equal(loads, 0);
+  assert.equal(container.querySelector('textarea')!.value, 'Summarize the discussion');
+  await click('button[aria-label="Remove notes.txt"]');
+  assert.equal(container.querySelector('[data-slot="attachment"]'), null);
+  assert.equal((container.querySelector('button[type="submit"]') as HTMLButtonElement).disabled, false);
   await type('Hello team @');
   assert.equal(loads, 1); assert.equal(container.querySelectorAll('[role="option"]').length, 2);
   await type('Hello team @Scout summarize privately');
@@ -61,7 +80,16 @@ try {
   await type('Only to Scribe'); await click('button[type="submit"]');
   assert.equal(privateSends.at(-1)!.agentId, 'scribe');
   assert.equal(privateSends.at(-1)!.instruction, 'Only to Scribe');
-  console.log('Composer interaction checks passed: @ loading, keyboard selection, private routing, private typing, preserved room draft, and unresolved-mention protection.');
+  await click('.room-chat-suggestions button');
+  assert.equal(container.querySelector('textarea')!.value, 'Summarize the discussion');
+  assert.equal(privateSends.length, 2); assert.equal(publicSends.length, 2);
+  await click('button[aria-label="Return to room chat"]');
+  assert.equal(container.querySelector('textarea')!.value, '');
+  await act(async () => { root.render(createElement(RoomChatComposer, { ...props, suggestions: ['Review the launch plan', 'Clarify the target audience', 'Draft a release checklist'] })); });
+  await click('.room-chat-suggestions button');
+  assert.equal(container.querySelector('textarea')!.value, 'Review the launch plan');
+  assert.equal(publicSends.length, 2); assert.equal(privateSends.length, 2);
+  console.log('Composer interaction checks passed: local suggestions and attachments, blocked attachment sends, @ loading, keyboard selection, private routing, private typing, preserved room draft, and unresolved-mention protection.');
 } finally {
   await act(async () => { root.unmount(); });
   await dom.happyDOM.close();

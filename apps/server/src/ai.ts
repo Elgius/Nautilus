@@ -1,5 +1,5 @@
-import { createGoogle } from '@ai-sdk/google'
-import { isStepCount, ToolLoopAgent, type LanguageModel } from 'ai'
+import { createOpenAI, type OpenAILanguageModelResponsesOptions } from '@ai-sdk/openai'
+import { defaultSettingsMiddleware, isStepCount, ToolLoopAgent, wrapLanguageModel, type LanguageModel } from 'ai'
 import { HTTPException } from 'hono/http-exception'
 import type { Bindings } from './env'
 
@@ -8,15 +8,23 @@ type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
 // Resolve per request: Cloudflare supplies secrets through bindings, not process.env.
 export function createAgentModel(env: Bindings): LanguageModel {
-  const apiKey = env.GOOGLE_GENERATIVE_AI_API_KEY?.trim()
-  const model = env.AI_MODEL?.trim()
+  const apiKey = env.OPENAI_API_KEY?.trim()
+  const model = env.LLM_MODEL?.trim()
   if (!apiKey || !model) {
     throw new HTTPException(503, { message: 'Agent AI is not configured.' })
   }
-  if (!/^gemini-[a-zA-Z0-9._-]+$/.test(model)) {
+  if (!/^(?:gpt-[a-zA-Z0-9._-]+|o\d[a-zA-Z0-9._-]*)$/.test(model)) {
     throw new HTTPException(503, { message: 'Agent AI model configuration is invalid.' })
   }
-  return createGoogle({ apiKey })(model)
+  // Keep all workflows stateless at the provider; Nautilus supplies their history.
+  const options: OpenAILanguageModelResponsesOptions = {
+    store: false,
+    reasoningSummary: null,
+  }
+  return wrapLanguageModel({
+    model: createOpenAI({ apiKey }).responses(model),
+    middleware: defaultSettingsMiddleware({ settings: { providerOptions: { openai: options } } }),
+  })
 }
 
 // The same agent supports generate() and stream() for future backend workflows.
