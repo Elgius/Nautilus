@@ -32,12 +32,26 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
     if (!enabled) return;
     let disposed = false, attempt = 0;
     let timer: ReturnType<typeof setTimeout>;
+    let readTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastReadSent = 0;
     let heartbeat: ReturnType<typeof setInterval>;
     let lastResponse = Date.now();
     let replaying = true;
     let initialSync = true;
     let socket: WebSocket | null = null;
     const send = (event: object) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(event)); };
+    const markRead = () => {
+      if (disposed || document.visibilityState !== "visible" || socket?.readyState !== WebSocket.OPEN) return;
+      if (readTimer !== undefined) return;
+      const delay = Math.max(0, 1000 - (Date.now() - lastReadSent));
+      if (delay) {
+        // Keep a trailing receipt so the last message in a burst is marked read.
+        readTimer = setTimeout(() => { readTimer = undefined; markRead(); }, delay);
+      } else {
+        lastReadSent = Date.now();
+        send({ type: "read" });
+      }
+    };
     const merge = (incoming: RoomMessage[]) => {
       setMessages((previous) => {
         const map = new Map(previous.map((message) => [message.id, message]));
@@ -79,7 +93,7 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
             }
             replaying = false; ready.current = true;
             setStatus("Connected");
-            if (document.visibilityState === "visible") send({ type: "read" });
+            markRead();
             for (const [requestId, input] of agentOutbox.current) send({ type: "agent.invoke", requestId, ...input });
             for (const [clientMessageId, text] of outbox.current) send({ type: "send", requestId: clientMessageId, clientMessageId, text });
           } else if (event.type === "history") {
@@ -95,7 +109,7 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
               setPending((previous) => previous.filter((message) => message.id !== event.requestId));
             }
             if (!replaying && event.message.createdAt > latestTime.current) { latest.current = event.message.id; latestTime.current = event.message.createdAt; }
-            if (document.visibilityState === "visible") send({ type: "read" });
+            markRead();
           } else if (event.type === "agent.list") {
             setAgents(event.agents); setAgentsLoading(false);
           } else if (event.type === "agent.history") {
@@ -128,6 +142,7 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
           }
         };
         socket.onclose = (event) => {
+          clearTimeout(readTimer); readTimer = undefined; lastReadSent = 0;
           ready.current = false; clearInterval(heartbeat); setLoadingOlder(false); setOnline([]); setAgentsLoading(false);
           if (disposed) return;
           if (event.code === 4003) {
@@ -159,9 +174,8 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
       return entries.length === Object.keys(previous).length ? previous : Object.fromEntries(entries);
     }), 1000);
     void connect();
-    const markRead = () => { if (document.visibilityState === "visible") send({ type: "read" }); };
     document.addEventListener("visibilitychange", markRead);
-    return () => { disposed = true; clearInterval(typingExpiry); clearTimeout(timer); clearInterval(heartbeat); socket?.close(); connection.current = null; ready.current = false; document.removeEventListener("visibilitychange", markRead); };
+    return () => { disposed = true; clearInterval(typingExpiry); clearTimeout(timer); clearTimeout(readTimer); clearInterval(heartbeat); socket?.close(); connection.current = null; ready.current = false; document.removeEventListener("visibilitychange", markRead); };
   }, [organizationId, roomId, userId, enabled]);
   function sendMessage(text: string, retryId?: string) {
     if (!enabled || blocked) return false;

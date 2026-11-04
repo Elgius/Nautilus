@@ -118,7 +118,7 @@ function providerError(statusCode: number, retryable = true, responseBody?: stri
   })
 }
 
-test('retries temporary Gemini failures and recovers without changing the description', async () => {
+test('retries temporary OpenAI failures and recovers without changing the description', async () => {
   const { model: success } = harness()
   let attempts = 0
   const model = new MockLanguageModelV4({ doGenerate: async (options) => {
@@ -152,20 +152,17 @@ test('rate limits and timeouts have separate safe errors', async () => {
   await expect(generateAvatarPreview('a game console', slow)).rejects.toMatchObject({ status: 504, message: 'Avatar generation took too long. Please try again.' })
 })
 
-test('daily Gemini quota exhaustion is not retried and returns the actual provider cooldown', async () => {
-  const body = JSON.stringify({ error: { message: 'private project and quota information', details: [
-    { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [
-      { quotaMetric: 'generativelanguage.googleapis.com/generate_content_free_tier_requests', quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier', quotaValue: '20' },
-    ] },
-    { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '71886s' },
-  ] } })
-  const { request, model } = harness(avatar, providerError(429, true, body))
+test('OpenAI quota exhaustion is not retried and does not fabricate a reset time', async () => {
+  const body = JSON.stringify({ error: { message: 'private project and quota information', code: 'insufficient_quota', type: 'insufficient_quota' } })
+  const error = providerError(429, true, body)
+  delete error.responseHeaders!['retry-after-ms']
+  const { request, model } = harness(avatar, error)
   const response = await request({ description: 'a sunflower' })
   expect(response.status).toBe(429)
-  expect(response.headers.get('Retry-After')).toBe('71886')
+  expect(response.headers.get('Retry-After')).toBeNull()
   expect(await response.json()).toEqual({
-    error: 'Gemini’s daily generation quota has been reached. Try again after it resets, or ask your administrator to review the API quota.',
-    code: 'quota_exhausted', retryAfterSeconds: 71886,
+    error: 'The avatar service’s OpenAI quota has been exhausted. Ask your administrator to review API billing and usage limits.',
+    code: 'quota_exhausted',
   })
   expect(model.doGenerateCalls).toHaveLength(1)
 })
@@ -178,11 +175,11 @@ test('malformed quota metadata stays safe and does not fabricate a reset time', 
   expect(model.doGenerateCalls).toHaveLength(1)
 })
 
-test('Gemini thinking models reserve output budget for the generated SVG details', async () => {
+test('avatar generation retains the output budget without Google-specific options', async () => {
   const { model: success } = harness()
-  const model = new MockLanguageModelV4({ provider: 'google.generative-ai', modelId: 'gemini-3.6-flash', doGenerate: (options) => success.doGenerate(options) })
+  const model = new MockLanguageModelV4({ provider: 'openai.responses', modelId: 'gpt-test', doGenerate: (options) => success.doGenerate(options) })
   expect(await generateAvatarPreview('a game console', model)).toEqual(avatar)
-  expect(model.doGenerateCalls[0].providerOptions).toMatchObject({ google: { thinkingConfig: { thinkingLevel: 'low' } } })
+  expect(model.doGenerateCalls[0].providerOptions?.google).toBeUndefined()
   expect(model.doGenerateCalls[0].maxOutputTokens).toBe(4096)
 })
 

@@ -55,6 +55,17 @@ rooms.use('/:roomId/*', async (c, next) => {
   await next()
 })
 
+// Server-authored identity only; the client cannot submit history or another user ID.
+rooms.post('/:roomId/suggestions', async (c) => {
+  const identity = { organizationId: c.get('organizationId'), roomId: c.req.param('roomId'),
+    userId: c.get('session').user.id, sessionId: c.get('session').session.id }
+  if (!await canChat(c.get('db'), identity)) throw new HTTPException(403, { message: 'Join this room to use chat suggestions.' })
+  if (!c.env.ROOM_CHAT) return c.json({ suggestions: [] })
+  const coordinator = c.env.ROOM_CHAT.get(c.env.ROOM_CHAT.idFromName(JSON.stringify([identity.organizationId, identity.roomId])))
+  const response = await coordinator.fetch(new Request('https://room.internal/suggestions', { method: 'POST', body: JSON.stringify(identity) }))
+  return new Response(response.body, { status: response.status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+})
+
 rooms.post('/:roomId/socket-ticket', async (c) => {
   if (!c.env.ROOM_CHAT) throw new HTTPException(503, { message: 'Room chat is not configured.' })
   const identity = { organizationId: c.get('organizationId'), roomId: c.req.param('roomId'),

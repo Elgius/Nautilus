@@ -38,8 +38,6 @@ const avatarSchema = jsonSchema<AvatarDesign>({
 export async function generateAvatarPreview(description: string, model: LanguageModel, abortSignal?: AbortSignal) {
   let finishReason: string | undefined
   try {
-    const googleThinkingModel = typeof model !== 'string' && model.provider.startsWith('google') &&
-      Number(/^gemini-(\d+)/.exec(model.modelId)?.[1]) >= 3
     const result = await generateText({
       model: typeof model === 'string' ? model : wrapLanguageModel({ model, middleware: {
         specificationVersion: 'v4',
@@ -71,9 +69,6 @@ export async function generateAvatarPreview(description: string, model: Language
       ].join('\n'),
       prompt: JSON.stringify({ description }),
       output: Output.object({ name: 'avatar_preview', schema: avatarSchema }),
-      // Thinking shares the output budget. A small geometry task should leave
-      // room for the actual JSON rather than exhaust the cap on reasoning.
-      ...(googleThinkingModel ? { providerOptions: { google: { thinkingConfig: { thinkingLevel: 'low' } } } } : {}),
       // Use the SDK's bounded exponential-backoff retry policy for transient outages.
       maxOutputTokens: 4096, timeout: 60_000, abortSignal,
     })
@@ -83,7 +78,7 @@ export async function generateAvatarPreview(description: string, model: Language
     if (abortSignal?.aborted) throw new HTTPException(408, { message: 'Avatar generation cancelled.' })
     const cause = RetryError.isInstance(error) ? error.lastError : error
     if (cause instanceof AvatarRateLimitError) {
-      console.warn('Avatar generation limited', { reason: cause.quotaExhausted ? 'daily_quota' : 'rate_limit', retryAfterSeconds: cause.retryAfterSeconds })
+      console.warn('Avatar generation limited', { reason: cause.quotaExhausted ? 'quota_exhausted' : 'rate_limit', retryAfterSeconds: cause.retryAfterSeconds })
       throw cause
     }
     const providerStatus = APICallError.isInstance(cause) ? cause.statusCode : undefined

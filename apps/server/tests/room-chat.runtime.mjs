@@ -49,6 +49,25 @@ const send = (socket, event) => socket.send(JSON.stringify(event))
 try {
   const lifecycle = await mf.dispatchFetch('https://api.test/lifecycle-regression')
   assert.equal(lifecycle.status, 200, await lifecycle.text())
+  // A passive reader's automatic receipts cannot exhaust their send allowance.
+  const busySender = await connect('alice', 'busy-room'), busyReader = await connect('bob', 'busy-room')
+  for (let index = 0; index < 40; index++) {
+    const id = crypto.randomUUID()
+    send(busySender, { type: 'send', requestId: id, clientMessageId: id, text: `Burst ${index}` })
+    await receive(busySender, 'ack')
+    await receive(busyReader, 'message')
+    send(busyReader, { type: 'read' })
+    await receive(busyReader, 'read')
+  }
+  const replyId = crypto.randomUUID()
+  send(busyReader, { type: 'send', requestId: replyId, clientMessageId: replyId, text: 'My first message' })
+  assert.equal((await receive(busyReader, 'ack')).requestId, replyId)
+  // Both allowances remain bounded independently.
+  send(busyReader, { type: 'read', requestId: 'receipt-limit' })
+  assert.equal((await receive(busyReader, 'error')).requestId, 'receipt-limit')
+  const overflowId = crypto.randomUUID()
+  send(busySender, { type: 'send', requestId: overflowId, clientMessageId: overflowId, text: 'Over the send limit' })
+  assert.equal((await receive(busySender, 'error')).requestId, overflowId)
   assert.equal((await upgrade(await ticket('alice'), 'room', 'https://evil.test')).status, 403)
   assert.equal((await upgrade(await ticket('outsider'))).status, 403)
   assert.equal((await upgrade(await ticket('expired'))).status, 403)

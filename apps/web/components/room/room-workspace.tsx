@@ -16,6 +16,7 @@ import { initials } from "@/lib/auth-types";
 import { errorMessage } from "@/lib/auth-client";
 import { roomRequest, type RoomDetail } from "@/lib/room-client";
 import { useRoomChat } from "./use-room-chat";
+import { useRoomSuggestions } from "./use-room-suggestions";
 import { RoomDocuments } from "./room-documents";
 import { useRoomLayout } from "./use-room-layout";
 import { clampChatWidth } from "@/lib/room-layout";
@@ -31,6 +32,7 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
   const [joined, setJoined] = useState(room.members.some(({ member }) => member.user.id === session.user.id));
   const [joining, setJoining] = useState(false);
   const { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, canSend, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage } = useRoomChat(organizationId, room.id, session.user.id, joined);
+  const suggestions = useRoomSuggestions(organizationId, room.id, session.user.id, joined, messages);
   const [mobilePanel, setMobilePanel] = useState<"chat" | "document">("chat");
   const [fileState, dispatchFiles] = useReducer(roomFileReducer, room.documents[0]?.id, initialRoomFileState);
   const [documentNavigation, setDocumentNavigation] = useState<HTMLDivElement | null>(null);
@@ -115,7 +117,7 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
         <div className="room-composer-area">
           {!joined && <Button variant="outline" size="sm" disabled={joining} onClick={joinRoom}>{joining ? 'Joining…' : 'Join room chat'}</Button>}
           <p role="status">{joined ? status : 'Join this room to chat with its members.'}{typingNames ? ` · ${typingNames} typing…` : ''}</p>
-          <RoomChatComposer canSend={canSend} agents={agents} agentsLoading={agentsLoading} agentBusy={agentBusy} loadAgents={loadAgents} sendMessage={sendMessage} invokeAgent={invokeAgent} sendTyping={sendTyping} />
+          <RoomChatComposer suggestions={suggestions} canSend={canSend} agents={agents} agentsLoading={agentsLoading} agentBusy={agentBusy} loadAgents={loadAgents} sendMessage={sendMessage} invokeAgent={invokeAgent} sendTyping={sendTyping} />
         </div>
       </section>
       <div className="room-panel-resizer" role="separator" tabIndex={chatLayout.collapsed ? -1 : 0} aria-label="Resize room chat" aria-orientation="vertical" aria-valuemin={18} aria-valuemax={45} aria-valuenow={Math.round(dragWidth ?? chatLayout.width)}

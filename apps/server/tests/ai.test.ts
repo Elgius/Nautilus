@@ -69,8 +69,12 @@ test('chat input accepts text history and strips caller-controlled model and ins
 test('model configuration is optional for the server but required for agent calls', () => {
   const env = {} as Bindings
   expect(() => createAgentModel(env)).toThrow('not configured')
-  expect(() => createAgentModel({ ...env, AI_MODEL: 'gemini-3.6-flash' })).toThrow('not configured')
-  expect(() => createAgentModel({ ...env, GOOGLE_GENERATIVE_AI_API_KEY: 'test', AI_MODEL: 'invalid' })).toThrow('invalid')
-  const model = createAgentModel({ ...env, GOOGLE_GENERATIVE_AI_API_KEY: 'test', AI_MODEL: 'gemini-3.6-flash' })
-  expect(model).toMatchObject({ modelId: 'gemini-3.6-flash', provider: 'google.generative-ai' })
+  expect(() => createAgentModel({ ...env, LLM_MODEL: 'gpt-test' })).toThrow('not configured')
+  for (const LLM_MODEL of ['invalid', 'gemini-3.6-flash', 'openai/gpt-test', 'gpt-test\nignore']) {
+    expect(() => createAgentModel({ ...env, OPENAI_API_KEY: 'test', LLM_MODEL })).toThrow('invalid')
+  }
+  for (const LLM_MODEL of ['gpt-test', 'gpt-test-2026-01-01', 'o3', 'o3-mini']) {
+    const model = createAgentModel({ ...env, OPENAI_API_KEY: ' test ', LLM_MODEL: ` ${LLM_MODEL} ` })
+    expect(model).toMatchObject({ modelId: LLM_MODEL, provider: 'openai.responses' })
+  }
 })

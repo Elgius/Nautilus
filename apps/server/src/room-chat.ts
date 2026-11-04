@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers'
+import { HTTPException } from 'hono/http-exception'
 import type { Bindings } from './env'
 import { createDatabase, type Database } from './db'
 import { canChat, chatHistory, parseSend, saveChatMessage, type ChatIdentity } from './room-chat-service'
@@ -6,10 +7,21 @@ import { PrivateRoomAgents } from './private-room-agents'
 import { streamPrivateRoomAgent } from './private-room-agent-stream'
 import type { PrivateAgentEvent } from '../../../shared/room-chat'
 import { agentAppearanceSelect } from './agents'
+import { createAgentModel } from './ai'
+import { generateRoomSuggestions, RoomSuggestions, suggestionHistory } from './room-suggestions'
 
-type Attachment = { identity: ChatIdentity; window: number; count: number }
+type Attachment = { identity: ChatIdentity; window: number; count: number; readCount?: number }
 export class RoomChat extends DurableObject<Bindings> {
   private privateAgents?: PrivateRoomAgents
+  private suggestions?: RoomSuggestions
+  private get suggestionService() {
+    return this.suggestions ??= new RoomSuggestions({
+      storage: this.ctx.storage,
+      canAccess: (identity) => this.withDatabase(async (db) => Boolean(await canChat(db, identity))),
+      history: (identity) => this.withDatabase((db) => suggestionHistory(db, identity)),
+      generate: (messages) => generateRoomSuggestions(messages, createAgentModel(this.env)),
+    })
+  }
   private closeSocket(socket: WebSocket, code: number, reason?: string) {
     if (socket.readyState === WebSocket.OPEN) socket.close(code, reason)
   }
@@ -51,6 +63,15 @@ export class RoomChat extends DurableObject<Bindings> {
   private queue: Promise<void> = Promise.resolve()
   async fetch(request: Request) {
     const url = new URL(request.url)
+    if (url.pathname === '/suggestions' && request.method === 'POST') {
+      const identity = await request.json<ChatIdentity>()
+      try {
+        return Response.json(await this.suggestionService.get(identity), { headers: { 'Cache-Control': 'no-store' } })
+      } catch (error) {
+        const status = error instanceof HTTPException ? error.status : 503
+        return Response.json({ error: 'Chat suggestions are unavailable.' }, { status, headers: { 'Cache-Control': 'no-store' } })
+      }
+    }
     if (url.pathname === '/ticket' && request.method === 'POST') {
       const identity = await request.json<ChatIdentity>()
       const ticket = crypto.randomUUID()
@@ -97,8 +118,11 @@ export class RoomChat extends DurableObject<Bindings> {
       const input = JSON.parse(raw) as Record<string, unknown>
       if (!input || typeof input !== 'object') throw new Error('Invalid event.')
       requestId = typeof input.requestId === 'string' ? input.requestId.slice(0, 100) : undefined
-      if (Date.now() - state.window > 10_000) { state.window = Date.now(); state.count = 0 }
-      if (++state.count > 40) throw new Error('Too many events. Please wait a moment.')
+      if (Date.now() - state.window > 10_000) { state.window = Date.now(); state.count = 0; state.readCount = 0 }
+      // Automatic receipts must not spend the allowance for user actions.
+      // Keep their own bound, including for clients connected before this update.
+      const count = input.type === 'read' ? (state.readCount = (state.readCount ?? 0) + 1) : ++state.count
+      if (count > 40) throw new Error('Too many events. Please wait a moment.')
       socket.serializeAttachment(state)
       if (input.type === 'agent.list') {
         const assignments = await db.roomAgent.findMany({ where: { organizationId: state.identity.organizationId, roomId: state.identity.roomId }, orderBy: { position: 'asc' }, select: { agent: { select: { ...agentAppearanceSelect, role: true } } } })

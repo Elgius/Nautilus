@@ -4,7 +4,7 @@ import { HTTPException } from 'hono/http-exception'
 export class AvatarRateLimitError extends HTTPException {
   constructor(readonly quotaExhausted: boolean, readonly retryAfterSeconds?: number) {
     super(429, { message: quotaExhausted
-      ? 'Gemini’s daily generation quota has been reached. Try again after it resets, or ask your administrator to review the API quota.'
+      ? 'The avatar service’s OpenAI quota has been exhausted. Ask your administrator to review API billing and usage limits.'
       : 'Avatar generation is temporarily rate-limited. Please wait before trying again.',
     })
   }
@@ -22,20 +22,11 @@ export function avatarRateLimit(error: APICallError): AvatarRateLimitError {
   if (header) useDelay(/^\d+(?:\.\d+)?$/.test(header) ? Number(header) : (Date.parse(header) - Date.now()) / 1000)
   const milliseconds = error.responseHeaders?.['retry-after-ms']
   if (milliseconds) useDelay(Number(milliseconds) / 1000)
-  // Read only documented quota and retry fields. Never return raw provider bodies,
+  // Read only quota classification fields. Never return raw provider bodies,
   // which may contain account identifiers, credentials, or private request data.
   try {
-    const details = JSON.parse(error.responseBody ?? '{}')?.error?.details
-    if (Array.isArray(details)) for (const detail of details) {
-      if (detail?.['@type'] === 'type.googleapis.com/google.rpc.QuotaFailure' && Array.isArray(detail.violations)) {
-        quotaExhausted ||= detail.violations.some((violation: { quotaId?: unknown; quotaValue?: unknown }) =>
-          (typeof violation?.quotaId === 'string' && /PerDay/i.test(violation.quotaId)) || violation?.quotaValue === '0' || violation?.quotaValue === 0)
-      }
-      if (detail?.['@type'] === 'type.googleapis.com/google.rpc.RetryInfo' && typeof detail.retryDelay === 'string') {
-        const delay = /^(\d+(?:\.\d+)?)s$/.exec(detail.retryDelay)
-        if (delay) useDelay(Number(delay[1]))
-      }
-    }
+    const details = JSON.parse(error.responseBody ?? '{}')?.error
+    quotaExhausted = details?.code === 'insufficient_quota' || details?.type === 'insufficient_quota'
   } catch { /* Missing/malformed metadata still produces a safe rate-limit error. */ }
   return new AvatarRateLimitError(quotaExhausted, retryAfterSeconds)
 }
