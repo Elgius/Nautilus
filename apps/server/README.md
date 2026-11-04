@@ -126,7 +126,8 @@ Set runtime secrets through Wrangler secrets or Cloudflare's dashboard, includin
 ## Agent LLM communication
 
 The backend uses Vercel AI SDK 7 (`ai`) and its `ToolLoopAgent` abstraction.
-`src/ai.ts` creates reusable agents with both `generate()` and `stream()` methods.
+`src/agent_interface` creates reusable agents with both `generate()` and `stream()` methods.
+`src/ai.ts` retains the model factory and a compatibility export for direct chat.
 Their instructions come from the saved agent name, purpose, and ordered rules.
 Calls use the AI SDK OpenAI provider (`@ai-sdk/openai`) directly through the Responses API, configured per
 request from Cloudflare bindings:
@@ -373,3 +374,34 @@ Reasoning effort remains a local UI preference and is not included in this endpo
 
 Checks: `bun test apps/server/tests/room-suggestions.test.ts` and
 `bun --cwd apps/web tests/room-suggestions.ui.tsx` from the repository root.
+
+
+## Agent interface and skills
+
+Room `@` instructions follow `agent.invoke` → `PrivateRoomAgents` →
+`agent_interface` → AI SDK `ToolLoopAgent`. The SDK handles all model calls,
+validates function arguments and executes skill handlers before returning their
+results to the model. Existing private job delivery and text history are retained;
+this module adds no memory system or changes to private-response visibility.
+
+`createAgentInterface(profile, model, skills)` composes agent instructions with
+skill instructions and tools. A skill has an ID, instructions, and an AI SDK tool
+map. Duplicate tool names fail at construction. New skills should provide typed
+schemas and execute handlers instead of interpreting arbitrary model text.
+
+Room agents receive document and spreadsheet skills through `createOfficeSkills`.
+They can list saved room files, read document bodies, find text, read workbook
+metadata and ranges, and apply atomic edit batches as agent-authored versions.
+Each batch supports the operations documented in `skills/docs.md` and
+`skills/spreadsheets.md`. The private Office service handles snapshot reads via
+`POST /read` and edits via `POST /edit`; Univer stays out of the Worker runtime.
+Configure the existing Office service and storage bindings before using these tools.
+
+Trusted socket context supplies organization, room, user and agent identity.
+Every tool call rechecks membership and agent assignment. Reads and writes remain
+room scoped; writes require a version read during the current run and use the
+existing optimistic concurrency checks. Tool execution is sequential, with eight
+model steps and the existing request timeout. Storage/database error details are
+not returned to the model. Local uploads and unsaved browser changes are not tool
+inputs. Only saved Univer documents can be edited, and an open editor does not
+automatically refresh after an agent saves a new version.

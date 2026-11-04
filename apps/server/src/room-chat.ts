@@ -8,6 +8,7 @@ import { streamPrivateRoomAgent } from './private-room-agent-stream'
 import type { PrivateAgentEvent } from '../../../shared/room-chat'
 import { agentAppearanceSelect } from './agents'
 import { createAgentModel } from './ai'
+import { createOfficeSkills, createRoomSkillBackend } from './agent_interface'
 import { generateRoomSuggestions, RoomSuggestions, suggestionHistory } from './room-suggestions'
 
 type Attachment = { identity: ChatIdentity; window: number; count: number; readCount?: number }
@@ -42,7 +43,10 @@ export class RoomChat extends DurableObject<Bindings> {
         return assignment?.agent ?? null
       }),
       canAccess: (identity) => this.withDatabase(async (db) => Boolean(await canChat(db, identity))),
-      stream: (profile, messages, signal) => streamPrivateRoomAgent(this.env, profile, messages, signal),
+      stream: (profile, messages, signal, identity) => streamPrivateRoomAgent(
+        this.env, profile, messages, signal, createAgentModel,
+        createOfficeSkills(createRoomSkillBackend(this.env, identity, profile.id, (action) => this.withDatabase(action)), signal),
+      ),
       send: (identity, event) => this.sendPrivate(identity, event),
       waitUntil: (task) => this.ctx.waitUntil(task),
     })
