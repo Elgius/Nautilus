@@ -5,5 +5,5 @@
     "lib": ["ESNext", "DOM"],
     "types": ["bun"]
   },
-  "include": ["scripts/**/*.ts", "tests/**/*.ts", "prisma.config.ts"]
+  "include": ["scripts/**/*.ts", "tests/**/*.ts", "prisma.config.ts", "worker-configuration.d.ts"]
 }

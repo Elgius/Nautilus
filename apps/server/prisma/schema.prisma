@@ -311,6 +311,7 @@ model RoomStar {
 }
 
 model RoomMessage {
+  clientMessageId String?
   id             String   @id @default(uuid())
   organizationId String
   roomId         String
@@ -325,6 +326,7 @@ model RoomMessage {
   documents      MessageDocument[]
 
   @@unique([organizationId, roomId, id])
+  @@unique([roomId, authorUserId, clientMessageId])
   @@index([roomId, createdAt, id])
   @@index([authorUserId])
   @@index([organizationId, authorAgentId])

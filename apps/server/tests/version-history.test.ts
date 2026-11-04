@@ -49,7 +49,7 @@ test('version history reaches the oldest version across multiple pages without g
 test('version history has no next page for empty or exactly full histories', async () => {
   for (const count of [0, 100]) {
     const response = await historyApp(count).request('/room/documents/doc/versions')
-    const page = await response.json()
+    const page = await response.json() as { versions: unknown[]; nextCursor: string | null }
     expect(page.versions).toHaveLength(count)
     expect(page.nextCursor).toBeNull()
   }

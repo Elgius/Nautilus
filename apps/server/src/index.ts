@@ -1,3 +1,4 @@
+export { RoomChat } from './room-chat'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { HTTPException } from 'hono/http-exception'
@@ -25,6 +26,15 @@ export type AppEnv = {
 const app = new Hono<AppEnv>()
 app.get('/', (c) => c.json({ name: 'Nautilus API', status: 'ok' }))
 app.get('/health', (c) => c.json({ status: 'ok' }))
+
+// Ticket authentication is performed by the room coordinator on upgrade.
+// Keep upgrades outside HTTP response-mutating middleware; the coordinator
+// validates origin, ticket, live session, and room membership.
+app.get('/api/room-sockets/:organizationId/:roomId', (c) => {
+  if (!c.env.ROOM_CHAT) throw new HTTPException(503, { message: 'Room chat is not configured.' })
+  const name = JSON.stringify([c.req.param('organizationId'), c.req.param('roomId')])
+  return c.env.ROOM_CHAT.get(c.env.ROOM_CHAT.idFromName(name)).fetch(c.req.raw)
+})
 
 app.use('/api/*', cors({
   origin: (origin, c) => origin === c.env.WEB_ORIGIN ? origin : undefined,

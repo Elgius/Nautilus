@@ -1,4 +1,6 @@
 export type Bindings = {
+  ROOM_CHAT?: DurableObjectNamespace
+  ROOM_SOCKET_ORIGIN?: string
   DATABASE_URL: string
   BETTER_AUTH_SECRET: string
   BETTER_AUTH_URL: string

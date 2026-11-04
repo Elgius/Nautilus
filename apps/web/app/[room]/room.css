@@ -1146,3 +1146,19 @@
   .room-file-tab [role="tab"] { max-width: 145px; }
   .room-tab-local { display: none; }
 }
+
+.room-agent-options { margin: 8px 0; padding: 8px; max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+.room-agent-options > button { display: flex; width: 100%; align-items: center; gap: 10px; padding: 9px; border-radius: 8px; text-align: left; }
+.room-agent-options > button[aria-selected="true"], .room-agent-options > button:hover { background: var(--muted); }
+.room-agent-options > button > span { display: grid; flex: 1; min-width: 0; }
+.room-agent-options small, .room-agent-options > p { font-size: 12px; color: var(--muted-foreground); }
+.room-private-target { flex-wrap: wrap; gap: 8px; }
+.room-private-target > span { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+.room-private-target > button { margin-left: auto; }
+.room-private-conversation { display: grid; gap: 12px; margin-top: 16px; padding: 12px; border: 1px dashed var(--border); border-radius: 12px; background: var(--card); }
+.room-private-conversation h3, .room-private-turn-heading { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+.room-private-conversation h3 { color: var(--muted-foreground); }
+.room-private-turn { min-width: 0; padding-top: 10px; border-top: 1px solid var(--border); }
+.room-private-turn-heading > span, .room-private-status { font-size: 11px; color: var(--muted-foreground); }
+.room-private-instruction, .room-private-reply { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
+.room-private-instruction { color: var(--muted-foreground); }

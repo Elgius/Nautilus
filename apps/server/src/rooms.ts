@@ -8,7 +8,7 @@ import { object, parseRoom, text } from './room-validation'
 import { MAX_OFFICE_BYTES, validateOfficeContent } from './office-content'
 import { officeConfigured, officeRequest } from './office-service'
 import { createDocumentService, versionSelect } from './documents/document-service'
-import { roomAgentChat } from './room-agent-chat'
+import { canChat } from './room-chat-service'
 
 export const rooms = new Hono<AppEnv>()
 rooms.use('*', bodyLimit({ maxSize: MAX_OFFICE_BYTES + 1024 * 1024 }))
@@ -22,10 +22,6 @@ const roomInclude = (userId: string) => ({
     id: true, title: true, kind: true, category: true, status: true, currentVersionId: true, updatedAt: true,
   } },
 })
-const messageInclude = {
-  authorUser: { select: { name: true } }, authorAgent: { select: { name: true } },
-  documents: { select: { documentId: true, documentVersionId: true, document: { select: { title: true, kind: true } } } },
-} as const
 
 async function body(request: { json: () => Promise<unknown> }) {
   return object(await request.json().catch(() => { throw new HTTPException(400, { message: 'Provide valid JSON.' }) }))
@@ -34,18 +30,6 @@ async function checkAgents(db: Database, organizationId: string, agentIds: strin
   if (await db.agent.count({ where: { organizationId, id: { in: agentIds } } }) !== agentIds.length) {
     throw new HTTPException(400, { message: 'Choose agents from this organisation.' })
   }
-}
-async function messagesPage(db: Database, organizationId: string, roomId: string, before?: string) {
-  const cursor = before ? await db.roomMessage.findFirst({ where: { organizationId, roomId, id: before }, select: { id: true, createdAt: true } }) : null
-  if (before && !cursor) throw new HTTPException(400, { message: 'Invalid message cursor.' })
-  const rows = await db.roomMessage.findMany({
-    where: { organizationId, roomId, ...(cursor ? { OR: [
-      { createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } },
-    ] } : {}) },
-    include: messageInclude, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 51,
-  })
-  const page = rows.slice(0, 50)
-  return { messages: page.reverse(), nextCursor: rows.length > 50 ? page[0].id : null }
 }
 
 rooms.get('/', async (c) => c.json({ rooms: await c.get('db').room.findMany({
@@ -70,15 +54,24 @@ rooms.use('/:roomId/*', async (c, next) => {
   await next()
 })
 
-rooms.route('/', roomAgentChat)
+rooms.post('/:roomId/socket-ticket', async (c) => {
+  if (!c.env.ROOM_CHAT) throw new HTTPException(503, { message: 'Room chat is not configured.' })
+  const identity = { organizationId: c.get('organizationId'), roomId: c.req.param('roomId'),
+    userId: c.get('session').user.id, sessionId: c.get('session').session.id, name: c.get('session').user.name }
+  if (!await canChat(c.get('db'), identity)) throw new HTTPException(403, { message: 'Join this room to use chat.' })
+  const coordinator = c.env.ROOM_CHAT.get(c.env.ROOM_CHAT.idFromName(JSON.stringify([identity.organizationId, identity.roomId])))
+  const response = await coordinator.fetch(new Request('https://room.internal/ticket', { method: 'POST', body: JSON.stringify(identity) }))
+  const { ticket } = await response.json() as { ticket: string }
+  const url = new URL(`/api/room-sockets/${encodeURIComponent(identity.organizationId)}/${encodeURIComponent(identity.roomId)}`, c.env.ROOM_SOCKET_ORIGIN ?? c.env.BETTER_AUTH_URL)
+  url.protocol = url.protocol === 'http:' ? 'ws:' : 'wss:'
+  url.searchParams.set('ticket', ticket)
+  return c.json({ url: url.toString() })
+})
 
 rooms.get('/:roomId', async (c) => {
   const organizationId = c.get('organizationId'), roomId = c.req.param('roomId'), db = c.get('db')
-  const [room, page] = await Promise.all([
-    db.room.findUniqueOrThrow({ where: { id: roomId, organizationId }, include: roomInclude(c.get('session').user.id) }),
-    messagesPage(db, organizationId, roomId),
-  ])
-  return c.json({ room, ...page, storageConfigured: storageConfigured(c.env), officeConfigured: officeConfigured(c.env) })
+  const room = await db.room.findUniqueOrThrow({ where: { id: roomId, organizationId }, include: roomInclude(c.get('session').user.id) })
+  return c.json({ room, messages: [], nextCursor: null, storageConfigured: storageConfigured(c.env), officeConfigured: officeConfigured(c.env) })
 })
 
 rooms.patch('/:roomId', async (c) => {
@@ -112,41 +105,6 @@ rooms.post('/:roomId/members', async (c) => {
   await c.get('db').roomMember.upsert({ where: { roomId_organizationMemberId: { roomId, organizationMemberId: member.id } },
     create: { organizationId, roomId, organizationMemberId: member.id }, update: {} })
   return c.json({ success: true })
-})
-
-rooms.post('/:roomId/read', async (c) => {
-  const organizationId = c.get('organizationId'), roomId = c.req.param('roomId')
-  const member = await c.get('db').member.findUniqueOrThrow({ where: { organizationId_userId: { organizationId, userId: c.get('session').user.id } } })
-  await c.get('db').roomMember.upsert({ where: { roomId_organizationMemberId: { roomId, organizationMemberId: member.id } },
-    create: { organizationId, roomId, organizationMemberId: member.id, lastReadAt: new Date() }, update: { lastReadAt: new Date() } })
-  return c.json({ success: true })
-})
-
-rooms.get('/:roomId/messages', async (c) => c.json(await messagesPage(c.get('db'), c.get('organizationId'), c.req.param('roomId'), c.req.query('before'))))
-rooms.post('/:roomId/messages', async (c) => {
-  const input = await body(c.req), organizationId = c.get('organizationId'), roomId = c.req.param('roomId')
-  const messageText = text(input.text, 'Message', 20_000)
-  const attachments = input.documents === undefined ? [] : input.documents
-  if (!Array.isArray(attachments) || attachments.length > 20) throw new HTTPException(400, { message: 'Attach up to 20 room documents.' })
-  const documents: { documentId: string; documentVersionId: string | null }[] = []
-  for (const item of attachments) {
-    const attachment = object(item), documentId = text(attachment.documentId, 'Document ID', 100)
-    const documentVersionId = attachment.documentVersionId == null ? null : text(attachment.documentVersionId, 'Version ID', 100)
-    if (!await c.get('db').document.findFirst({ where: { organizationId, roomId, id: documentId }, select: { id: true } }) ||
-      (documentVersionId && !await c.get('db').documentVersion.findFirst({ where: { organizationId, roomId, documentId, id: documentVersionId }, select: { id: true } }))) {
-      throw new HTTPException(400, { message: 'Choose documents and versions from this room.' })
-    }
-    if (documents.some((item) => item.documentId === documentId)) throw new HTTPException(400, { message: 'Attach each document once.' })
-    documents.push({ documentId, documentVersionId })
-  }
-  const message = await c.get('db').$transaction(async (tx) => {
-    const result = await tx.roomMessage.create({ data: { organizationId, roomId, authorUserId: c.get('session').user.id, text: messageText,
-      documents: { create: documents },
-    }, include: messageInclude })
-    await tx.room.update({ where: { id: roomId, organizationId }, data: { lastActivityAt: new Date() } })
-    return result
-  })
-  return c.json({ message }, 201)
 })
 
 rooms.post('/:roomId/documents', async (c) => {
