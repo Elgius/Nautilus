@@ -27,8 +27,8 @@ test('agent generation uses saved instructions, conversation history, and output
   const call = model.doGenerateCalls[0]
   expect(call.maxOutputTokens).toBe(4096)
   expect(call.prompt[0].role).toBe('system')
-  expect(call.prompt[0].content).toContain('Your purpose: Research')
-  expect(call.prompt[0].content).toContain('Rule: Cite sources.\nRule: Be concise.')
+  expect(call.prompt[0].content).toContain('\"purpose\":\"Research\"')
+  expect(call.prompt[0].content).toContain(JSON.stringify(profile.rules))
   expect(call.prompt.at(-1)).toMatchObject({ role: 'user', content: [{ type: 'text', text: 'Ocean navigation.' }] })
 })
 

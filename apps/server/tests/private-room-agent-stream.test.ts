@@ -22,7 +22,7 @@ test('private streaming uses the selected agent’s profile and only supplied pr
   for await (const text of streamPrivateRoomAgent({} as Bindings, profile, [{ role: 'user', content: 'PRIVATE_PROMPT' }], new AbortController().signal, () => model)) chunks.push(text)
   expect(chunks).toEqual(['Private ', 'answer'])
   expect(model.doStreamCalls[0].prompt[0]).toMatchObject({ role: 'system' })
-  expect(model.doStreamCalls[0].prompt[0].content).toContain('Your purpose: Research')
+  expect(model.doStreamCalls[0].prompt[0].content).toContain('\"purpose\":\"Research\"')
   expect(model.doStreamCalls[0].prompt.at(-1)).toMatchObject({ role: 'user', content: [{ type: 'text', text: 'PRIVATE_PROMPT' }] })
 })
 

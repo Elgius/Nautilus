@@ -62,7 +62,7 @@ test('OpenAI requests preserve chat and structured generation contracts with sto
       expect(request).not.toHaveProperty('previous_response_id')
     }
     expect(JSON.stringify(requests[0].input)).toContain('Earlier answer')
-    expect(JSON.stringify(requests[0].input)).toContain('Rule: Cite sources.')
+    expect(JSON.stringify(requests[0].input)).toContain('Cite sources.')
     for (const [index, name] of [[1, 'agent_instructions'], [2, 'avatar_preview']] as const) {
       expect(requests[index].text.format).toMatchObject({ type: 'json_schema', name, strict: true })
       expect(requests[index].text.format.schema.additionalProperties).toBe(false)

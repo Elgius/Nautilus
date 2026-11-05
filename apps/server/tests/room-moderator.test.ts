@@ -17,7 +17,7 @@ async function execute(skills: AgentSkill[], name: string, input: unknown) {
   const run = definition.execute as unknown as (input: unknown, options: { toolCallId: string; messages: never[] }) => Promise<unknown>
   return run(input, { toolCallId: crypto.randomUUID(), messages: [] })
 }
-function harness(prepare?: (agent: PrivateAgentProfile, skills: AgentSkill[]) => Promise<string>) {
+function harness(prepare?: (agent: PrivateAgentProfile, skills: AgentSkill[]) => Promise<string>, review: () => Promise<void> = async () => {}, signal: AbortSignal = new AbortController().signal) {
   const writes: unknown[] = [], commits: unknown[] = [], checkpoints = new Map<string, Proposal>()
   let version = 'v1'
   const source: SkillBackend = {
@@ -30,8 +30,8 @@ function harness(prepare?: (agent: PrivateAgentProfile, skills: AgentSkill[]) =>
   }
   const run: AgentRunContext = { id: 'run', token: 'lease', activity: async () => {},
     committed: async (commit) => { commits.push(commit) }, checkpoint: async (id, value) => { checkpoints.set(id, structuredClone(value) as Proposal) } }
-  const skills = createModeratorSkills(moderator, run, new AbortController().signal, {
-    backend: () => source, profiles: async () => [moderator, specialist, other],
+  const skills = createModeratorSkills(moderator, run, signal, {
+    review, backend: () => source, profiles: async () => [moderator, specialist, other],
     specialist: async (agent, _instruction, _signal, tools) => {
       if (prepare) return prepare(agent, tools)
       await execute(tools, 'readDocument', { documentId: 'doc' })
@@ -97,4 +97,36 @@ test('unassigned agents and moderator self-delegation never execute', async () =
     assignments: [{ ...assignment.assignments[0], agentId }],
   })).rejects.toThrow()
   expect(h.writes).toHaveLength(0)
+})
+
+
+test('rejected independent review blocks both direct and proposed commits', async () => {
+  const h = harness(undefined, async () => { throw new HTTPException(422, { message: 'Review rejected' }) })
+  await execute(h.skills, 'readDocument', { documentId: 'doc' })
+  await expect(execute(h.skills, 'applyDocumentEdits', edit)).rejects.toThrow('Review rejected')
+  await execute(h.skills, 'delegateWork', assignment)
+  const proposalId = [...h.checkpoints.keys()][0]
+  await expect(execute(h.skills, 'acceptProposal', { proposalId })).rejects.toThrow('Review rejected')
+  expect(h.writes).toHaveLength(0)
+  expect(h.commits).toHaveLength(0)
+})
+
+
+test('direct commits require independent review before writing', async () => {
+  let reviews = 0
+  const h = harness(undefined, async () => { expect(h.writes).toHaveLength(0); reviews++ })
+  await execute(h.skills, 'readDocument', { documentId: 'doc' })
+  await execute(h.skills, 'applyDocumentEdits', edit)
+  expect(reviews).toBe(1)
+  expect(h.writes).toHaveLength(1)
+})
+
+
+test('cancellation during review blocks committing an approved edit', async () => {
+  const controller = new AbortController()
+  const h = harness(undefined, async () => { controller.abort() }, controller.signal)
+  await execute(h.skills, 'readDocument', { documentId: 'doc' })
+  await expect(execute(h.skills, 'applyDocumentEdits', edit)).rejects.toThrow()
+  expect(h.writes).toHaveLength(0)
+  expect(h.commits).toHaveLength(0)
 })
