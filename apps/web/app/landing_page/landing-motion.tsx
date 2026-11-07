@@ -1,24 +1,34 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowUpRight, Bot, Check, FileText, MessageSquare, Pause, Play, Sparkles, Users } from "lucide-react";
+import { ArrowRight, Bot, FileText, MessageSquare, Pause, Play, Users } from "lucide-react";
 
 export function LandingMotion() {
   const [paused, setPaused] = useState(false);
   return (
     <div className={`lp-scene${paused ? " lp-motion-paused" : ""}`}>
-      <div className="lp-scene-art" role="img" aria-label="Illustration of people, agents, and documents connected around a shared project room">
+      <div className="lp-scene-art" role="img" aria-label="Illustrative project room: people, an AI agent, and project documents come together around a launch plan.">
         <div className="lp-scene-grid" />
-        <div className="lp-orbit lp-orbit-outer"><span /></div>
-        <div className="lp-orbit lp-orbit-inner"><span /></div>
-        <div className="lp-cross lp-cross-one">+</div><div className="lp-cross lp-cross-two">+</div>
-        <div className="lp-floating lp-float-people"><span className="lp-float-icon"><Users size={18} /></span><div><strong>Your people</strong><small>Great minds, together.</small></div><span className="lp-online" /></div>
-        <div className="lp-room-card"><div className="lp-room-card-top"><span><span className="lp-online" /> A SHARED ROOM</span><ArrowUpRight size={16} /></div><div className="lp-room-symbol"><Sparkles size={31} strokeWidth={1.3} /></div><h3>The next big thing</h3><p>A little space. Endless possibility.</p><div className="lp-room-divider" /><div className="lp-room-bottom"><span><MessageSquare size={14} /> Ideas in motion</span><span className="lp-card-avatars"><i>J</i><i>M</i><i><Bot size={13} /></i></span></div></div>
-        <div className="lp-floating lp-float-agent"><span className="lp-agent-icon"><Bot size={21} /></span><div><strong>A fresh perspective</strong><small>Your agents are in.</small></div><Sparkles size={14} /></div>
-        <div className="lp-floating lp-float-doc"><FileText size={21} /><div><strong>The big idea.doc</strong><small>Context, all in one place.</small></div><span className="lp-check"><Check size={13} /></span></div>
-        <span className="lp-scene-caption">CONNECTED BY CONTEXT. POWERED BY YOU.</span>
+        <div className="lp-context-nodes" aria-hidden="true">
+          <div className="lp-context-node"><Users size={21} /><span>Your people</span><small>One team</small></div>
+          <div className="lp-context-node"><Bot size={21} /><span>Your agents</span><small>A role to play</small></div>
+          <div className="lp-context-node"><FileText size={21} /><span>Your documents</span><small>Context close by</small></div>
+        </div>
+        <div className="lp-connections" aria-hidden="true"><span /><span /><span /></div>
+        <div className="lp-product" aria-hidden="true">
+          <aside className="lp-product-sidebar"><span className="lp-product-brand">n.</span><MessageSquare size={18} /><FileText size={18} /><Bot size={18} /></aside>
+          <div className="lp-product-main">
+            <div className="lp-product-top"><span><span className="lp-online" /> Product launch</span><span className="lp-preview-label">ILLUSTRATIVE WORKSPACE</span></div>
+            <div className="lp-product-body"><div className="lp-product-heading"><span className="lp-eyebrow">ONE ROOM. SHARED CONTEXT.</span><h3>Let’s move this forward.</h3></div>
+              <div className="lp-product-message"><span className="lp-avatar">J</span><div><strong>Jordan <small>Teammate</small></strong><p>The launch brief is ready for review. Let’s work through the next steps here.</p></div></div>
+              <div className="lp-product-document"><FileText size={23} /><div><strong>Launch brief</strong><span>Project document</span></div><ArrowRight size={17} /></div>
+              <div className="lp-product-agent"><span className="lp-avatar"><Bot size={20} /></span><div><strong>Research agent <small>Room agent</small></strong><p>A dedicated teammate for the questions ahead.</p></div></div>
+            </div>
+            <div className="lp-product-bottom"><MessageSquare size={15} /> Conversations and documents, together.</div>
+          </div>
+        </div>
       </div>
-      <button className="lp-motion-toggle" type="button" onClick={() => setPaused(!paused)} aria-pressed={paused}>{paused ? <Play size={13} /> : <Pause size={13} />}{paused ? "Play motion" : "Pause motion"}</button>
+      <button className="lp-motion-toggle" type="button" onClick={() => setPaused(value => !value)} aria-pressed={paused}>{paused ? <Play size={13} /> : <Pause size={13} />}{paused ? "Play motion" : "Pause motion"}</button>
     </div>
   );
 }
