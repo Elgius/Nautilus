@@ -1,3 +1,4 @@
+import { assertSafeAgentProfile } from './agent-policy'
 import { HTTPException } from 'hono/http-exception'
 import { Prisma } from './generated/prisma/browser'
 import { parseAvatarDesign, type AvatarDesign } from '../../../shared/avatar-design'
@@ -23,6 +24,7 @@ export function parseAgentProfile(value: unknown) {
   }
   const rules = (input.rules as string[]).map((rule) => rule.trim()).filter(Boolean)
   if (rules.join('\n').length > 6000) throw new HTTPException(400, { message: 'Keep all rules within 6,000 characters.' })
+  assertSafeAgentProfile({ name, role, rules })
   const avatarUrl = input.avatarUrl ?? null
   if (avatarUrl !== null) {
     if (typeof avatarUrl !== 'string' || avatarUrl.length > 2_796_240) {

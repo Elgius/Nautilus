@@ -447,3 +447,28 @@ room run ends; local drafts are preserved when the saved document has changed.
 Moderator/lease checks: `bun test apps/server/tests/room-moderator.test.ts
 apps/server/tests/room-write-lock.test.ts apps/server/tests/private-room-agents.test.ts`.
 Room activity UI checks: `bun run --filter @nautilus/web test:room-work`.
+
+
+### Agent guardrails
+
+Platform safeguards and tool contracts take precedence over custom profiles and user
+requests. Profile text is serialized as JSON task configuration; document content,
+tool output, and specialist reports are untrusted evidence. Profile creation,
+updates, generated instructions, and runtime initialization reject common explicit
+attempts to override safeguards, disclose credentials, or misreport success.
+This normalized pattern check is defense in depth, not a complete semantic filter;
+obfuscated, indirect, or multilingual instructions may evade it.
+
+Every moderator commit, including accepted specialist proposals, requires a separate,
+tool-free structured review against the original private user conversation, exact
+edit operations, and reads at the expected document version. Custom profile rules
+are excluded from the reviewer. Missing evidence, oversized context, rejection,
+invalid output, provider errors, timeout, and cancellation block the write. Access
+is checked again after review; existing version and room lease checks still apply.
+Review evidence is limited to 100,000 characters per document and the full review
+input to 160,000 characters. Narrow requests that exceed these limits. Each commit
+adds a model call with a 20-second timeout and no retries, increasing cost and latency.
+This model review can make mistakes; it does not prove user intent or factual accuracy.
+
+Specialists expose proposal-only edit tools. A successful proposal is never reported
+as a saved shared version. Only a successful commit result establishes a saved edit.
