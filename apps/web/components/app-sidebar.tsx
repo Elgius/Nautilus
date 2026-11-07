@@ -37,6 +37,8 @@ import type { LucideIcon } from "lucide-react";
 
 export type WorkspaceView =
   | "Overview"
+  | "Kanban"
+  | "Calendar"
   | "Rooms"
   | "Agents"
   | "Documents"
