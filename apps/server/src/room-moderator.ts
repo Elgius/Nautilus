@@ -6,7 +6,7 @@ import type { AgentRunContext, PrivateAgentMessage, PrivateAgentProfile } from '
 import type { ChatIdentity } from './room-chat-service'
 import { canChat } from './room-chat-service'
 import { createOfficeSkills, createRoomSkillBackend, type AgentSkill } from './agent_interface'
-import type { SkillBackend } from './agent_interface/skills'
+import { validateReadResult, type SkillBackend } from './agent_interface/skills'
 import type { Bindings } from './env'
 import type { Database } from './db'
 import { streamPrivateRoomAgent } from './private-room-agent-stream'
@@ -28,17 +28,18 @@ type Dependencies = {
 export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRunContext, signal: AbortSignal, deps: Dependencies): AgentSkill[] {
   const proposals = new Map<string, Proposal>()
   let delegated = 0
-  const evidence = new Map<string, { version: string | null; reads: unknown[] }>()
+  const evidence = new Map<string, { version: string | null; kind: string; reads: unknown[] }>()
   const tracked = (agent: PrivateAgentProfile, source: SkillBackend, write: SkillBackend['edit']): SkillBackend => ({
     ...source,
     read: async (id, operation, args, activeSignal) => {
       await run.activity({ runId: run.id, agentId: agent.id, agentName: agent.name, color: agent.color, documentId: id,
         phase: 'reading', target: targetLabel(operation, args) }, agent.id)
       const saved = await source.read(id, operation, args, activeSignal)
+      validateReadResult(saved)
       const previous = evidence.get(id)
       const reads = previous?.version === saved.currentVersionId ? [...previous.reads, { operation, args, result: saved.result }] : [{ operation, args, result: saved.result }]
       if (JSON.stringify(reads).length > 100_000) throw new HTTPException(422, { message: 'Review context too large. Narrow this request.' })
-      evidence.set(id, { version: saved.currentVersionId, reads })
+      evidence.set(id, { version: saved.currentVersionId, kind: saved.kind, reads })
       return saved
     },
     edit: write,
@@ -49,7 +50,10 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
     commitSignal.throwIfAborted()
     const context = evidence.get(documentId)
     if (!context || context.version !== expectedVersionId) throw new HTTPException(422, { message: 'Read this document version before review.' })
-    await deps.review({ documentId, expectedVersionId, kind, edits, changeSummary: summary, reads: context.reads }, commitSignal)
+    const reads = [...evidence].map(([id, entry]) => ({
+      documentId: id, currentVersionId: entry.version, kind: entry.kind, reads: entry.reads,
+    }))
+    await deps.review({ documentId, expectedVersionId, kind, edits, changeSummary: summary, reads }, commitSignal)
     commitSignal.throwIfAborted()
     await source.authorize()
     await run.activity({ runId: run.id, agentId: profile.id, agentName: profile.name, color: profile.color, documentId,

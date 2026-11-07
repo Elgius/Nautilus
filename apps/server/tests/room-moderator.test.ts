@@ -4,6 +4,7 @@ import type { AgentRunContext, PrivateAgentProfile } from '../src/private-room-a
 import type { AgentSkill } from '../src/agent_interface'
 import type { SkillBackend } from '../src/agent_interface/skills'
 import { HTTPException } from 'hono/http-exception'
+import type { EditReview } from '../src/edit-review'
 
 const moderator = { id: 'moderator', name: 'Maya', role: 'Editor', rules: [] }
 const specialist = { id: 'specialist', name: 'Scout', role: 'Analyst', rules: [] }
@@ -17,12 +18,12 @@ async function execute(skills: AgentSkill[], name: string, input: unknown) {
   const run = definition.execute as unknown as (input: unknown, options: { toolCallId: string; messages: never[] }) => Promise<unknown>
   return run(input, { toolCallId: crypto.randomUUID(), messages: [] })
 }
-function harness(prepare?: (agent: PrivateAgentProfile, skills: AgentSkill[]) => Promise<string>, review: () => Promise<void> = async () => {}, signal: AbortSignal = new AbortController().signal) {
+function harness(prepare?: (agent: PrivateAgentProfile, skills: AgentSkill[]) => Promise<string>, review: (edit: EditReview) => Promise<void> = async () => {}, signal: AbortSignal = new AbortController().signal, read?: SkillBackend['read']) {
   const writes: unknown[] = [], commits: unknown[] = [], checkpoints = new Map<string, Proposal>()
   let version = 'v1'
   const source: SkillBackend = {
     authorize: async () => {}, list: async () => [],
-    read: async () => ({ currentVersionId: version, kind: 'DOCUMENT', result: { text: 'Hello' } }),
+    read: read ?? (async () => ({ currentVersionId: version, kind: 'DOCUMENT', result: { text: 'Hello' } })),
     edit: async (...args) => {
       if (args[1] !== version) throw new HTTPException(409, { message: 'A newer document version exists.' })
       writes.push(args); version = 'v2'; return { versionId: 'v2', versionNumber: 2 }
@@ -129,4 +130,51 @@ test('cancellation during review blocks committing an approved edit', async () =
   await expect(execute(h.skills, 'applyDocumentEdits', edit)).rejects.toThrow()
   expect(h.writes).toHaveLength(0)
   expect(h.commits).toHaveLength(0)
+})
+
+for (const delegated of [false, true]) test(`cross-document ${delegated ? 'proposals' : 'direct edits'} include versioned source evidence`, async () => {
+  const reviews: EditReview[] = []
+  const read: SkillBackend['read'] = async (id) => id === 'workbook'
+    ? { currentVersionId: 'workbook-v3', kind: 'SPREADSHEET', result: { value: 42 } }
+    : { currentVersionId: 'v1', kind: 'DOCUMENT', result: { text: 'Hello' } }
+  const h = harness(async (_agent, tools) => {
+    await execute(tools, 'readWorkbook', { documentId: 'workbook' })
+    await execute(tools, 'readDocument', { documentId: 'doc' })
+    await execute(tools, 'proposeDocumentEdits', edit)
+    return 'Prepared a cross-document edit.'
+  }, async (candidate) => { reviews.push(candidate) }, undefined, read)
+  if (delegated) {
+    await execute(h.skills, 'delegateWork', { assignments: [{ ...assignment.assignments[0], documentIds: ['workbook', 'doc'] }] })
+    await execute(h.skills, 'acceptProposal', { proposalId: [...h.checkpoints.keys()][0] })
+  } else {
+    await execute(h.skills, 'readWorkbook', { documentId: 'workbook' })
+    await execute(h.skills, 'readDocument', { documentId: 'doc' })
+    await execute(h.skills, 'applyDocumentEdits', edit)
+  }
+  expect(reviews).toHaveLength(1)
+  expect(reviews[0].reads).toEqual([
+    { documentId: 'workbook', currentVersionId: 'workbook-v3', kind: 'SPREADSHEET',
+      reads: [{ operation: 'readWorkbook', args: {}, result: { value: 42 } }] },
+    { documentId: 'doc', currentVersionId: 'v1', kind: 'DOCUMENT',
+      reads: [{ operation: 'readDocument', args: {}, result: { text: 'Hello' } }] },
+  ])
+  expect(h.writes).toHaveLength(1)
+})
+
+test('oversized failed reads do not retain evidence or prevent narrower reads and edits', async () => {
+  let calls = 0
+  const reviews: EditReview[] = []
+  const narrow = { text: 'Hello' + 'x'.repeat(20_000) }
+  const h = harness(undefined, async (candidate) => { reviews.push(candidate) }, undefined, async () => ({
+    currentVersionId: 'v1', kind: 'DOCUMENT', result: ++calls === 2 ? { text: 'x'.repeat(70_000) } : narrow,
+  }))
+  await execute(h.skills, 'readDocument', { documentId: 'doc' })
+  await expect(execute(h.skills, 'readDocument', { documentId: 'doc' })).rejects.toThrow('Read result too large')
+  await execute(h.skills, 'readDocument', { documentId: 'doc' })
+  await execute(h.skills, 'applyDocumentEdits', edit)
+  expect(reviews[0].reads).toEqual([{ documentId: 'doc', currentVersionId: 'v1', kind: 'DOCUMENT', reads: [
+    { operation: 'readDocument', args: {}, result: narrow },
+    { operation: 'readDocument', args: {}, result: narrow },
+  ] }])
+  expect(h.writes).toHaveLength(1)
 })

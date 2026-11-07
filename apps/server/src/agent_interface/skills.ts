@@ -14,6 +14,11 @@ export type SkillBackend = {
 }
 export type AgentSkill = { id: string; instructions: string; tools: ToolSet }
 
+export function validateReadResult(saved: Awaited<ReturnType<SkillBackend['read']>>) {
+  // Do not give the LLM a huge snapshot or silently truncate positions/ranges.
+  if (JSON.stringify(saved).length > 60_000) throw new HTTPException(422, { message: 'Read result too large. Narrow the range or search text.' })
+}
+
 // Skill instructions and executable tools travel together. Markdown guides in
 // /skills document these same operations for developers and other hosts.
 export function createOfficeSkills(backend: SkillBackend, signal: AbortSignal, mode: 'commit' | 'proposal' = 'commit'): AgentSkill[] {
@@ -36,8 +41,7 @@ export function createOfficeSkills(backend: SkillBackend, signal: AbortSignal, m
   }
   const read = (id: string, operation: string, args: Record<string, unknown>, toolSignal?: AbortSignal) => guard(async (activeSignal) => {
     const saved = await backend.read(id, operation, args, activeSignal)
-    // Do not give the LLM a huge snapshot or silently truncate positions/ranges.
-    if (JSON.stringify(saved).length > 60_000) throw new HTTPException(422, { message: 'Read result too large. Narrow the range or search text.' })
+    validateReadResult(saved)
     if (saved.currentVersionId) readVersions.set(id, saved.currentVersionId)
     return saved
   }, toolSignal)
