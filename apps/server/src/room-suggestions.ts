@@ -2,6 +2,7 @@ import { generateText, jsonSchema, Output, type LanguageModel } from 'ai'
 import { HTTPException } from 'hono/http-exception'
 import type { Database } from './db'
 import type { ChatIdentity } from './room-chat-service'
+import { agentCallLogging } from './agent-call-logging'
 
 export type Suggestions = { suggestions: string[]; retryAfterMs?: number }
 export type SuggestionMessage = { id: string; text: string; createdAt: Date; editedAt: Date | null }
@@ -38,6 +39,7 @@ const schema = jsonSchema<Suggestions>({
 
 export async function generateRoomSuggestions(messages: SuggestionMessage[], model: LanguageModel): Promise<Suggestions> {
   const { output } = await generateText({
+    ...agentCallLogging({ kind: 'room-suggestions' }),
     model,
     system: [
       'Suggest exactly three distinct, useful next messages a person could send in this Nautilus room.',

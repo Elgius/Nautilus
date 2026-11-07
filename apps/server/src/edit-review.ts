@@ -3,6 +3,7 @@ import { HTTPException } from 'hono/http-exception'
 import { z } from 'zod'
 import type { PrivateAgentMessage } from './private-room-agents'
 import type { SkillBackend } from './agent_interface/skills'
+import { agentCallLogging } from './agent-call-logging'
 
 export type EditReview = {
   documentId: string; expectedVersionId: string; kind: 'DOCUMENT' | 'SPREADSHEET'
@@ -10,13 +11,14 @@ export type EditReview = {
 }
 
 /** Separate, tool-free call: agent summaries and custom rules cannot approve a write. */
-export async function reviewDocumentEdit(model: LanguageModel, messages: PrivateAgentMessage[], edit: EditReview, signal: AbortSignal) {
+export async function reviewDocumentEdit(model: LanguageModel, messages: PrivateAgentMessage[], edit: EditReview, signal: AbortSignal, loggingContext: Record<string, string> = {}) {
   const denied = () => new HTTPException(422, { message: 'The edit could not be verified against your request. Clarify the requested changes or narrow the edit.' })
   signal.throwIfAborted()
   const prompt = JSON.stringify({ conversation: messages, candidate: edit })
   if (!edit.reads.length || prompt.length > 160_000) throw denied()
   try {
     const { output } = await generateText({
+      ...agentCallLogging({ ...loggingContext, kind: 'edit-review', documentId: edit.documentId }),
       model,
       system: [
         'You independently review a proposed shared-document edit. Return approved:true only when the exact operations are justified by the user request and supplied document reads.',
