@@ -165,8 +165,9 @@ function targetLabel(operation: string, args: Record<string, unknown>) {
 
 export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, run: AgentRunContext,
   withDatabase: <T>(action: (db: Database) => Promise<T>) => Promise<T>) {
+  const loggingContext = { roomId: identity.roomId, runId: run.id }
   const skills = createModeratorSkills(profile, run, signal, {
-    review: (edit, activeSignal) => reviewDocumentEdit(createAgentModel(env), messages, edit, activeSignal),
+    review: (edit, activeSignal) => reviewDocumentEdit(createAgentModel(env), messages, edit, activeSignal, loggingContext),
     backend: (agent) => createRoomSkillBackend(env, identity, agent.id, withDatabase, run.token),
     profiles: () => withDatabase(async (db) => {
       if (!await canChat(db, identity)) throw new Error('Access expired')
@@ -176,12 +177,12 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
     }),
     specialist: async (agent, instruction, activeSignal, specialistSkills) => {
       let report = ''
-      for await (const chunk of streamPrivateRoomAgent(env, agent, [{ role: 'user', content: instruction }], activeSignal, createAgentModel, specialistSkills)) {
+      for await (const chunk of streamPrivateRoomAgent(env, agent, [{ role: 'user', content: instruction }], activeSignal, createAgentModel, specialistSkills, { loggingContext: { ...loggingContext, kind: 'specialist', parentAgentId: profile.id } })) {
         report += chunk
         if (report.length > 16_000) throw new Error('Specialist report too large')
       }
       return report
     },
   })
-  return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, skills, { steps: 32, timeout: 175_000 })
+  return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, skills, { steps: 32, timeout: 175_000, loggingContext: { ...loggingContext, kind: 'moderator' } })
 }

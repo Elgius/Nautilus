@@ -1,13 +1,14 @@
 import { isStepCount, ToolLoopAgent, type LanguageModel, type ToolSet } from 'ai'
 import type { AgentSkill } from './skills'
 import { assertSafeAgentProfile } from '../agent-policy'
+import { agentCallLogging } from '../agent-call-logging'
 export { createOfficeSkills, type AgentSkill, type SkillBackend } from './skills'
 export { createRoomSkillBackend } from './room-skills'
 
 export type AgentProfile = { id: string; name: string; role: string; rules: string[] }
 
 /** One runtime for agent/model communication and dispatch to registered skills. */
-export function createAgentInterface(profile: AgentProfile, model: LanguageModel, skills: AgentSkill[] = [], options: { steps?: number; timeout?: number } = {}) {
+export function createAgentInterface(profile: AgentProfile, model: LanguageModel, skills: AgentSkill[] = [], options: { steps?: number; timeout?: number; loggingContext?: Record<string, string> } = {}) {
   assertSafeAgentProfile(profile)
   const tools: ToolSet = {}
   for (const skill of skills) for (const [name, definition] of Object.entries(skill.tools)) {
@@ -27,6 +28,6 @@ export function createAgentInterface(profile: AgentProfile, model: LanguageModel
     ].join('\n'),
     toolCallConcurrency: 1,
     stopWhen: isStepCount(options.steps ?? 8), maxOutputTokens: 4096, timeout: options.timeout ?? 60_000, maxRetries: 1,
-    onError: () => { console.error('Agent generation failed', { agentId: profile.id }) },
+    ...agentCallLogging({ ...options.loggingContext, kind: options.loggingContext?.kind ?? 'agent', agentId: profile.id, agentName: profile.name }),
   })
 }
