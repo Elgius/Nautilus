@@ -47,3 +47,18 @@ export async function roomRequest<T>(organizationId: string, path = '', method =
   if (!response.ok || !result) throw new RoomRequestError(result?.error || 'Couldn’t load or save this room. Please try again.', response.status);
   return result;
 }
+
+export type RoomAttachment = {
+  id: string; filename: string; mimeType: string; sizeBytes: number; checksum: string;
+  uploadedByUserId: string; createdAt: string;
+};
+
+export async function uploadRoomAttachment(organizationId: string, roomId: string, file: File): Promise<RoomAttachment> {
+  const form = new FormData(); form.set('file', file);
+  const response = await fetch(`/api/organizations/${encodeURIComponent(organizationId)}/rooms/${encodeURIComponent(roomId)}/attachments`, {
+    method: 'POST', credentials: 'include', body: form,
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || !result?.attachment) throw new RoomRequestError(result?.error || 'Couldn’t save this file to the room. Please try again.', response.status);
+  return result.attachment;
+}

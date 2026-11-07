@@ -6,7 +6,7 @@ import type { PrivateAgentEvent } from '../../../shared/room-chat'
 const alice: ChatIdentity = { organizationId: 'org', roomId: 'room', userId: 'alice', sessionId: 'alice-session' }
 const bob = { ...alice, userId: 'bob', sessionId: 'bob-session' }
 const profile = { id: 'scout', name: 'Scout', role: 'Research', rules: ['Cite sources'] }
-function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<void>; reply?: string } = {}) {
+function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<void>; reply?: string; preview?: string } = {}) {
   const values = new Map<string, unknown>()
   let transactions: Promise<unknown> = Promise.resolve()
   const store = {
@@ -43,10 +43,11 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
     acquire: async () => true,
     release: async () => {},
     profile: async (identity, id) => !options.denyAgent && identity.organizationId === 'org' && id === profile.id ? profile : null,
-    stream: async function* (_profile, messages, signal) {
+    stream: async function* (_profile, messages, signal, _identity, run) {
       calls.push(messages)
       if (calls.length === 1) await options.gate
       signal.throwIfAborted()
+      if (options.preview) await run.preview?.('write', options.preview)
       if (options.fail) throw new Error('PROVIDER_SECRET_AND_PROMPT')
       yield options.reply ?? 'Private response'
     },
@@ -57,6 +58,16 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
   const invoke = (identity = alice, instruction = 'Alice secret', id = crypto.randomUUID()) => service.invoke(identity, { requestId: id, agentId: profile.id, instruction, userId: 'attacker' })
   return { service, invoke, values, events, calls, tasks, restart: () => new PrivateRoomAgents(deps), revoke: () => { allowed = false } }
 }
+
+test('document previews are ephemeral and sent only through the requesting user’s private channel', async () => {
+  const h = harness({ preview: 'PRIVATE_UNREVIEWED_DOCUMENT_TEXT' })
+  await h.invoke(alice); await Promise.all(h.tasks)
+  const previews = h.events.filter(({ event }) => event.type === 'agent.document-preview')
+  expect(previews).toHaveLength(1)
+  expect(previews[0]).toMatchObject({ userId: 'alice', event: { type: 'agent.document-preview', toolCallId: 'write', input: 'PRIVATE_UNREVIEWED_DOCUMENT_TEXT' } })
+  expect(JSON.stringify([...h.values.values()])).not.toContain('PRIVATE_UNREVIEWED_DOCUMENT_TEXT')
+  expect(await h.service.history(bob)).toEqual([])
+})
 
 test('private instructions and history are scoped to the authenticated user', async () => {
   const h = harness()

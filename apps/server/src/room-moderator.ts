@@ -177,12 +177,12 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
     }),
     specialist: async (agent, instruction, activeSignal, specialistSkills) => {
       let report = ''
-      for await (const chunk of streamPrivateRoomAgent(env, agent, [{ role: 'user', content: instruction }], activeSignal, createAgentModel, specialistSkills, { loggingContext: { ...loggingContext, kind: 'specialist', parentAgentId: profile.id } })) {
+      for await (const chunk of streamPrivateRoomAgent(env, agent, [{ role: 'user', content: instruction }], activeSignal, createAgentModel, specialistSkills, { preview: run.preview, loggingContext: { ...loggingContext, kind: 'specialist', parentAgentId: profile.id } })) {
         report += chunk
         if (report.length > 16_000) throw new Error('Specialist report too large')
       }
       return report
     },
   })
-  return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, skills, { steps: 32, timeout: 175_000, loggingContext: { ...loggingContext, kind: 'moderator' } })
+  return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, skills, { steps: 32, timeout: 175_000, preview: run.preview, loggingContext: { ...loggingContext, kind: 'moderator' } })
 }

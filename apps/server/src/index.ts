@@ -40,7 +40,7 @@ app.get('/api/room-sockets/:organizationId/:roomId', (c) => {
 app.use('/api/*', cors({
   origin: (origin, c) => origin === c.env.WEB_ORIGIN ? origin : undefined,
   credentials: true,
-  allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'X-Invitation-Id'],
 }))
 

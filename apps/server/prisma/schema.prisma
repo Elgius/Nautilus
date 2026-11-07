@@ -33,6 +33,7 @@ model User {
   roomMessages  RoomMessage[]
   documentVersions DocumentVersion[]
   roomAgentAssignments RoomAgent[]
+  roomAttachments RoomAttachment[]
 
   @@map("user")
 }
@@ -262,6 +263,7 @@ model Room {
   stars           RoomStar[]
   messages        RoomMessage[]
   documents       Document[]
+  attachments     RoomAttachment[]
 
   @@unique([organizationId, id])
   @@index([organizationId, lastActivityAt, id])
@@ -398,4 +400,25 @@ model MessageDocument {
   @@id([messageId, documentId])
   @@index([organizationId, roomId, documentId])
   @@map("messageDocument")
+}
+
+// Pending/deleting records retain object keys for retryable cleanup.
+model RoomAttachment {
+  id               String   @id @default(uuid())
+  organizationId   String
+  roomId           String
+  filename         String   @db.VarChar(255)
+  mimeType         String   @db.VarChar(255)
+  sizeBytes        Int
+  checksum         String
+  objectKey        String   @unique
+  uploadedByUserId String
+  state            String   @default("PENDING")
+  createdAt        DateTime @default(now())
+  room             Room     @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Restrict)
+  uploadedBy       User     @relation(fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, roomId, state, createdAt])
+  @@index([uploadedByUserId])
+  @@map("roomAttachment")
 }

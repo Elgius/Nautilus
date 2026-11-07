@@ -9,6 +9,7 @@ export type AgentRunContext = {
   activity: (activity: AgentWorkActivity | null, agentId: string) => Promise<void>
   committed: (commit: NonNullable<PrivateAgentJob['commits']>[number]) => Promise<void>
   checkpoint: (id: string, value: unknown) => Promise<void>
+  preview?: (toolCallId: string, input: string | null) => Promise<void>
 }
 type Entry = { identity: ChatIdentity; id: string; token?: string; deadline?: number; cancelRequested?: boolean }
 type Dependencies = {
@@ -227,7 +228,12 @@ export class PrivateRoomAgents {
           await this.deps.storage.put(ACTIVITIES, [...activities.values()])
           await this.changed(entry.identity)
         },
-        committed: async (commit) => { job.commits = [...(job.commits ?? []), commit]; await save() },
+        committed: async (commit) => { job.commits = [...(job.commits ?? []), commit]; await save(); await this.changed(entry.identity) },
+        preview: async (toolCallId, input) => {
+          signal.throwIfAborted()
+          // Ephemeral, owner-only drafts; never persist them as document versions.
+          try { await this.deps.send(entry.identity, { type: 'agent.document-preview', runId: job.id, toolCallId, input }) } catch { /* final content is recovered via work/history */ }
+        },
         checkpoint: async (id, value) => { signal.throwIfAborted(); await this.deps.storage.put(`room-work:checkpoint:${encodeURIComponent(key)}:${id}`, value) },
       }
       await context.activity({ runId: job.id, agentId: profile.id, agentName: profile.name, color: profile.color, phase: 'planning' }, profile.id)

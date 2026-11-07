@@ -23,3 +23,6 @@ apps/server/src/generated/
 # Logs and OS files
 *.log
 .DS_Store
+
+# Local video exports
+/Nautilus videos/

@@ -13,7 +13,7 @@ export type DocumentScope = { organizationId: string; roomId: string; documentId
 export type DocumentActor = { userId: string; agentId?: never; workToken?: never } | { agentId: string; userId?: never; workToken: string }
 export const versionSelect = { id: true, versionNumber: true, sizeBytes: true, mimeType: true, checksum: true,
   changeSummary: true, createdAt: true, authorUser: { select: { name: true } }, authorAgent: { select: { name: true } } } as const
-type Storage = Pick<ReturnType<typeof createStorage>, 'get' | 'put'>
+type Storage = { get: (key: string) => Promise<string>; put: (key: string, body: string) => Promise<void> }
 const digest = async (bytes: Uint8Array<ArrayBuffer>) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map((byte) => byte.toString(16).padStart(2, '0')).join('')
 
 /** Construct only with an authenticated organization scope, never model-supplied identity. */

@@ -116,6 +116,9 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
             mergeAgentJobs(event.jobs);
           } else if (event.type === "agent.update") {
             mergeAgentJobs([event.job]);
+            if (event.job.status === 'complete' || event.job.status === 'failed') window.dispatchEvent(new window.CustomEvent('room-document-preview', { detail: { organizationId, roomId, runId: event.job.id, input: null } }));
+          } else if (event.type === 'agent.document-preview') {
+            window.dispatchEvent(new window.CustomEvent('room-document-preview', { detail: { organizationId, roomId, ...event } }));
           } else if (event.type === "work.update") {
             window.dispatchEvent(new window.CustomEvent('room-work-update', { detail: { organizationId, roomId, work: event.work } }));
           } else if (event.type === "presence") {
@@ -144,6 +147,7 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
           }
         };
         socket.onclose = (event) => {
+          window.dispatchEvent(new window.CustomEvent('room-document-preview', { detail: { organizationId, roomId, input: null } }));
           clearTimeout(readTimer); readTimer = undefined; lastReadSent = 0;
           ready.current = false; clearInterval(heartbeat); setLoadingOlder(false); setOnline([]); setAgentsLoading(false);
           if (disposed) return;

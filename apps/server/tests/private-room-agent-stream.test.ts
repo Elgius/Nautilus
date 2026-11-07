@@ -1,9 +1,43 @@
 import { expect, test } from 'bun:test'
-import { simulateReadableStream } from 'ai'
+import { simulateReadableStream, tool } from 'ai'
+import { z } from 'zod'
 import { MockLanguageModelV4 } from 'ai/test'
 import { streamPrivateRoomAgent } from '../src/private-room-agent-stream'
 import type { Bindings } from '../src/env'
 const profile = { id: 'scout', name: 'Scout', role: 'Research', rules: ['Keep replies concise'] }
+
+test('document tool input streams before the write completes and closes after its result', async () => {
+  const input = '{"documentId":"doc","expectedVersionId":"v1","edits":[{"type":"insertText","index":0,"text":"ocean"}]}'
+  const split = input.indexOf('ocean') + 3
+  let completed = false
+  const previews: { input: string | null; completed: boolean }[] = []
+  const usage = { inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 2, text: 2, reasoning: undefined } }
+  const model = new MockLanguageModelV4({ doStream: [
+    { stream: simulateReadableStream({ initialDelayInMs: null, chunkDelayInMs: null, chunks: [
+      { type: 'tool-input-start', id: 'write', toolName: 'applyDocumentEdits' },
+      { type: 'tool-input-delta', id: 'write', delta: input.slice(0, split) },
+      { type: 'tool-input-delta', id: 'write', delta: input.slice(split) },
+      { type: 'tool-input-end', id: 'write' },
+      { type: 'tool-call', toolCallId: 'write', toolName: 'applyDocumentEdits', input },
+      { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+    ] }) },
+    { stream: simulateReadableStream({ initialDelayInMs: null, chunkDelayInMs: null, chunks: [
+      { type: 'text-start', id: 'answer' }, { type: 'text-delta', id: 'answer', delta: 'Saved.' }, { type: 'text-end', id: 'answer' },
+      { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage },
+    ] }) },
+  ] })
+  const skills = [{ id: 'test-write', instructions: 'Write the document.', tools: {
+    applyDocumentEdits: tool({ inputSchema: z.object({ documentId: z.string(), expectedVersionId: z.string(), edits: z.array(z.object({ type: z.literal('insertText'), index: z.number(), text: z.string() })) }), execute: async () => { completed = true; return { saved: true } } }),
+  } }]
+  let reply = ''
+  for await (const delta of streamPrivateRoomAgent({} as Bindings, profile, [{ role: 'user', content: 'Write ocean' }], new AbortController().signal, () => model, skills, {
+    preview: async (id, text) => { expect(id).toBe('write'); previews.push({ input: text, completed }) },
+  })) reply += delta
+  expect(reply).toBe('Saved.')
+  expect(previews[0]).toEqual({ input: input.slice(0, split), completed: false })
+  expect(previews.some((item) => item.input === input)).toBe(true)
+  expect(previews.at(-1)).toEqual({ input: null, completed: true })
+})
 
 test('private streaming uses the selected agent’s profile and only supplied private messages', async () => {
   const model = new MockLanguageModelV4({ doStream: {

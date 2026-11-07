@@ -16,6 +16,7 @@ import { UniverSheetsConditionalFormattingPreset } from '@univerjs/preset-sheets
 import FormattingEnUS from '@univerjs/preset-sheets-conditional-formatting/locales/en-US';
 import { belongsToOfficeUnit } from '@/lib/office-mutations';
 import type { OfficeContent } from '@/lib/office-content';
+import { updateUniverDocument } from '@/lib/univer-document-update';
 import '@univerjs/preset-docs-core/lib/index.css';
 import '@univerjs/preset-sheets-core/lib/index.css';
 import '@univerjs/preset-sheets-filter/lib/index.css';
@@ -24,7 +25,10 @@ import '@univerjs/preset-sheets-data-validation/lib/index.css';
 import '@univerjs/preset-sheets-conditional-formatting/lib/index.css';
 import './univer-editor.css';
 
-export type OfficeEditorHandle = { snapshot: () => Promise<OfficeContent> };
+export type OfficeEditorHandle = {
+  snapshot: () => Promise<OfficeContent>;
+  updateContent?: (content: OfficeContent, preview?: boolean) => boolean;
+};
 
 export default function UniverEditor({ initialContent, onReady, onDirty, onError, onSuspend, readOnly = false }: {
   initialContent: OfficeContent;
@@ -56,6 +60,9 @@ export default function UniverEditor({ initialContent, onReady, onDirty, onError
       ],
     });
     let subscription: { dispose: () => void } | undefined;
+    let applyingRemote = false;
+    let previewing = false;
+    let savedContent = initialContent;
     try {
       if (initialContent.kind === 'DOCUMENT') univerAPI.createDocument(structuredClone(initialContent.snapshot));
       else univerAPI.createWorkbook(structuredClone(initialContent.snapshot));
@@ -65,7 +72,19 @@ export default function UniverEditor({ initialContent, onReady, onDirty, onError
         else univerAPI.getActiveWorkbook()?.setEditable(!value);
       };
       void permission.current(currentReadOnly()).catch(() => reportError('Could not update editor permissions. Reload this document.'));
-      ready({ snapshot: async () => {
+      ready({ updateContent: (next, preview = false) => {
+        if (!isDoc) return false;
+        applyingRemote = true;
+        try {
+          if (preview && !previewing) savedContent = { format: 'univer', kind: 'DOCUMENT', snapshot: structuredClone(univerAPI.getActiveDocument()!.save()) };
+          if (!updateUniverDocument(univerAPI, next)) return false;
+          previewing = preview;
+          if (!preview) savedContent = next;
+          return true;
+        } finally { applyingRemote = false; }
+      }, snapshot: async () => {
+        // Unreviewed previews are never exported, saved, or retained as drafts.
+        if (previewing) return structuredClone(savedContent);
         // Read at save/export time, including the latest committed cell editor value.
         container.current?.querySelector<HTMLElement>(':focus')?.blur();
         if (isDoc) {
@@ -79,7 +98,7 @@ export default function UniverEditor({ initialContent, onReady, onDirty, onError
         return { format: 'univer', kind: 'SPREADSHEET', snapshot: structuredClone(workbook.save()) };
       } });
       subscription = univerAPI.addEvent(univerAPI.Event.CommandExecuted, (event) => {
-        if (event.type === CommandType.MUTATION && !event.id.startsWith('formula.') && !event.options?.applyFormulaCalculationResult && belongsToOfficeUnit(event.params, initialContent.snapshot.id)) dirty();
+        if (!applyingRemote && event.type === CommandType.MUTATION && !event.id.startsWith('formula.') && !event.options?.applyFormulaCalculationResult && belongsToOfficeUnit(event.params, initialContent.snapshot.id)) dirty();
       });
     } catch (error) {
       reportError(error instanceof Error ? error.message : 'Could not open the editor.');
@@ -89,7 +108,7 @@ export default function UniverEditor({ initialContent, onReady, onDirty, onError
       // handlers so that only the visible editor receives input.
       const document = isDoc ? univerAPI.getActiveDocument() : null;
       const workbook = !isDoc ? univerAPI.getActiveWorkbook() : null;
-      if (document) suspend({ format: 'univer', kind: 'DOCUMENT', snapshot: structuredClone(document.save()) }, initialContent);
+      if (document) suspend(previewing ? structuredClone(savedContent) : { format: 'univer', kind: 'DOCUMENT', snapshot: structuredClone(document.save()) }, initialContent);
       if (workbook) suspend({ format: 'univer', kind: 'SPREADSHEET', snapshot: structuredClone(workbook.save()) }, initialContent);
       subscription?.dispose(); ready(null); mount.remove();
       permission.current = null;

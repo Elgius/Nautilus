@@ -36,6 +36,12 @@ try {
   assert.equal(sockets.length, 1);
   const socket = sockets[0];
   const receive = (event: object) => socket.onmessage?.({ data: JSON.stringify(event) });
+  const previews: unknown[] = [];
+  window.addEventListener('room-document-preview', (event) => { if ('detail' in event) previews.push(event.detail); });
+  await act(async () => {
+    receive({ type: 'agent.document-preview', runId: 'run', toolCallId: 'write', input: '{"partial":"text' });
+  });
+  assert.deepEqual(previews[0], { organizationId: 'org', roomId: 'room', type: 'agent.document-preview', runId: 'run', toolCallId: 'write', input: '{"partial":"text' });
   const receipts = () => socket.sent.filter((event) => event.type === 'read').length;
   await act(async () => {
     receive({ type: 'ready' });

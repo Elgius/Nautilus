@@ -7,12 +7,14 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "build": "prisma generate && wrangler deploy --dry-run --outdir dist",
     "typecheck": "prisma generate && tsc --noEmit && tsc --noEmit -p tsconfig.tools.json",
+    "storage:reconcile": "bun scripts/reconcile-room-attachments.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:status": "prisma migrate status",
     "db:deploy": "prisma migrate deploy",
     "db:bootstrap-admin": "bun scripts/bootstrap-admin.ts",
     "test": "bun test tests",
+    "test:room-attachments-live": "bun tests/room-attachments.live.ts",
     "test:room-socket": "node tests/room-chat.runtime.mjs"
   },
   "dependencies": {

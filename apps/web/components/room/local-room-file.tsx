@@ -4,12 +4,12 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Download, FileText, Trash2, Info, ChevronDown } from 'lucide-react';
+import { Download, FileText, Trash2, Info, ChevronDown, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { downloadBlob } from '@/lib/office-content';
 import { localPreviewType, type LocalRoomFile } from '@/lib/local-room-files';
 
-export function LocalRoomFilePreview({ entry, onRemove, active, actionsContainer }: { entry: LocalRoomFile; onRemove: () => void; active: boolean; actionsContainer: HTMLDivElement | null }) {
+export function LocalRoomFilePreview({ entry, onRemove, active, actionsContainer, onSave, saving = false, saved = false }: { onSave?: () => void; saving?: boolean; saved?: boolean; entry: LocalRoomFile; onRemove: () => void; active: boolean; actionsContainer: HTMLDivElement | null }) {
   const { file } = entry;
   const [detailsOpen, setDetailsOpen] = useState(false);
   const kind = localPreviewType(file);
@@ -40,12 +40,13 @@ export function LocalRoomFilePreview({ entry, onRemove, active, actionsContainer
         <DropdownMenuContent align="end" className="min-w-48">
           <DropdownMenuItem onClick={() => downloadBlob(file, file.name)}><Download size={14} />Download original</DropdownMenuItem>
           <DropdownMenuItem onClick={() => setDetailsOpen(true)}><Info size={14} />File details</DropdownMenuItem>
-          <DropdownMenuItem variant="destructive" onClick={onRemove}><Trash2 size={14} />Remove local file</DropdownMenuItem>
+          <DropdownMenuItem variant="destructive" disabled={saving} onClick={onRemove}><Trash2 size={14} />Remove local file</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <Button variant="outline" size="sm" onClick={() => downloadBlob(file, file.name)}><Download size={14} /><span className="room-download-label">Download original</span></Button>
+      {(onSave || saved) && <Button size="sm" onClick={onSave} disabled={saving || saved}><Save size={14} />{saved ? 'Saved to room' : saving ? 'Saving…' : 'Save to room'}</Button>}
     </div>, actionsContainer)}
-    <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}><DialogContent><DialogHeader><DialogTitle>Local file details</DialogTitle><DialogDescription>This file stays in this browser tab. It is not saved to the room or uploaded to cloud storage.</DialogDescription></DialogHeader>
+    <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}><DialogContent><DialogHeader><DialogTitle>Local file details</DialogTitle><DialogDescription>This original file stays in this browser tab. Use Save to room to store a shared copy that remains after you leave.</DialogDescription></DialogHeader>
       <p className="break-all font-medium">{file.name}</p><p className="text-sm text-muted-foreground">{file.size.toLocaleString()} bytes · {file.type || 'Unknown file type'}</p>
       <p className="text-sm text-muted-foreground">Closing its tab keeps it in Files. Leaving or refreshing this room clears local files.</p>
     </DialogContent></Dialog>

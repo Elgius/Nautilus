@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { roomAttachments } from './room-attachments'
 import { bodyLimit } from 'hono/body-limit'
 import { HTTPException } from 'hono/http-exception'
 import type { AppEnv } from './index'
@@ -57,6 +58,8 @@ rooms.use('/:roomId/*', async (c, next) => {
   if (!await c.get('db').room.findUnique({ where: { id: c.req.param('roomId'), organizationId: c.get('organizationId') }, select: { id: true } })) throw new HTTPException(404, { message: 'Room not found.' })
   await next()
 })
+
+rooms.route('/:roomId/attachments', roomAttachments)
 
 // Server-authored identity only; the client cannot submit history or another user ID.
 rooms.post('/:roomId/suggestions', async (c) => {

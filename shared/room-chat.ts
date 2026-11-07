@@ -37,6 +37,7 @@ export type PrivateAgentJob = {
   commits?: { documentId: string; versionId: string; versionNumber: number }[];
 };
 export type PrivateAgentEvent =
+  | { type: 'agent.document-preview'; runId: string; toolCallId: string; input: string | null }
   | { type: 'agent.list'; agents: RoomAgentOption[] }
   | { type: 'agent.history'; jobs: PrivateAgentJob[] }
   | { type: 'agent.update'; job: PrivateAgentJob };
