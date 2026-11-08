@@ -1,17 +1,20 @@
 "use client";
 
 import { useCallback, useMemo, useState, useSyncExternalStore, type FormEvent } from "react";
-import { CalendarDays, GripVertical, Plus, Trash2 } from "lucide-react";
+import { CalendarDays, Circle, CircleCheck, CircleDashed, CircleDot, Columns3, List, ListFilter, Plus, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Calendar } from "@/components/ui/calendar";
+import { TaskCalendar } from "./task-calendar";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuGroup, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+
+const statusIcons = { "To do": Circle, "In progress": CircleDot, "In review": CircleDashed, Done: CircleCheck };
 const statuses = ["To do", "In progress", "In review", "Done"] as const;
 type Status = typeof statuses[number];
-type Task = { id: string; title: string; description: string; status: Status; date: string };
+export type Task = { id: string; title: string; description: string; status: Status; date: string };
 const selectClass = "h-8 w-full rounded-lg border border-input bg-background px-2 text-sm focus-visible:outline-ring";
 const storageEvent = "nautilus-planner-change";
 function subscribe(callback: () => void) {
@@ -44,15 +47,16 @@ export function Planner({ mode, storageKey }: { mode: "Kanban" | "Calendar"; sto
     try { return { tasks: parseTasks(raw), readError: "" }; }
     catch { return { tasks: [] as Task[], readError: "Saved tasks are unavailable. Check browser storage and reload before making changes." }; }
   }, [raw]);
-  const [selected, setSelected] = useState(() => new Date());
-  const [month, setMonth] = useState(() => new Date());
   const [draft, setDraft] = useState<Task | null>(null);
   const [error, setError] = useState("");
   const [announcement, setAnnouncement] = useState("");
   const [dragging, setDragging] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const filtered = tasks.filter((task) => `${task.title} ${task.description}`.toLowerCase().includes(query.toLowerCase()));
-  const scheduled = filtered.filter((task) => task.date === dateKey(selected));
+  const [layout, setLayout] = useState("board");
+  const [statusFilter, setStatusFilter] = useState("All tasks");
+  const [fields, setFields] = useState({ description: false, status: true, date: true });
+  const [dropTarget, setDropTarget] = useState<Status | null>(null);
+  const filtered = tasks.filter((task) => (statusFilter === "All tasks" || task.status === statusFilter) && `${task.title} ${task.description}`.toLowerCase().includes(query.toLowerCase()));
 
   function update(change: (current: Task[]) => Task[], message: string) {
     try {
@@ -67,8 +71,8 @@ export function Planner({ mode, storageKey }: { mode: "Kanban" | "Calendar"; sto
       return false;
     }
   }
-  function add(status: Status = "To do") {
-    setDraft({ id: crypto.randomUUID(), title: "", description: "", status, date: mode === "Calendar" ? dateKey(selected) : "" });
+  function add(status: Status = "To do", date = mode === "Calendar" ? dateKey(new Date()) : "") {
+    setDraft({ id: crypto.randomUUID(), title: "", description: "", status, date });
   }
   function move(id: string, status: Status) {
     update((current) => current.map((task) => task.id === id ? { ...task, status } : task), `Task moved to ${status}.`);
@@ -80,47 +84,59 @@ export function Planner({ mode, storageKey }: { mode: "Kanban" | "Calendar"; sto
     if (update((current) => current.some((task) => task.id === saved.id) ? current.map((task) => task.id === saved.id ? saved : task) : [...current, saved], "Task saved.")) setDraft(null);
   }
   function taskCard(task: Task) {
+    const StatusIcon = statusIcons[task.status];
+    const isBoard = mode === "Kanban";
     return (
-      <article key={task.id} draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", task.id); event.dataTransfer.effectAllowed = "move"; setDragging(task.id); }} onDragEnd={() => setDragging(null)} className="rounded-xl border bg-card p-4 shadow-sm">
-        <div className="flex items-start gap-2">
-          <GripVertical aria-hidden="true" className="mt-1 size-4 shrink-0 text-muted-foreground" />
-          <button type="button" onClick={() => setDraft({ ...task })} className="min-w-0 flex-1 break-words text-left text-sm font-medium hover:underline focus-visible:outline-ring">{task.title}</button>
+      <article key={task.id} draggable onDragStart={(event) => { event.dataTransfer.setData("text/plain", task.id); event.dataTransfer.effectAllowed = "move"; setDragging(task.id); }} onDragEnd={() => { setDragging(null); setDropTarget(null); }} className={`group rounded-xl border border-border/80 bg-card p-4 shadow-sm transition-[box-shadow,opacity] hover:shadow-md ${dragging === task.id ? "opacity-40" : ""}`}>
+        <div className="mb-3 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+          <span className="font-medium tracking-wide">TASK-{task.id.slice(0, 6).toUpperCase()}</span>
+          {task.date && (!isBoard || fields.date) && <time dateTime={task.date} className="flex items-center gap-1.5"><CalendarDays className="size-3" />{new Date(`${task.date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time>}
         </div>
-        {task.description && <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-xs text-muted-foreground">{task.description}</p>}
-        {task.date && <p className="mt-3 flex items-center gap-1 text-xs text-muted-foreground"><CalendarDays className="size-3" /><time dateTime={task.date}>{new Date(`${task.date}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}</time></p>}
-        <select aria-label={`Status for ${task.title}`} className={`${selectClass} mt-3`} value={task.status} onChange={(event) => move(task.id, event.target.value as Status)}>{statuses.map((status) => <option key={status}>{status}</option>)}</select>
+        <button type="button" onClick={() => setDraft({ ...task })} className="block w-full break-words text-left text-sm font-medium leading-relaxed hover:text-primary focus-visible:outline-ring">{task.title}</button>
+        {task.description && (!isBoard || fields.description) && <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">{task.description}</p>}
+        {(!isBoard || fields.status) && <div className="mt-4 flex items-center gap-1.5"><StatusIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" /><select aria-label={`Status for ${task.title}`} className="h-7 max-w-full rounded-md border border-border/70 bg-card px-2 text-xs text-foreground focus-visible:outline-ring" value={task.status} onChange={(event) => move(task.id, event.target.value as Status)}>{statuses.map((status) => <option key={status}>{status}</option>)}</select></div>}
       </article>
     );
   }
   return (
     <section className="space-y-6">
       <div className="page-heading">
-        <div><div className="eyebrow"><span /> YOUR TEAM, IN SYNC</div><h1>{mode === "Kanban" ? "A clear path from to do to done." : "Make time for what’s next."}</h1><p>{mode === "Kanban" ? "Organize tasks and move work forward, one card at a time." : "Plan your days and keep task due dates in view."}</p></div>
+        <div><div className="eyebrow"><span /> YOUR TEAM, IN SYNC</div><h1>{mode === "Kanban" ? "Your team’s work." : "Your team’s calendar."}</h1><p>{mode === "Kanban" ? "Organize tasks and move work forward, one card at a time." : "Plan your days and keep task due dates in view."}</p></div>
         <Button onClick={() => add()} disabled={!!readError}><Plus />Add task</Button>
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-3"><Input aria-label="Search tasks" placeholder="Search tasks…" className="max-w-sm" value={query} onChange={(event) => setQuery(event.target.value)} /><p className="text-xs text-muted-foreground">Saved in this browser · Personal to this workspace</p></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-5">
+        {<DropdownMenu>
+          <DropdownMenuTrigger render={<Button variant="outline" />}><ListFilter />{statusFilter === "All tasks" ? "Filters and views" : statusFilter}{statusFilter !== "All tasks" && <span className="size-1.5 rounded-full bg-primary" />}</DropdownMenuTrigger>
+          <DropdownMenuContent className="w-52"><DropdownMenuGroup><DropdownMenuLabel>Filter by status</DropdownMenuLabel><DropdownMenuRadioGroup value={statusFilter} onValueChange={setStatusFilter}>{["All tasks", ...statuses].map((status) => <DropdownMenuRadioItem closeOnClick key={status} value={status}>{status}</DropdownMenuRadioItem>)}</DropdownMenuRadioGroup></DropdownMenuGroup></DropdownMenuContent>
+        </DropdownMenu>}
+        <div className="ml-auto flex w-full max-w-full items-center justify-end gap-2 sm:w-auto sm:flex-1">
+          <div className="relative w-full sm:max-w-72"><Search aria-hidden="true" className="absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input aria-label="Search tasks" placeholder="Search tasks…" className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} /></div>
+          {mode === "Kanban" && <DropdownMenu>
+            <DropdownMenuTrigger render={<Button variant="outline" />}><SlidersHorizontal />Display</DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64 p-2">
+              <DropdownMenuGroup><DropdownMenuLabel>Layout</DropdownMenuLabel><DropdownMenuRadioGroup value={layout} onValueChange={setLayout} className="grid grid-cols-2 gap-2 p-1"><DropdownMenuRadioItem closeOnClick value="list" className="flex-col rounded-lg border py-4"><List />List</DropdownMenuRadioItem><DropdownMenuRadioItem closeOnClick value="board" className="flex-col rounded-lg border py-4"><Columns3 />Board</DropdownMenuRadioItem></DropdownMenuRadioGroup></DropdownMenuGroup>
+              <DropdownMenuSeparator /><DropdownMenuGroup><DropdownMenuLabel>Card properties</DropdownMenuLabel>{([['status', 'Status'], ['date', 'Due date'], ['description', 'Description']] as const).map(([key, label]) => <DropdownMenuCheckboxItem key={key} checked={fields[key]} closeOnClick={false} onCheckedChange={(checked) => setFields((current) => ({ ...current, [key]: checked }))} className="py-2.5">{label}</DropdownMenuCheckboxItem>)}</DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>}
+        </div>
+      </div>
       {(error || readError) && <p role="alert" className="text-sm text-destructive">{error || readError}</p>}
       <p role="status" className="sr-only">{announcement}</p>
       {mode === "Kanban" ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {statuses.map((status) => {
+        <div className={layout === "board" ? "flex items-stretch gap-4 overflow-x-auto pb-3" : "space-y-4"}>
+          {statuses.filter((status) => statusFilter === "All tasks" || statusFilter === status).map((status) => {
             const cards = filtered.filter((task) => task.status === status);
-            return <section key={status} aria-label={status} onDragOver={(event) => { if (dragging) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); if (dragging && event.dataTransfer.getData("text/plain") === dragging) move(dragging, status); setDragging(null); }} className="min-h-72 rounded-xl border bg-muted/40 p-3">
-              <div className="mb-4 flex items-center gap-2"><h2 className="text-sm font-semibold">{status}</h2><Badge variant="secondary">{cards.length}</Badge><Button variant="ghost" size="icon-sm" className="ml-auto" aria-label={`Add task to ${status}`} onClick={() => add(status)} disabled={!!readError}><Plus /></Button></div>
-              <div className="space-y-3">{cards.map(taskCard)}{cards.length === 0 && <p className="rounded-lg border border-dashed p-6 text-center text-xs text-muted-foreground">{query ? "No matching tasks." : "Add a task or move one here."}</p>}</div>
+            const StatusIcon = statusIcons[status];
+            return <section key={status} aria-label={status} onDragOver={(event) => { if (dragging) { event.preventDefault(); setDropTarget(status); } }} onDrop={(event) => { event.preventDefault(); if (dragging && event.dataTransfer.getData("text/plain") === dragging) move(dragging, status); setDragging(null); setDropTarget(null); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null); }} className={`rounded-2xl border p-3 transition-colors ${layout === "board" ? "min-h-[max(420px,calc(100dvh-310px))] min-w-[280px] flex-1" : ""} ${dropTarget === status ? "border-primary/50 bg-primary/10" : "border-border/40 bg-muted"}`}>
+              <div className="mb-3 flex items-center gap-2 px-1"><StatusIcon aria-hidden="true" className="size-4 text-primary" /><h2 className="text-sm font-semibold">{status}</h2><Badge variant="outline" className="rounded-md bg-card font-normal">{cards.length}</Badge><Button variant="ghost" size="icon-sm" className="ml-auto" aria-label={`Add task to ${status}`} onClick={() => add(status)} disabled={!!readError}><Plus /></Button></div>
+              <div className="space-y-3">{cards.map(taskCard)}{cards.length === 0 && <div className="rounded-xl border border-dashed border-border/80 px-4 py-8 text-center"><StatusIcon aria-hidden="true" className="mx-auto mb-3 size-6 text-primary/40" /><p className="text-xs text-muted-foreground">{query ? "No matching tasks." : "No tasks yet"}</p><Button variant="ghost" size="sm" className="mt-2 text-xs text-muted-foreground" onClick={() => add(status)} disabled={!!readError}><Plus />Add task</Button></div>}</div>
             </section>;
           })}
         </div>
       ) : (
-        <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,1fr)]">
-          <div className="min-w-0 rounded-xl border bg-card p-2 sm:p-5">
-            <div className="mb-2 flex items-center justify-between px-2"><h2 className="font-semibold">Task calendar</h2><Button variant="outline" onClick={() => { const today = new Date(); setSelected(today); setMonth(today); }}>Today</Button></div>
-            <Calendar mode="single" required selected={selected} onSelect={setSelected} month={month} onMonthChange={setMonth} className="w-full [--cell-size:clamp(2rem,5vw,4rem)]" classNames={{ root: "w-full" }} modifiers={{ scheduled: (date) => filtered.some((task) => task.date === dateKey(date)) }} modifiersClassNames={{ scheduled: "after:pointer-events-none after:absolute after:bottom-1 after:left-1/2 after:z-20 after:size-1 after:-translate-x-1/2 after:rounded-full after:bg-primary" }} />
-            <p className="px-3 pb-2 text-xs text-muted-foreground">Dots mark days with tasks. Select a day to see its agenda.</p>
-          </div>
-          <section className="space-y-4"><div className="flex items-center justify-between gap-2"><h2 className="font-semibold">{selected.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</h2><Badge variant="secondary">{scheduled.length} tasks</Badge></div>{scheduled.map(taskCard)}{scheduled.length === 0 && <div className="rounded-xl border border-dashed p-8 text-center"><CalendarDays className="mx-auto mb-3 size-8 text-muted-foreground" /><p className="text-sm text-muted-foreground">{query ? "No matching tasks for this day." : "Nothing scheduled. Give your next task a date."}</p><Button variant="outline" className="mt-4" onClick={() => add()} disabled={!!readError}><Plus />Add task</Button></div>}<p className="text-xs text-muted-foreground">Tasks without a due date are available on the Kanban board.</p></section>
-        </div>
+        <TaskCalendar tasks={filtered} disabled={!!readError} onAdd={(date) => add("To do", date)} onEdit={(task) => setDraft({ ...task })} />
       )}
+      <p className="text-xs text-muted-foreground">Saved in this browser · Personal to this workspace</p>
       <Dialog open={draft !== null} onOpenChange={(open) => { if (!open) setDraft(null); }}>
         <DialogContent><DialogHeader><DialogTitle>{tasks.some((task) => task.id === draft?.id) ? "Edit task" : "Add task"}</DialogTitle><DialogDescription>Track work on the board and add a due date to show it on your calendar.</DialogDescription></DialogHeader>
           {draft && <form onSubmit={save} className="space-y-4">
