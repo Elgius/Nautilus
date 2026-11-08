@@ -236,3 +236,7 @@ user files before claiming full Word/Excel compatibility.
 The former `nautilus/` directory is now `apps/web/`; `nautilus-server/` is now
 `apps/server/`. The frontend's Git history has been moved to this repository root.
 Existing application source and uncommitted edits were preserved.
+
+The backend [scheduler](apps/server/src/scheduler/index.ts) dispatches database-backed
+one-time events to room agents asynchronously. Its registered tools and delivery
+contract are documented in the [scheduler skill](skills/scheduler.md).

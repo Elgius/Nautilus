@@ -217,3 +217,28 @@ test('Unicode replies cannot overflow durable job storage and retain a safe fail
   expect(job.status).toBe('failed')
   expect(new TextEncoder().encode(JSON.stringify(job)).byteLength).toBeLessThan(110_000)
 })
+
+test('scheduled delivery receipts survive history pruning and coordinator restart', async () => {
+  const h = harness()
+  const id = crypto.randomUUID()
+  const identity = { ...alice, scheduledDeliveryId: id, sessionId: '' }
+  const input = { requestId: id, agentId: profile.id, instruction: 'Scheduled task' }
+  await h.service.invoke(identity, input, true)
+  await Promise.all(h.tasks)
+  const count = h.calls.length
+  // Simulate normal history pruning while preserving the durable receipt.
+  for (const key of h.values.keys()) if (key.includes(`job:${id}`)) h.values.delete(key)
+  await h.restart().invoke(identity, input, true)
+  await Promise.all(h.tasks)
+  expect(h.calls).toHaveLength(count)
+  expect(h.values.get(`scheduler:receipt:${id}`)).toBe(true)
+})
+
+test('scheduled execution excludes earlier unrelated private conversation', async () => {
+  const h = harness()
+  await h.invoke(); await Promise.all(h.tasks)
+  const id = crypto.randomUUID()
+  await h.service.invoke({ ...alice, scheduledDeliveryId: id }, { requestId: id, agentId: profile.id, instruction: 'Future authorized task' }, true)
+  await Promise.all(h.tasks)
+  expect(h.calls[1]).toEqual([{ role: 'user', content: 'Future authorized task' }])
+})

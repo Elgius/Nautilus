@@ -1,3 +1,4 @@
+import { createSchedulerSkill } from './scheduler/skill'
 import { reviewDocumentEdit, type EditReview } from './edit-review'
 import { tool } from 'ai'
 import { z } from 'zod'
@@ -184,5 +185,6 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
       return report
     },
   })
+  if (!identity.scheduledDeliveryId) skills.push(createSchedulerSkill(identity, profile.id, withDatabase, signal))
   return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, skills, { steps: 32, timeout: 175_000, preview: run.preview, loggingContext: { ...loggingContext, kind: 'moderator' } })
 }

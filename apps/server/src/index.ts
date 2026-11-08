@@ -1,3 +1,4 @@
+import { runScheduler } from './scheduler'
 export { RoomChat } from './room-chat'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
@@ -179,4 +180,9 @@ app.get('/api/admin/email-outbox', authenticated, platformAdmin, async (c) => {
 
 app.onError(handleApiError)
 
-export default app
+// Preserve the Hono instance for existing local consumers and tests.
+export default Object.assign(app, {
+  scheduled(_controller: ScheduledController, env: Bindings, ctx: ExecutionContext) {
+    ctx.waitUntil(runScheduler(env))
+  },
+})

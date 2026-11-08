@@ -1,17 +1,21 @@
 import type { Database } from './db'
 
-export type ChatIdentity = { organizationId: string; roomId: string; userId: string; sessionId: string; name?: string }
+export type ChatIdentity = { organizationId: string; roomId: string; userId: string; sessionId: string; scheduledDeliveryId?: string; name?: string }
 export const chatInclude = {
   authorUser: { select: { name: true } }, authorAgent: { select: { name: true } },
   documents: { select: { documentId: true, documentVersionId: true, document: { select: { title: true, kind: true } } } },
 } as const
 export async function canChat(db: Database, identity: ChatIdentity) {
   const { organizationId, roomId, userId, sessionId } = identity
-  const [session, member] = await Promise.all([
-    db.session.findFirst({ where: { id: sessionId, userId, expiresAt: { gt: new Date() } }, select: { id: true } }),
+  // scheduledDeliveryId is set only by the internal scheduler receiver.
+  // Browser identities always require a live authenticated session.
+  const [authorization, member] = await Promise.all([
+    identity.scheduledDeliveryId
+      ? db.schedulerDelivery.findFirst({ where: { id: identity.scheduledDeliveryId, schedule: { state: 'started', event: { organizationId, roomId, ownerUserId: userId } } }, select: { id: true } })
+      : db.session.findFirst({ where: { id: sessionId, userId, expiresAt: { gt: new Date() } }, select: { id: true } }),
     db.roomMember.findFirst({ where: { organizationId, roomId, member: { userId, organizationId } }, select: { organizationMemberId: true } }),
   ])
-  return session && member ? member : null
+  return authorization && member ? member : null
 }
 export function parseSend(input: Record<string, unknown>) {
   if (typeof input.clientMessageId !== 'string' || !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(input.clientMessageId)) throw new Error('Invalid message ID.')

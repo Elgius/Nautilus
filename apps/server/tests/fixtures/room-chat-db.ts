@@ -11,6 +11,13 @@ export function seed() {
 export function revoke() { revoked = true }
 export function createDatabase() {
   const db = {
+    schedulerDelivery: { findFirst: async ({ where }: { where: { id: string; leaseToken?: string; schedule?: { event: { organizationId: string; roomId: string; ownerUserId: string } } } }) => {
+      if (!['c326b5dc-0fdd-4d70-b838-d155fe1ecacd', 'c326b5dc-0fdd-4d70-b838-d155fe1ecace'].includes(where.id)) return null
+      if (where.leaseToken !== undefined && where.leaseToken !== 'valid-lease') return null
+      const ownerUserId = where.id.endsWith('e') ? 'outsider' : 'alice'
+      if (where.schedule && (where.schedule.event.organizationId !== 'org' || where.schedule.event.roomId !== 'room' || where.schedule.event.ownerUserId !== ownerUserId)) return null
+      return { id: where.id, agentId: 'agent-1', schedule: { state: 'started', scheduledAt: new Date('2026-01-01T00:00:00Z'), event: { organizationId: 'org', roomId: 'room', ownerUserId, title: 'Private scheduled event', instruction: 'SCHEDULED_PRIVATE_TASK' } } }
+    } },
     session: { findFirst: async ({ where }: { where: { userId: string } }) => where.userId !== 'expired' && !(revoked && where.userId === 'bob') ? { id: 'session' } : null },
     roomAgent: {
       findMany: async ({ where }: { where: { organizationId: string; roomId: string } }) => where.organizationId === 'org' && where.roomId === 'room' ? [{ agent: { id: 'agent-1', name: 'Scout', role: 'Research' } }] : [],

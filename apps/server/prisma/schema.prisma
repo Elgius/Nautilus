@@ -24,6 +24,7 @@ model User {
   platformRole  String   @default("user")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  scheduledEvents SchedulerEvent[]
   sessions      Session[]
   accounts      Account[]
   members       Member[]
@@ -173,6 +174,7 @@ enum AgentStatus {
 }
 
 model Agent {
+  scheduledDeliveries SchedulerDelivery[]
   id             String       @id @default(uuid())
   organizationId String
   name           String       @db.VarChar(30)
@@ -243,6 +245,7 @@ enum DocumentStatus {
 }
 
 model Room {
+  scheduledEvents SchedulerEvent[]
   id              String       @id @default(uuid())
   organizationId  String
   name            String       @db.VarChar(70)
@@ -421,4 +424,51 @@ model RoomAttachment {
   @@index([organizationId, roomId, state, createdAt])
   @@index([uploadedByUserId])
   @@map("roomAttachment")
+}
+
+// Event content is separate from timing and per-agent delivery state.
+model SchedulerEvent {
+  id String @id @default(uuid())
+  organizationId String
+  roomId String
+  ownerUserId String
+  title String
+  instruction String
+  createdAt DateTime @default(now())
+  room Room @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Cascade)
+  owner User @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  schedules SchedulerSchedule[]
+  @@index([organizationId, roomId, ownerUserId])
+  @@map("schedulerEvent")
+}
+
+model SchedulerSchedule {
+  id String @id @default(uuid())
+  eventId String
+  scheduledAt DateTime @db.Timestamptz(3)
+  state String @default("pending")
+  createdAt DateTime @default(now())
+  event SchedulerEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  deliveries SchedulerDelivery[]
+  @@index([state, scheduledAt])
+  @@map("schedulerSchedule")
+}
+
+model SchedulerDelivery {
+  id String @id @default(uuid())
+  scheduleId String
+  organizationId String
+  agentId String
+  state String @default("pending")
+  attempts Int @default(0)
+  nextAttemptAt DateTime @db.Timestamptz(3)
+  leaseToken String?
+  leaseExpiresAt DateTime? @db.Timestamptz(3)
+  acceptedAt DateTime? @db.Timestamptz(3)
+  lastError String?
+  schedule SchedulerSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  agent Agent @relation(fields: [organizationId, agentId], references: [organizationId, id], onDelete: Cascade)
+  @@unique([scheduleId, agentId])
+  @@index([state, nextAttemptAt])
+  @@map("schedulerDelivery")
 }

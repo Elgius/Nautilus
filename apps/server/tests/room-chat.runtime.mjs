@@ -8,7 +8,7 @@ const root = fileURLToPath(new URL('..', import.meta.url))
 const bundle = await build({
   stdin: { contents: `import app from './src/index'; import { RoomChat } from './tests/fixtures/room-chat-lifecycle'; import { revoke, seed } from './tests/fixtures/room-chat-db'; import { privateAgentCalls } from './tests/fixtures/private-agent-stream'; export { RoomChat }; export default { fetch(request, env, ctx) { const url = new URL(request.url); if (url.pathname === '/agent-calls') return Response.json({ calls: privateAgentCalls() }); if (url.pathname === '/seed') { seed(); return new Response('ok'); } if (url.pathname === '/revoke') { revoke(); return new Response('ok'); } const room = url.searchParams.get('room') || 'room'; if (url.pathname === '/socket') { url.pathname = '/api/room-sockets/org/' + room; return app.fetch(new Request(url, request), env, ctx); } return env.ROOM_CHAT.get(env.ROOM_CHAT.idFromName(JSON.stringify(['org', room]))).fetch(request); } };`, resolveDir: root, loader: 'ts' },
   bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', external: ['cloudflare:workers', 'node:*'],
-  plugins: [{ name: 'test-database', setup(builder) { builder.onResolve({ filter: /^\.\/private-room-agent-stream$/ }, () => ({ path: path.join(root, 'tests/fixtures/private-agent-stream.ts') })); builder.onResolve({ filter: /^\.\/db$/ }, () => ({ path: path.join(root, 'tests/fixtures/room-chat-db.ts') })) } }],
+  plugins: [{ name: 'test-database', setup(builder) { builder.onResolve({ filter: /^\.\/private-room-agent-stream$/ }, () => ({ path: path.join(root, 'tests/fixtures/private-agent-stream.ts') })); builder.onResolve({ filter: /^\.{1,2}\/db$/ }, () => ({ path: path.join(root, 'tests/fixtures/room-chat-db.ts') })) } }],
 })
 const mf = new Miniflare({ workers: [{ config: {
   name: 'room-test', compatibilityDate: '2026-10-24', compatibilityFlags: ['nodejs_compat'],
@@ -147,6 +147,20 @@ try {
   assert.equal(JSON.stringify(publicHistory).includes('BOB_PRIVATE'), false)
   send(alice, { type: 'send', clientMessageId: crypto.randomUUID(), text: '@Scout ' + secret })
   assert.match((await receive(alice, 'error')).error, /Select an agent/)
+  // Scheduler delivery uses real Durable Object storage and owner-only delivery.
+  const scheduledId = 'c326b5dc-0fdd-4d70-b838-d155fe1ecacd'
+  const deliver = (leaseToken = 'valid-lease', room = 'room', deliveryId = scheduledId) => mf.dispatchFetch(`https://api.test/scheduler?room=${room}`, { method: 'POST', body: JSON.stringify({ deliveryId, leaseToken }) })
+  assert.equal((await deliver('expired-lease')).status, 409)
+  assert.equal((await deliver('valid-lease', 'other')).status, 403)
+  assert.equal((await deliver('valid-lease', 'room', 'c326b5dc-0fdd-4d70-b838-d155fe1ecace')).status, 403)
+  assert.equal((await deliver()).status, 202)
+  let scheduledResult
+  do { scheduledResult = await receive(alice, 'agent.update') } while (scheduledResult.job.id !== scheduledId || scheduledResult.job.status !== 'complete')
+  assert.match(scheduledResult.job.reply, /SCHEDULED_PRIVATE_TASK/)
+  const callsBeforeRetry = (await (await mf.dispatchFetch('https://api.test/agent-calls')).json()).calls
+  assert.equal((await deliver()).status, 202)
+  assert.equal((await (await mf.dispatchFetch('https://api.test/agent-calls')).json()).calls, callsBeforeRetry)
+  for (const peer of [bob, other]) assert.equal(queues.get(peer).some((event) => JSON.stringify(event).includes('SCHEDULED_PRIVATE_TASK')), false)
   await mf.dispatchFetch('https://api.test/revoke')
   const closed = new Promise((resolve) => bob.addEventListener('close', (event) => resolve(event.code), { once: true }))
   send(bob, { type: 'send', clientMessageId: crypto.randomUUID(), text: 'revoked' })
