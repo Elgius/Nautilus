@@ -13,6 +13,9 @@ import {
 export function NavProjects({
   projects,
   onCreate,
+  loading,
+  error,
+  onRetry,
 }: {
   projects: {
     id: string;
@@ -21,6 +24,9 @@ export function NavProjects({
     onClick: () => void;
   }[];
   onCreate: () => void;
+  loading?: boolean;
+  error?: string;
+  onRetry?: () => void;
 }) {
   return (
     <SidebarGroup className="group-data-[collapsible=icon]:hidden">
@@ -39,7 +45,9 @@ export function NavProjects({
           </SidebarMenuItem>
         ))}
       </SidebarMenu>
-      {projects.length === 0 && (
+      {loading && <p role="status" className="px-2 py-1 text-xs text-sidebar-foreground/70">Loading starred rooms…</p>}
+      {error && <div role="alert" className="px-2 py-1 text-xs text-sidebar-foreground/70"><p>{error}</p><button type="button" className="mt-1 underline" onClick={onRetry}>Retry starred rooms</button></div>}
+      {!loading && !error && projects.length === 0 && (
         <p className="px-2 py-1 text-xs text-sidebar-foreground/70">
           Star a room to keep it here.
         </p>

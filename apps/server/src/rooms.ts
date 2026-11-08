@@ -37,11 +37,27 @@ async function checkAgents(db: Database, organizationId: string, agentIds: strin
   }
 }
 
-rooms.get('/', async (c) => c.json({ rooms: await c.get('db').room.findMany({
-  omit: privateRoomFields,
-  where: { organizationId: c.get('organizationId') },
-  include: roomInclude(c.get('session').user.id), orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }],
-}) }))
+rooms.get('/', async (c) => {
+  const include = roomInclude(c.get('session').user.id)
+  if (c.req.query('summary') === '1') {
+    return c.json({ rooms: await c.get('db').room.findMany({
+      omit: privateRoomFields,
+      where: { organizationId: c.get('organizationId') },
+      include: {
+        ...include,
+        agents: { orderBy: { position: 'asc' }, select: { agent: { select: { id: true, name: true } } } },
+        documents: { distinct: ['kind'], select: { kind: true } },
+        _count: { select: { documents: true } },
+      },
+      orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }],
+    }) })
+  }
+  return c.json({ rooms: await c.get('db').room.findMany({
+    omit: privateRoomFields,
+    where: { organizationId: c.get('organizationId') },
+    include, orderBy: [{ lastActivityAt: 'desc' }, { id: 'desc' }],
+  }) })
+})
 
 rooms.post('/', async (c) => {
   const { agentIds, ...data } = parseRoom(await body(c.req))

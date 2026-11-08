@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, Suspense, type ReactNode, type FormEvent } from "react";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { type Room } from "@/lib/room-data";
@@ -8,15 +8,13 @@ import { roomRequest, toRoom, type RoomRecord } from "@/lib/room-client";
 import { type Agent, type AgentProfile, type AgentCreationInput } from "@/lib/agent-data";
 import { createAgentFromDescription, persistAgent } from "@/lib/agent-client";
 import { AgentPortrait } from "@/components/agents/agent-portrait";
-import { AgentProfileDialog } from "@/components/agents/agent-profile-dialog";
-import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
 import {
   Accordion,
   AccordionItem,
   AccordionTrigger,
   AccordionContent,
 } from "@/components/ui/accordion";
-import { RoomDocumentLibrary } from "@/components/workspace/room-document-library";
+
 import "@/app/documents.css";
 import { ThemeSettings } from "@/components/theme-settings";
 import { BrandMark } from "@/components/brand-mark";
@@ -74,7 +72,20 @@ import {
 } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
-import { Planner } from "./planner";
+import dynamic from "next/dynamic";
+import { useWorkspaceData } from "@/lib/workspace-data";
+import { ViewBoundary, ViewLoading } from "./view-boundary";
+
+const loadDocuments = () => import("./room-document-library");
+const loadPlanner = () => import("./planner");
+const RoomDocumentLibrary = dynamic(() => loadDocuments().then((module) => module.RoomDocumentLibrary), { loading: ViewLoading });
+const Planner = dynamic(() => loadPlanner().then((module) => module.Planner), { loading: ViewLoading });
+const AgentProfileDialog = dynamic(() => import("@/components/agents/agent-profile-dialog").then((module) => module.AgentProfileDialog));
+const CreateAgentDialog = dynamic(() => import("@/components/agents/create-agent-dialog").then((module) => module.CreateAgentDialog));
+function prefetchView(view: WorkspaceView) {
+  if (view === "Documents") void loadDocuments().catch(() => {});
+  if (view === "Kanban" || view === "Calendar") void loadPlanner().catch(() => {});
+}
 
 type View = WorkspaceView;
 type Event = {
@@ -118,7 +129,7 @@ function Status({ status }: { status: Room["status"] }) {
   );
 }
 
-export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agent[]; initialRooms: Room[] }) {
+export function Workspace({ children }: { children?: ReactNode }) {
   const router = useRouter();
   const { session, refresh } = useWorkspaceSession();
   const workspaceName = session.activeOrganization?.name || "Workspace";
@@ -134,8 +145,6 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
   const requestedView = searchParams.get("view");
   const view: View = pathname === "/kanban" ? "Kanban" : pathname === "/calendar" ? "Calendar" :
     [...navigation.map((item) => item.label), "Settings"].includes(requestedView || "") ? requestedView as View : "Overview";
-  const [rooms, setRooms] = useState(initialRooms);
-  const [agents, setAgents] = useState(initialAgents);
   const [events, setEvents] = useState<Event[]>([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("All rooms");
@@ -145,8 +154,19 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
   >(null);
   const [notice, setNotice] = useState("");
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const viewNeedsAgents = ["Overview", "Rooms", "Agents"].includes(view);
+  const needsAgents = viewNeedsAgents || modal === "room" || modal === "agent" || editingAgentId !== null;
+  const { rooms: roomData, agents: agentData } = useWorkspaceData(session.activeOrganization!.id, needsAgents);
+  const rooms = roomData.data ?? [];
+  const agents = agentData.data ?? [];
+  const setRooms = (change: (current: Room[]) => Room[]) => { void roomData.mutate((current) => change(current ?? []), { revalidate: true }); };
+  const setAgents = (change: (current: Agent[]) => Agent[]) => { void agentData.mutate((current) => change(current ?? []), { revalidate: true }); };
+  const needsRooms = view === "Overview" || view === "Rooms";
+  const dataError = (needsRooms && roomData.error) || (viewNeedsAgents && agentData.error);
+  const waitingForData = (needsRooms && !roomData.data) || (viewNeedsAgents && !agentData.data);
   const editingAgent = agents.find((agent) => agent.id === editingAgentId);
-  const [selectedAgents, setSelectedAgents] = useState<string[]>(initialAgents[0] ? [initialAgents[0].id] : []);
+  const [selectedAgentIds, setSelectedAgents] = useState<string[] | null>(null);
+  const selectedAgents = selectedAgentIds ?? (agents[0] ? [agents[0].id] : []);
   const visibleRooms = rooms.filter(
     (room) =>
       (filter !== "Starred" || room.favorite) &&
@@ -267,7 +287,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
     setNotice(`${name}’s profile saved.`);
     return null;
   }
-  function openRoom(room: Room) {
+  function openRoom(room: { id: string }) {
     router.push(`/room-id=${encodeURIComponent(room.id)}`);
   }
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
@@ -302,8 +322,13 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
           view={view}
           navigation={navigation}
           rooms={rooms}
-          agentCount={agents.length}
+          roomsLoading={roomData.isLoading}
+          roomsError={roomData.error ? "Couldn’t refresh starred rooms." : undefined}
+          onRetryRooms={() => void roomData.mutate()}
+          agentCount={agentData.data?.length}
           onNavigate={navigate}
+          onPrefetch={prefetchView}
+          onNavigateLink={() => setSearch("")}
           onOpenRoom={(id) => {
             const room = rooms.find((room) => room.id === id);
             if (room) openRoom(room);
@@ -337,6 +362,11 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
             </div>
           </header>
           <main className="main-content">
+            {children}
+            <ViewBoundary key={view}>
+            <Suspense fallback={<ViewLoading />}>
+            {dataError && <div role="alert" className="mb-4 rounded-xl border p-4"><p>{dataError.message}</p><Button variant="outline" className="mt-2" onClick={() => { if (needsRooms) void roomData.mutate(); if (needsAgents) void agentData.mutate(); }}>Retry loading</Button></div>}
+            {waitingForData ? (!dataError && <ViewLoading />) : <>
             {view !== "Documents" && view !== "Kanban" && view !== "Calendar" && (
               <div className="page-heading">
                 <div>
@@ -383,7 +413,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
               </div>
             )}
             {(view === "Kanban" || view === "Calendar") && <Planner key={`${session.user.id}:${session.activeOrganization?.id}`} mode={view} storageKey={`nautilus:planner:v1:${session.user.id}:${session.activeOrganization?.id}`} />}
-            {view === "Documents" && <RoomDocumentLibrary rooms={rooms} onOpen={openRoom} />}
+            {view === "Documents" && <RoomDocumentLibrary organizationId={session.activeOrganization!.id} onOpen={openRoom} />}
             {(view === "Overview" || view === "Rooms") && (
               <>
                 {view === "Overview" && (
@@ -862,6 +892,9 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
               </section>
               </>
             )}
+            </>}
+            </Suspense>
+            </ViewBoundary>
             <footer className="page-footer">
               <span>
                 <BrandMark className="nautilus-mark small" /> Room to think.
@@ -903,9 +936,10 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
                       : "Your shared workspace for people and AI agents."}
               </DialogDescription>
             </DialogHeader>
+            {modal === "room" && agentData.error && <div role="alert"><p>{agentData.error.message}</p><Button variant="outline" onClick={() => void agentData.mutate()}>Retry agents</Button></div>}
             {modal === "room" && (
               <form onSubmit={createRoom} className="dialog-form" aria-busy={creatingRoom}>
-                <fieldset disabled={creatingRoom} className="contents">
+                <fieldset disabled={creatingRoom || !agentData.data} className="contents">
                 <label htmlFor="room-name">Room name</label>
                 <Input
                   id="room-name"
@@ -935,6 +969,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
                   </SelectContent>
                 </Select>
                 <label>Add agents</label>
+                {agentData.isLoading && <p role="status">Loading agents…</p>}
                 <div className="agent-choices">
                   {agents.map((agent) => (
                     <Button variant="ghost" size="sm"
@@ -946,9 +981,9 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
                       key={agent.name}
                       onClick={() =>
                         setSelectedAgents((previous) =>
-                          previous.includes(agent.id)
-                            ? previous.filter((id) => id !== agent.id)
-                            : [...previous, agent.id],
+                          (previous ?? selectedAgents).includes(agent.id)
+                            ? (previous ?? selectedAgents).filter((id) => id !== agent.id)
+                            : [...(previous ?? selectedAgents), agent.id],
                         )
                       }
                     >
