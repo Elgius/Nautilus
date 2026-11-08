@@ -75,6 +75,26 @@ export class RoomChat extends DurableObject<Bindings> {
   private queue: Promise<void> = Promise.resolve()
   async fetch(request: Request) {
     const url = new URL(request.url)
+    // Internal binding-only endpoint: the public Worker never forwards this path.
+    // Load identity/content from the database, never from the request body.
+    if (url.pathname === '/scheduler' && request.method === 'POST') {
+      const { deliveryId, leaseToken } = await request.json<{ deliveryId: string; leaseToken: string }>()
+      if (typeof deliveryId !== 'string' || typeof leaseToken !== 'string') return new Response('Invalid delivery', { status: 400 })
+      return this.withDatabase(async (db) => {
+        const delivery = await db.schedulerDelivery.findFirst({ where: { id: deliveryId, leaseToken, state: 'dispatching', leaseExpiresAt: { gt: new Date() } }, include: { schedule: { include: { event: true } } } })
+        if (!delivery || delivery.schedule.state !== 'started') return new Response('Delivery unavailable', { status: 409 })
+        const event = delivery.schedule.event
+        const expectedId = this.env.ROOM_CHAT?.idFromName(JSON.stringify([event.organizationId, event.roomId]))
+        if (!expectedId || !this.ctx.id.equals(expectedId)) return new Response('Wrong room', { status: 403 })
+        const identity: ChatIdentity = { organizationId: event.organizationId, roomId: event.roomId, userId: event.ownerUserId, sessionId: '', scheduledDeliveryId: delivery.id }
+        if (!await canChat(db, identity) || !await db.roomAgent.findFirst({ where: { organizationId: event.organizationId, roomId: event.roomId, agentId: delivery.agentId } })) return new Response('Access expired', { status: 403 })
+        try {
+          await this.agentService.invoke(identity, { requestId: delivery.id, agentId: delivery.agentId,
+            instruction: `Scheduled event: ${event.title}\nScheduled for: ${delivery.schedule.scheduledAt.toISOString()}\n\n${event.instruction}` }, true)
+          return new Response(null, { status: 202 })
+        } catch { return new Response('Queue unavailable', { status: 503 }) }
+      })
+    }
     if (url.pathname === '/work' && request.method === 'GET') {
       return Response.json(await this.agentService.activity(), { headers: { 'Cache-Control': 'no-store' } })
     }

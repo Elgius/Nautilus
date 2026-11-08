@@ -61,7 +61,7 @@ export class PrivateRoomAgents {
     }
     return jobs
   }
-  async invoke(identity: ChatIdentity, input: Record<string, unknown>) {
+  async invoke(identity: ChatIdentity, input: Record<string, unknown>, scheduled = false) {
     const { clientMessageId: id, text: instruction } = parseSend({ clientMessageId: input.requestId, text: input.instruction })
     if (typeof input.agentId !== 'string' || !input.agentId || input.agentId.length > 100) throw new Error('Invalid agent selection.')
     const profile = await this.deps.profile(identity, input.agentId)
@@ -69,9 +69,14 @@ export class PrivateRoomAgents {
     const key = this.key(identity, id)
     const now = new Date().toISOString()
     const job = await this.deps.storage.transaction(async (tx) => {
+      // Receipts outlive the 50-job history retention and are committed with
+      // queue acceptance. A lost HTTP response must never enqueue twice.
+      const receiptKey = `scheduler:receipt:${id}`
+      if (scheduled && await tx.get(receiptKey)) return null
       const existing = await tx.get<PrivateAgentJob>(key)
       if (existing) {
         if (existing.agentId !== profile.id || existing.instruction !== instruction) throw new Error('Invalid reuse of an instruction ID.')
+        if (scheduled) await tx.put(receiptKey, true)
         return existing
       }
       const queue = await tx.get<Entry[]>(QUEUE) ?? []
@@ -88,11 +93,13 @@ export class PrivateRoomAgents {
       }
       await tx.put(indexKey, [...ids.filter((oldId) => !retained.includes(oldId)), id])
       await tx.put(key, job)
+      if (scheduled) await tx.put(receiptKey, true)
       await tx.put(QUEUE, [...queue, { identity, id }])
       // Persist a wakeup with acceptance, before relying on waitUntil.
       await tx.setAlarm(Date.now() + 1000)
       return job
     })
+    if (!job) { this.wake(); return }
     await this.safeSend(identity, job)
     await this.changed(identity)
     this.wake()
@@ -206,7 +213,7 @@ export class PrivateRoomAgents {
       job.status = 'running'; await save()
       const messages: PrivateAgentMessage[] = [{ role: 'user', content: job.instruction }]
       let budget = 32_000 - job.instruction.length
-      for (const old of (await this.history(entry.identity)).filter((item) => item.agentId === profile.id && item.status === 'complete').slice(-10).reverse()) {
+      for (const old of (entry.identity.scheduledDeliveryId ? [] : await this.history(entry.identity)).filter((item) => item.agentId === profile.id && item.status === 'complete').slice(-10).reverse()) {
         if (old.instruction.length + old.reply.length > budget) break
         messages.unshift({ role: 'user', content: old.instruction }, { role: 'assistant', content: old.reply })
         budget -= old.instruction.length + old.reply.length

@@ -8,6 +8,7 @@
   ],
   "durable_objects": { "bindings": [{ "name": "ROOM_CHAT", "class_name": "RoomChat" }] },
   "migrations": [{ "tag": "room-chat-v1", "new_sqlite_classes": ["RoomChat"] }],
+  "triggers": { "crons": ["* * * * *"] },
   "build": {
     "watch_dir": "src"
   }

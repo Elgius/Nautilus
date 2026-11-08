@@ -507,3 +507,30 @@ To verify against an **already running local API**, from the repository root run
 It creates isolated users/rooms, tests real Bunny upload/download/deletion plus
 existing document saving, and removes its fixtures and objects. It starts no
 servers. UI regression: `bun run --filter @nautilus/web test:room-local-save`.
+
+## Scheduler
+
+`src/scheduler` provides one-time, private room-agent events through registered
+agent tools and `/api/organizations/:organizationId/rooms/:roomId/schedules`.
+See [`skills/scheduler.md`](../../skills/scheduler.md) for tool arguments, HTTP
+routes, delivery semantics and local cron testing. The moderator has scheduling
+tools; scheduled runs and delegated specialists do not.
+
+Event content, UTC schedules and per-agent delivery records use separate database
+tables. Cloudflare Cron runs every minute, claims bounded batches with database
+locks and expiring leases, and concurrently enqueues work in the existing room
+Durable Objects. Durable receipts prevent duplicate jobs after lost acknowledgements.
+Retry attempts are bounded and errors are sanitized. Agent execution and responses
+remain private, with live membership/assignment checks and existing room write locks.
+Schedules outlive browser sessions. Timing is minute-level and can be delayed by
+backlogs. Cancellation/rescheduling is only available before dispatch starts.
+
+Apply migration `20261107190000_scheduler` before deploying this Worker. Builds do
+not apply migrations or publish cron triggers. Delivery `accepted` means queued;
+execution outcomes are in private agent history (subject to its existing retention).
+
+Verification: `bun test apps/server/tests/scheduler.test.ts
+apps/server/tests/private-room-agents.test.ts` and
+`bun run --filter @nautilus/server test:room-socket`. The runtime test exercises
+scheduled delivery, expired leases, room isolation, owner-only responses and
+idempotent acceptance with real Durable Object storage and a stub database/model.

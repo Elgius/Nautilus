@@ -1,3 +1,4 @@
+import { schedulerRoutes } from './scheduler/routes'
 import { Hono } from 'hono'
 import { roomAttachments } from './room-attachments'
 import { bodyLimit } from 'hono/body-limit'
@@ -60,6 +61,7 @@ rooms.use('/:roomId/*', async (c, next) => {
 })
 
 rooms.route('/:roomId/attachments', roomAttachments)
+rooms.route('/:roomId/schedules', schedulerRoutes)
 
 // Server-authored identity only; the client cannot submit history or another user ID.
 rooms.post('/:roomId/suggestions', async (c) => {
