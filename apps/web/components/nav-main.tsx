@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import {
   SidebarGroup,
@@ -17,6 +18,8 @@ export function NavMain({
     icon: ReactNode;
     isActive: boolean;
     onClick: () => void;
+    href: string;
+    onPrefetch?: () => void;
     badge?: number;
   }[];
 }) {
@@ -27,6 +30,7 @@ export function NavMain({
         {items.map((item) => (
           <SidebarMenuItem key={item.title}>
             <SidebarMenuButton
+              render={<Link href={item.href} prefetch onMouseEnter={item.onPrefetch} onFocus={item.onPrefetch} />}
               tooltip={item.title}
               isActive={item.isActive}
               aria-current={item.isActive ? "page" : undefined}

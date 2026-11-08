@@ -10,6 +10,7 @@ import { agentChat } from './agent-chat'
 import { agentCreator } from './agent-creator-route'
 import { avatarGeneration } from './avatar-generation-route'
 import { rooms } from './rooms'
+import { documentLibrary } from './document-library'
 import { createAuth, type Auth } from './auth'
 import { createDatabase, type Database } from './db'
 import { isLocalDevelopment, validateBindings, type Bindings } from './env'
@@ -117,6 +118,10 @@ const organizationMember = createMiddleware<AppEnv>(async (c, next) => {
   c.set('organizationId', organizationId)
   await next()
 })
+
+const documentLibraryPath = '/api/organizations/:organizationId/documents'
+app.use(documentLibraryPath, authenticated, organizationMember)
+app.route(documentLibraryPath, documentLibrary)
 
 const creatorPath = '/api/organizations/:organizationId/agent_creator_agent'
 app.use(creatorPath, authenticated, organizationMember)

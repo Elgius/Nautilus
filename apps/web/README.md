@@ -63,3 +63,32 @@ Tests cover safe login destinations, invitation URL encoding and UI role checks.
 The backend has database-backed integration tests for authentication and tenant
 isolation. Builds do not start a server or deploy. For browser checks, use the
 existing development processes on ports 3000 and 8787.
+
+## Workspace navigation
+
+The `(workspace)` route-group layout owns the authenticated shell for `/`,
+`/dashboard`, `/kanban`, and `/calendar`. Sidebar navigation keeps its header,
+sidebar, session provider, and view state mounted. The existing `?view=` links
+continue to select workspace panels. Room and authentication routes retain their
+own layouts and authorization checks.
+
+SWR stores workspace data in a provider scoped to the signed-in user and active
+organisation. Room summaries load in the background for the sidebar; agent
+profiles load only when their view or a relevant dialog needs them. Successful
+mutations update that cache, and focus/reconnect refreshes it. Documents use a
+separate metadata endpoint with 50-item pages and server-side search. Each view
+has local loading/error UI, so a slow or failed request does not block navigation.
+
+The production browser regression test uses a fixture API on port 8791 and starts
+its own Next server on port 3100. It covers persistent navigation, request counts,
+slow/error isolation, caching, pagination, mutations, history, and tenant changes.
+It never uses the real backend. Install Chromium once, then run from the root:
+
+```sh
+bun apps/web/node_modules/playwright/cli.js install chromium
+bun run --filter @nautilus/web test:workspace-navigation
+```
+
+Alternatively set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to an installed Chromium path.
+The test builds the web app with the fixture API origin; run the normal build
+again before deployment to use the deployment's configured API origin.

@@ -13,7 +13,7 @@ export async function WorkspaceGate({
   if (!session.activeOrganization) redirect("/organizations");
   return (
     <WorkspaceSessionProvider
-      key={session.activeOrganization.id}
+      key={`${session.user.id}:${session.activeOrganization.id}`}
       initialSession={session}
     >
       {children}

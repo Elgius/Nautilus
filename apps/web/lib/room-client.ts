@@ -24,7 +24,9 @@ export type DocumentVersion = {
 export type DocumentVersionsPage = { versions: DocumentVersion[]; nextCursor: string | null };
 export type RoomDetail = { room: RoomRecord; messages: RoomMessage[]; nextCursor: string | null; storageConfigured: boolean; officeConfigured: boolean };
 
-export function toRoom(room: RoomRecord): Room {
+export type RoomDisplayRecord = Omit<RoomRecord, 'agents'> & { agents: { agent: { id: string; name: string } }[] };
+
+export function toRoom(room: RoomDisplayRecord): Room {
   return { id: room.id, name: room.name, description: room.description, category: room.category, color: room.color,
     status: { READY: 'Ready', WORKING: 'Working', NEEDS_REVIEW: 'Needs review' }[room.status] as Room['status'],
     agents: room.agents.map(({ agent }) => agent.name), agentIds: room.agents.map(({ agent }) => agent.id),

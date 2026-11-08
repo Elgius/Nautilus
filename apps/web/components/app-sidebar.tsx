@@ -51,7 +51,12 @@ type AppSidebarProps = {
   view: WorkspaceView;
   navigation: { label: WorkspaceView; icon: LucideIcon }[];
   rooms: { id: string; name: string; favorite: boolean }[];
-  agentCount: number;
+  roomsLoading?: boolean;
+  roomsError?: string;
+  onRetryRooms?: () => void;
+  agentCount?: number;
+  onPrefetch?: (view: WorkspaceView) => void;
+  onNavigateLink?: () => void;
   onNavigate: (view: WorkspaceView) => void;
   onOpenRoom: (id: string) => void;
   onAction: (action: "room" | "invite" | "help" | "notifications") => void;
@@ -63,7 +68,12 @@ export function AppSidebar({
   navigation,
   rooms,
   agentCount,
+  roomsLoading,
+  roomsError,
+  onRetryRooms,
   onNavigate,
+  onPrefetch,
+  onNavigateLink,
   onOpenRoom,
   onAction,
 }: AppSidebarProps) {
@@ -126,11 +136,16 @@ export function AppSidebar({
             title: label === "Agents" ? "Agent hub" : label,
             icon: <Icon />,
             isActive: view === label,
-            onClick: () => run(() => onNavigate(label)),
+            href: label === "Kanban" ? "/kanban" : label === "Calendar" ? "/calendar" : `/?view=${label}`,
+            onClick: () => run(() => onNavigateLink?.()),
+            onPrefetch: () => onPrefetch?.(label),
             badge: label === "Agents" ? agentCount : undefined,
           }))}
         />
         <NavProjects
+          loading={roomsLoading}
+          error={roomsError}
+          onRetry={onRetryRooms}
           projects={rooms
             .filter((room) => room.favorite)
             .map((room) => ({
