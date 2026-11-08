@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { type Room } from "@/lib/room-data";
 import { roomRequest, toRoom, type RoomRecord } from "@/lib/room-client";
@@ -38,6 +38,8 @@ import {
   FileText,
   Folder,
   LayoutGrid,
+  Kanban,
+  CalendarDays,
   List,
   MessageSquare,
   Plus,
@@ -72,6 +74,8 @@ import {
 } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
+import { Planner } from "./planner";
+
 type View = WorkspaceView;
 type Event = {
   agent: string;
@@ -82,6 +86,8 @@ type Event = {
 };
 const navigation: { label: View; icon: LucideIcon }[] = [
   { label: "Overview", icon: LayoutGrid },
+  { label: "Kanban", icon: Kanban },
+  { label: "Calendar", icon: CalendarDays },
   { label: "Rooms", icon: MessageSquare },
   { label: "Agents", icon: Bot },
   { label: "Documents", icon: FileText },
@@ -123,7 +129,11 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
   const [savingSettings, setSavingSettings] = useState(false);
   const [creatingRoom, setCreatingRoom] = useState(false);
   const [starringRooms, setStarringRooms] = useState<string[]>([]);
-  const [view, setView] = useState<View>("Overview");
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const requestedView = searchParams.get("view");
+  const view: View = pathname === "/kanban" ? "Kanban" : pathname === "/calendar" ? "Calendar" :
+    [...navigation.map((item) => item.label), "Settings"].includes(requestedView || "") ? requestedView as View : "Overview";
   const [rooms, setRooms] = useState(initialRooms);
   const [agents, setAgents] = useState(initialAgents);
   const [events, setEvents] = useState<Event[]>([]);
@@ -149,7 +159,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
     (agent) => agent.status === "Working",
   ).length;
   function navigate(next: View) {
-    setView(next);
+    router.push(next === "Kanban" ? "/kanban" : next === "Calendar" ? "/calendar" : `/?view=${next}`);
     setSearch("");
   }
   function addEvent(agent: string, action: string, target: string) {
@@ -173,7 +183,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
       setRooms((previous) => [toRoom(room), ...previous]);
       addEvent("You", "created", name);
       setModal(null);
-      setView("Rooms");
+      navigate("Rooms");
       setFilter("All rooms");
       setSearch("");
       setSelectedAgents(agents[0] ? [agents[0].id] : []);
@@ -203,7 +213,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
       addEvent("You", "added agent", agent.name);
       setModal(null);
       setNotice("");
-      setView("Agents");
+      navigate("Agents");
       setEditingAgentId(agent.id);
       return null;
     } catch (error) {
@@ -327,7 +337,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
             </div>
           </header>
           <main className="main-content">
-            {view !== "Documents" && (
+            {view !== "Documents" && view !== "Kanban" && view !== "Calendar" && (
               <div className="page-heading">
                 <div>
                   <div className="eyebrow">
@@ -372,6 +382,7 @@ export function Workspace({ initialAgents, initialRooms }: { initialAgents: Agen
                 </Button>
               </div>
             )}
+            {(view === "Kanban" || view === "Calendar") && <Planner key={`${session.user.id}:${session.activeOrganization?.id}`} mode={view} storageKey={`nautilus:planner:v1:${session.user.id}:${session.activeOrganization?.id}`} />}
             {view === "Documents" && <RoomDocumentLibrary rooms={rooms} onOpen={openRoom} />}
             {(view === "Overview" || view === "Rooms") && (
               <>
