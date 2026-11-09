@@ -5,6 +5,8 @@ import { canChat, type ChatIdentity } from '../room-chat-service'
 
 export const scheduleTime = z.iso.datetime({ offset: true }).refine((value) => new Date(value).getTime() > Date.now(), 'Choose a future time with an explicit UTC offset.')
 export const eventInput = z.strictObject({
+  taskId: z.uuid().optional(),
+  requestId: z.uuid().optional(),
   title: z.string().trim().min(1).max(200),
   instruction: z.string().trim().min(1).max(12_000),
   scheduledAt: scheduleTime,
@@ -23,17 +25,38 @@ export function schedulerService(db: Database, identity: ChatIdentity) {
   return {
     async create(input: unknown) {
       await authorize()
-      const { agentIds, scheduledAt, ...content } = parseInput(eventInput, input)
-      const assigned = await db.roomAgent.count({ where: { organizationId: scope.organizationId, roomId: scope.roomId, agentId: { in: agentIds } } })
-      if (assigned !== agentIds.length) throw new HTTPException(400, { message: 'Choose agents assigned to this room.' })
-      return db.schedulerEvent.create({ data: { ...scope, ...content, schedules: { create: {
-        scheduledAt: new Date(scheduledAt), deliveries: { create: agentIds.map((agentId) => ({ organizationId: scope.organizationId, agentId, nextAttemptAt: new Date(scheduledAt) })) },
-      } } }, include: { schedules: { include: { deliveries: true } } } })
+      const { agentIds, scheduledAt, requestId, ...content } = parseInput(eventInput, input)
+      const create = async (source: Pick<Database, 'roomAgent' | 'schedulerEvent'>) => {
+        const assigned = await source.roomAgent.count({ where: { organizationId: scope.organizationId, roomId: scope.roomId, agentId: { in: agentIds } } })
+        if (assigned !== agentIds.length) throw new HTTPException(400, { message: 'Choose agents assigned to this room.' })
+        return source.schedulerEvent.create({ data: { ...(requestId ? { id: requestId } : {}), ...scope, ...content, schedules: { create: {
+          scheduledAt: new Date(scheduledAt), deliveries: { create: agentIds.map((agentId) => ({ organizationId: scope.organizationId, agentId, nextAttemptAt: new Date(scheduledAt) })) },
+        } } }, include: { schedules: { include: { deliveries: true } } } })
+      }
+      if (!content.taskId && !requestId) return create(db)
+      return db.$transaction(async (tx) => {
+        // Serialize task completion/deletion with linked schedule creation.
+        if (content.taskId) {
+          await tx.$queryRaw`SELECT id FROM "plannerTask" WHERE id = ${content.taskId} AND "organizationId" = ${scope.organizationId} AND "roomId" = ${scope.roomId} FOR UPDATE`
+          const task = await tx.plannerTask.findFirst({ where: { id: content.taskId, organizationId: scope.organizationId, roomId: scope.roomId, deletedAt: null, status: { not: 'Done' } } })
+          if (!task) throw new HTTPException(409, { message: 'Choose an active task in this room.' })
+          if (agentIds.some((id) => !task.agentIds.includes(id))) throw new HTTPException(400, { message: 'Schedule agents assigned to this task.' })
+        }
+        if (requestId) {
+          const existing = await tx.schedulerEvent.findUnique({ where: { id: requestId }, include: { schedules: { include: { deliveries: true } } } })
+          if (existing) {
+            const schedule = existing.schedules[0]
+            if (existing.ownerUserId !== scope.ownerUserId || existing.roomId !== scope.roomId || existing.organizationId !== scope.organizationId || existing.taskId !== (content.taskId ?? null) || existing.title !== content.title || existing.instruction !== content.instruction || schedule?.scheduledAt.getTime() !== new Date(scheduledAt).getTime() || [...schedule.deliveries.map((d) => d.agentId)].sort().join() !== [...agentIds].sort().join()) throw new HTTPException(409, { message: 'Schedule request ID already used.' })
+            return existing
+          }
+        }
+        return create(tx)
+      })
     },
     async list(after?: string) {
       await authorize()
       const rows = await db.schedulerSchedule.findMany({ where: { event: scope, ...(after ? { id: { gt: after } } : {}) },
-        include: { event: true, deliveries: { select: { id: true, agentId: true, state: true, attempts: true, acceptedAt: true, lastError: true } } }, orderBy: { id: 'asc' }, take: 51 })
+        include: { event: true, deliveries: { select: { id: true, agentId: true, state: true, attempts: true, acceptedAt: true, lastError: true, executionState: true, result: true, executionError: true } } }, orderBy: { id: 'asc' }, take: 51 })
       return { schedules: rows.slice(0, 50), nextCursor: rows.length > 50 ? rows[49].id : null }
     },
     async change(id: string, scheduledAt?: string) {

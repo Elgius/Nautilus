@@ -1,3 +1,5 @@
+import { createPlannerSkill } from './planner/skill'
+import { reviewPlannerEdit } from './edit-review'
 import { createSchedulerSkill } from './scheduler/skill'
 import { reviewDocumentEdit, type EditReview } from './edit-review'
 import { tool } from 'ai'
@@ -167,7 +169,7 @@ function targetLabel(operation: string, args: Record<string, unknown>) {
 export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, run: AgentRunContext,
   withDatabase: <T>(action: (db: Database) => Promise<T>) => Promise<T>) {
   const loggingContext = { roomId: identity.roomId, runId: run.id }
-  const skills = createModeratorSkills(profile, run, signal, {
+  const dependencies: Dependencies = {
     review: (edit, activeSignal) => reviewDocumentEdit(createAgentModel(env), messages, edit, activeSignal, loggingContext),
     backend: (agent) => createRoomSkillBackend(env, identity, agent.id, withDatabase, run.token),
     profiles: () => withDatabase(async (db) => {
@@ -184,7 +186,9 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
       }
       return report
     },
-  })
+  }
+  const skills = createModeratorSkills(profile, run, signal, dependencies)
+  skills.push(createPlannerSkill(identity, profile, run, withDatabase, signal, { ...dependencies, review: (edit, active) => reviewPlannerEdit(createAgentModel(env), messages, edit, active, loggingContext) }))
   if (!identity.scheduledDeliveryId) skills.push(createSchedulerSkill(identity, profile.id, withDatabase, signal))
   return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, skills, { steps: 32, timeout: 175_000, preview: run.preview, loggingContext: { ...loggingContext, kind: 'moderator' } })
 }

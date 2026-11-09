@@ -3,7 +3,7 @@ import type { AgentAppearance } from './agent-appearance';
 export type ChatUser = { id: string; name: string };
 export type AgentWorkActivity = {
   runId: string; agentId: string; agentName: string; color?: AgentAppearance['color'];
-  documentId?: string; target?: string;
+  taskId?: string; documentId?: string; target?: string;
   phase: 'planning' | 'reading' | 'proposing' | 'applying';
 };
 export type RoomWorkState = {
@@ -34,6 +34,7 @@ export type PrivateAgentJob = {
   createdAt: string;
   updatedAt: string;
   revision: number;
+  taskCommits?: { taskId: string; revision: number }[];
   commits?: { documentId: string; versionId: string; versionNumber: number }[];
 };
 export type PrivateAgentEvent =
