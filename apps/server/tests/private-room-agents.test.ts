@@ -33,7 +33,7 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
     setAlarm: async () => {},
     list: async ({ prefix }: { prefix: string }) => new Map([...values].filter(([key]) => key.startsWith(prefix))),
   }
-  const events: { userId: string; event: PrivateAgentEvent }[] = []
+  const events: { userId: string; scheduledDeliveryId?: string; event: PrivateAgentEvent }[] = []
   const tasks: Promise<void>[] = []
   const calls: PrivateAgentMessage[][] = []
   let allowed = true
@@ -51,7 +51,7 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
       if (options.fail) throw new Error('PROVIDER_SECRET_AND_PROMPT')
       yield options.reply ?? 'Private response'
     },
-    send: async (identity, event) => { if (allowed) events.push({ userId: identity.userId, event: structuredClone(event) }) },
+    send: async (identity, event) => { if (allowed) events.push({ userId: identity.userId, scheduledDeliveryId: identity.scheduledDeliveryId, event: structuredClone(event) }) },
     waitUntil: (task) => { tasks.push(task) },
   }
   const service = new PrivateRoomAgents(deps)
@@ -165,6 +165,21 @@ test('queued cancellation is owner-scoped and does not start the cancelled model
   expect((await h.service.history(bob))[0].status).toBe('queued')
   await h.service.cancel(bob, second)
   expect((await h.service.history(bob))[0]).toMatchObject({ status: 'failed', error: 'Cancelled before starting.' })
+  gate.resolve(); await settle(h.tasks)
+  expect(h.calls).toHaveLength(1)
+})
+
+test('browser cancellation preserves a queued scheduled job’s delivery identity across restart', async () => {
+  const gate = deferred(), h = harness({ gate: gate.promise })
+  const id = crypto.randomUUID()
+  await h.invoke(bob, 'Blocking work')
+  await h.service.invoke({ ...alice, sessionId: '', scheduledDeliveryId: id }, { requestId: id, agentId: profile.id, instruction: 'Scheduled work' }, true)
+  await h.service.cancel(bob, id)
+  expect((await h.service.history(alice))[0].status).toBe('queued')
+  await h.service.cancel(alice, id)
+  expect(h.events.at(-1)).toMatchObject({ userId: 'alice', scheduledDeliveryId: id,
+    event: { type: 'agent.update', job: { id, status: 'failed', error: 'Cancelled before starting.' } } })
+  expect((await h.restart().history(alice))[0].status).toBe('failed')
   gate.resolve(); await settle(h.tasks)
   expect(h.calls).toHaveLength(1)
 })

@@ -116,23 +116,26 @@ export class PrivateRoomAgents {
   async cancel(identity: ChatIdentity, id: string) {
     const key = this.key(identity, id)
     if (this.active?.key === key) this.active.controller.abort()
-    await this.deps.storage.transaction(async (tx) => {
+    const owner = await this.deps.storage.transaction(async (tx) => {
       const queue = await tx.get<Entry[]>(QUEUE) ?? []
       const entry = queue.find((entry) => this.key(entry.identity, entry.id) === key)
       if (!entry) return
       if (entry.token) {
         entry.cancelRequested = true
         await tx.put(QUEUE, queue)
-        return
+        return entry.identity
       }
       const job = await tx.get<PrivateAgentJob>(key)
       if (job) { job.status = 'failed'; job.error = 'Cancelled before starting.'; job.revision++; await tx.put(key, job) }
       await tx.put(QUEUE, queue.filter((item) => item !== entry))
+      return entry.identity
     })
     // The run may have started while cancellation was being persisted.
     if (this.active?.key === key) this.active.controller.abort()
     const job = await this.deps.storage.get<PrivateAgentJob>(key)
-    if (job) await this.safeSend(identity, job)
+    // Preserve scheduler metadata from the durable entry, not the browser caller.
+    if (job) await this.safeSend(owner ?? identity, job)
+    if (owner) await this.changed(owner)
   }
   private async safeSend(identity: ChatIdentity, job: PrivateAgentJob) {
     // A disconnected subscriber must not change execution/commit state.
