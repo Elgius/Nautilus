@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
 import { MessageScrollerProvider, MessageScroller, MessageScrollerViewport, MessageScrollerContent, MessageScrollerItem, MessageScrollerButton } from "@/components/ui/message-scroller";
+import { RoomConnectionStatus } from "./room-connection-status";
 import { RoomChatComposer } from "./room-chat-composer";
 import { PrivateAgentConversation } from "./private-agent-conversation";
 import { useWorkspaceSession } from "@/components/auth/workspace-session";
@@ -57,6 +58,10 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
     try { await navigator.clipboard.writeText(window.location.href); setNotice('Room link copied.'); }
     catch { setNotice('Copy the room link from your address bar.'); }
   }
+  const latestOutgoingId = pending.length ? null : messages.reduce<string | null>(
+    (latest, message) => message.authorUserId === session.user.id ? message.id : latest,
+    null,
+  );
   const agentBusy = agentJobs.filter((job) => job.status === "queued" || job.status === "running").length >= 20;
   const typingNames = Object.entries(typing).filter(([id]) => id !== session.user.id).map(([, user]) => user.name).join(', ');
   return <div className="room-workspace">
@@ -72,10 +77,6 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
         {room.agents.map(({ agent }) => <AgentPortrait key={agent.id} agent={agent} small />)}
       </div><Button variant="outline" size="sm" onClick={copyLink} aria-label="Copy room link"><Link2 size={14} /><span>Copy link</span></Button></div>
       </div>
-      <nav className="room-document-navbar" aria-label="Document navigation">
-        <div className="room-document-navigation" ref={setDocumentNavigation} />
-        <div className="room-document-actions" ref={setDocumentActions} />
-      </nav>
     </header>
     <div className="room-mobile-tabs" role="tablist" aria-label="Room panels">
       <Button variant="ghost" size="sm" id="chat-tab" role="tab" aria-selected={mobilePanel === 'chat'} aria-controls="room-chat" onClick={() => setMobilePanel('chat')}><MessageSquare size={16} />Chat</Button>
@@ -90,7 +91,7 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
         <MessageScrollerViewport className="room-messages" aria-label="Conversation" tabIndex={0}>
         <MessageScrollerContent className="room-chat-content" aria-label="Conversation messages" aria-live="polite">
           {nextCursor && <Button variant="ghost" size="sm" onClick={loadOlder} disabled={loadingOlder}>{loadingOlder ? 'Loading…' : 'Load earlier messages'}</Button>}
-          {!messages.length && <div className="room-conversation-intro"><div className="room-intro-icon"><MessageSquare size={20} /></div><h3>A space to think together</h3><p>Share an idea or work through a document with the people in this room.</p></div>}
+          {!messages.length && !pending.length && <div className="room-conversation-intro"><div className="room-intro-icon"><MessageSquare size={20} /></div><h3>A space to think together</h3><p>Share an idea or work through a document with the people in this room.</p></div>}
           {messages.map((message) => {
             const own = message.authorUserId === session.user.id, author = message.authorUser?.name || 'Unknown author';
             return <MessageScrollerItem key={message.id} messageId={message.id} scrollAnchor={Boolean(message.authorUserId)}>
@@ -98,14 +99,16 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
               <div className="room-message-avatar">{initials(author)}</div>
               <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>{own ? 'You' : author}</strong><time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></MessageHeader>
                 <Bubble variant={own ? 'muted' : 'ghost'} align={own ? 'end' : 'start'}><BubbleContent className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</BubbleContent></Bubble>
-                {own && <span className="room-message-meta">{Object.entries(reads).filter(([id, readAt]) => id !== session.user.id && readAt >= message.createdAt).length ? 'Seen' : 'Sent'}</span>}
+                {own && message.id === latestOutgoingId && <span className="room-message-meta">{Object.entries(reads).filter(([id, readAt]) => id !== session.user.id && readAt >= message.createdAt).length ? 'Seen' : 'Sent'}</span>}
                 {message.documents.map((attachment) => <Button variant="ghost" size="sm" key={attachment.documentId} className="room-document-reference" onClick={() => { dispatchFiles({ type: 'select', id: attachment.documentId }); setMobilePanel('document'); }}><FileText size={15} />{attachment.document.title}</Button>)}
               </MessageContent>
             </Message></MessageScrollerItem>;
           })}
           {pending.map((message) => <MessageScrollerItem key={message.id} messageId={message.id}>
-            <Message align="end"><MessageContent><Bubble variant="muted" align="end"><BubbleContent className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</BubbleContent></Bubble>
-              <p role="status">{message.status === 'pending' ? 'Sending…' : 'Message failed'}{message.status === 'failed' && <Button variant="ghost" size="sm" disabled={!canSend} onClick={() => sendMessage(message.text, message.id)}>Retry</Button>}</p>
+            <Message align="end" className="room-message is-own" data-delivery={message.status} aria-busy={message.status === 'pending'}>
+              <div className="room-message-avatar">{initials(session.user.name)}</div>
+              <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>You</strong></MessageHeader><Bubble variant="muted" align="end"><BubbleContent className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</BubbleContent></Bubble>
+              <p className="room-message-meta" role="status">{message.status === 'pending' ? 'Sending…' : 'Message failed'}{message.status === 'failed' && <Button variant="ghost" size="sm" disabled={!canSend} onClick={() => sendMessage(message.text, message.id)}>Retry</Button>}</p>
             </MessageContent></Message>
           </MessageScrollerItem>)}
           <PrivateAgentConversation agents={room.agents.map(({ agent }) => agent)} jobs={agentJobs} canSend={canSend} busy={agentBusy} retry={invokeAgent} cancel={cancelAgent} />
@@ -116,7 +119,7 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
         </MessageScrollerProvider>
         <div className="room-composer-area">
           {!joined && <Button variant="outline" size="sm" disabled={joining} onClick={joinRoom}>{joining ? 'Joining…' : 'Join room chat'}</Button>}
-          <p role="status">{joined ? status : 'Join this room to chat with its members.'}{typingNames ? ` · ${typingNames} typing…` : ''}</p>
+          {typingNames && <p role="status">{typingNames} typing…</p>}
           <RoomChatComposer suggestions={suggestions} canSend={canSend} agents={agents} agentsLoading={agentsLoading} agentBusy={agentBusy} loadAgents={loadAgents} sendMessage={sendMessage} invokeAgent={invokeAgent} sendTyping={sendTyping} />
         </div>
       </section>
@@ -127,9 +130,14 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
         onPointerCancel={() => setDragWidth(null)}
         onKeyDown={(event) => { const width = event.key === 'ArrowLeft' ? chatLayout.width - 2 : event.key === 'ArrowRight' ? chatLayout.width + 2 : event.key === 'Home' ? 18 : event.key === 'End' ? 45 : null; if (width === null) return; event.preventDefault(); updateChatLayout({ ...chatLayout, width: clampChatWidth(width) }); }} />
       <section className="room-document-panel" id="room-document" aria-label="Room documents">
+      <nav className="room-document-navbar" aria-label="Document navigation">
+        <div className="room-document-navigation" ref={setDocumentNavigation} />
+        <div className="room-document-actions" ref={setDocumentActions} />
+      </nav>
         <RoomDocuments dirtyDocumentIds={dirtyDocumentIds} navigationContainer={documentNavigation} actionsContainer={documentActions} organizationId={organizationId} roomId={room.id} initialDocuments={room.documents} storageConfigured={initialData.storageConfigured} officeConfigured={initialData.officeConfigured} fileState={fileState} dispatchFiles={(action) => { dispatchFiles(action); if (action.type === 'add') setMobilePanel('document'); }} onSelect={(id) => { dispatchFiles({ type: 'select', id }); setMobilePanel('document'); }} onDirtyChange={onDocumentDirtyChange} />
       </section>
     </main>
+    <RoomConnectionStatus joined={joined} status={status} />
     {notice && <div className="room-toast" role="status">{notice}<Button variant="ghost" size="sm" aria-label="Dismiss notification" onClick={() => setNotice('')}>×</Button></div>}
   </div>;
 }

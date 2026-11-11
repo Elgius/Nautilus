@@ -9,8 +9,8 @@ test('room layout restores valid width and collapsed preferences', () => {
 test('invalid or unavailable stored preferences safely restore the default layout', () => {
   for (const raw of [null, '{', 'null', 'true', '"other"']) assert.deepEqual(parseRoomLayout(raw), DEFAULT_ROOM_LAYOUT);
   assert.deepEqual(parseRoomLayout('{"width":"100%","collapsed":"true"}'), DEFAULT_ROOM_LAYOUT);
-  assert.equal(clampChatWidth(Infinity), 25);
-  assert.equal(clampChatWidth(NaN), 25);
+  assert.equal(clampChatWidth(Infinity), 40);
+  assert.equal(clampChatWidth(NaN), 40);
 });
 test('stored and dragged widths are bounded so both panels remain usable', () => {
   assert.equal(parseRoomLayout('{"width":100}').width, 45);

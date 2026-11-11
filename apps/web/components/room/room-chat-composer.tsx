@@ -2,7 +2,7 @@
 
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ArrowUp, Brain, FileText, LockKeyhole, Plus, X } from "lucide-react";
-import { AgentPortrait } from "@/components/agents/agent-portrait";
+import { RoomAgentAvatar } from "./room-agent-avatar";
 import { Button } from "@/components/ui/button";
 import { Attachment, AttachmentAction, AttachmentContent, AttachmentDescription, AttachmentMedia, AttachmentTitle } from "@/components/ui/attachment";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
@@ -85,7 +85,7 @@ export function RoomChatComposer({ suggestions = defaultRoomSuggestions, canSend
     {pickerOpen && <div id={listId} role="listbox" aria-label="Choose an agent" className="room-agent-options">
       {agentsLoading ? <p role="status">Loading room agents…</p> : matches.length ? matches.map((agent, index) =>
         <button key={agent.id} id={`${listId}-${index}`} type="button" role="option" aria-selected={index === activeIndex} onMouseDown={(event) => event.preventDefault()} onClick={() => select(agent)}>
-          <AgentPortrait agent={agent} small /><span><strong>{agent.name}</strong><small>{agent.role}</small></span><LockKeyhole size={13} />
+          <RoomAgentAvatar agent={agent} /><span className="room-agent-option-label"><strong>{agent.name}</strong><small>{agent.role}</small></span><LockKeyhole size={13} />
         </button>) : <p role="status">{agents.length ? 'No matching agents. Edit the name after @.' : 'No agents are assigned to this room.'}</p>}
       <p className="room-local-note">Instructions and replies are visible only to you.</p>
     </div>}
@@ -97,7 +97,7 @@ export function RoomChatComposer({ suggestions = defaultRoomSuggestions, canSend
           <AttachmentAction aria-label={`Remove ${file.name}`} onClick={() => setAttachments((previous) => previous.filter((attachment) => attachment.id !== id))}><X size={13} /></AttachmentAction>
         </Attachment>)}
       </InputGroupAddon>}
-      {selected && <InputGroupAddon align="block-start" className="room-private-target"><AgentPortrait agent={selected} small /><strong>@{selected.name}</strong><span><LockKeyhole size={12} /> Only you</span><Button type="button" size="icon-sm" variant="ghost" aria-label="Return to room chat" onClick={() => {
+      {selected && <InputGroupAddon align="block-start" className="room-private-target"><RoomAgentAvatar agent={selected} /><strong>@{selected.name}</strong><span><LockKeyhole size={12} /> Only you</span><Button type="button" size="icon-sm" variant="ghost" aria-label="Return to room chat" onClick={() => {
         // Never move private instruction text into the public room draft.
         setSelected(null); textarea.current?.focus();
       }}><X size={14} /></Button></InputGroupAddon>}

@@ -10,7 +10,7 @@ function subscribe(notify: () => void) {
 const serverSnapshot = () => null;
 
 function createLayoutStore(userId: string) {
-  const key = `nautilus:room-layout:v1:${userId}`;
+  const key = `nautilus:room-layout:v2:${userId}`;
   let fallback: string | null = null;
   let storageUnavailable = false;
   return {
