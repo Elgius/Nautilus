@@ -16,6 +16,7 @@ datasource db {
 }
 
 model User {
+  agentProgress AgentProgress[]
   id            String   @id
   name          String
   email         String   @unique
@@ -174,6 +175,7 @@ enum AgentStatus {
 }
 
 model Agent {
+  agentProgress AgentProgress[]
   scheduledDeliveries SchedulerDelivery[]
   id             String       @id @default(uuid())
   organizationId String
@@ -245,6 +247,7 @@ enum DocumentStatus {
 }
 
 model Room {
+  agentProgress AgentProgress[]
   tasks PlannerTask[]
   scheduledEvents SchedulerEvent[]
   id              String       @id @default(uuid())
@@ -355,6 +358,7 @@ model Document {
   updatedAt        DateTime       @updatedAt
   room             Room           @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Cascade)
   versions         DocumentVersion[] @relation("DocumentVersions")
+  creationReceipts  DocumentCreationReceipt[]
   currentVersion   DocumentVersion? @relation("CurrentVersion", fields: [organizationId, roomId, id, currentVersionId], references: [organizationId, roomId, documentId, id], onDelete: NoAction, onUpdate: NoAction)
   messages         MessageDocument[]
 
@@ -513,4 +517,67 @@ model PlannerChange {
   task PlannerTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
   @@unique([taskId, revision])
   @@map("plannerChange")
+}
+
+// Durable retry receipts are independent of agent job retention.
+model DocumentCreationReceipt {
+  organizationId String
+  roomId         String
+  userId         String
+  requestId      String
+  requestHash    String
+  documentId     String
+  versionId      String
+  versionNumber  Int
+  agentId        String
+  runId          String
+  createdAt      DateTime @default(now())
+  document       Document @relation(fields: [organizationId, roomId, documentId], references: [organizationId, roomId, id], onDelete: Cascade, map: "documentCreationReceipt_document_fkey")
+
+  @@id([organizationId, roomId, userId, requestId])
+  @@index([organizationId, roomId, documentId])
+  @@map("documentCreationReceipt")
+}
+
+// Private handover notes, separate from shared documents and ephemeral run checkpoints.
+model AgentProgress {
+  organizationId String
+  roomId String
+  userId String
+  agentId String
+  id String
+  title String @db.VarChar(200)
+  objective String
+  completed String[]
+  remaining String[]
+  blockers String[]
+  documents Json
+  status String
+  revision Int
+  createdRunId String
+  updatedRunId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  room Room @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Cascade, map: "agentProgress_room_fkey")
+  owner User @relation(fields: [userId], references: [id], onDelete: Cascade, map: "agentProgress_owner_fkey")
+  agent Agent @relation(fields: [organizationId, agentId], references: [organizationId, id], onDelete: Cascade, map: "agentProgress_agent_fkey")
+  saves AgentProgressSave[]
+  @@id([organizationId, roomId, userId, agentId, id])
+  @@map("agentProgress")
+}
+model AgentProgressSave {
+  organizationId String
+  roomId String
+  userId String
+  agentId String
+  requestId String
+  progressId String
+  requestHash String
+  revision Int
+  runId String
+  createdAt DateTime @default(now())
+  progress AgentProgress @relation(fields: [organizationId, roomId, userId, agentId, progressId], references: [organizationId, roomId, userId, agentId, id], onDelete: Cascade, map: "agentProgressSave_progress_fkey")
+  @@id([organizationId, roomId, userId, agentId, requestId])
+  @@index([organizationId, roomId, userId, agentId, progressId], map: "agentProgressSave_progress_idx")
+  @@map("agentProgressSave")
 }

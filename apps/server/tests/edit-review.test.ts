@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { MockLanguageModelV4 } from 'ai/test'
-import { reviewDocumentEdit, type EditReview } from '../src/edit-review'
+import { reviewDocumentCreation, reviewDocumentEdit, type EditReview } from '../src/edit-review'
 
 const messages = [{ role: 'user' as const, content: 'Replace Hello with World.' }]
 const edit: EditReview = { documentId: 'doc', expectedVersionId: 'v1', kind: 'DOCUMENT', changeSummary: 'Greeting',
@@ -39,4 +39,18 @@ test('missing evidence, oversized context, cancellation and provider failures ca
   expect(reviewer.doGenerateCalls).toHaveLength(0)
   const broken = new MockLanguageModelV4({ doGenerate: async () => { throw new Error('private provider details') } })
   await expect(reviewDocumentEdit(broken, messages, edit, new AbortController().signal)).rejects.toThrow('could not be verified')
+})
+
+
+test('creation review checks exact structured content and fails closed without existing-version requirements', async () => {
+  const candidate = { operation: 'create' as const, documentId: 'request', input: {
+    kind: 'DOCUMENT' as const, requestId: '00000000-0000-4000-8000-000000000001', title: 'Brief', category: 'Notes', changeSummary: 'Create brief', paragraphs: [{ text: 'Actual content' }],
+  }, reads: [{ operation: 'listDocuments', result: { documents: [] } }] }
+  const reviewer = model('{"approved":true}')
+  await reviewDocumentCreation(reviewer, [{ role: 'user', content: 'Create a brief' }], candidate, new AbortController().signal)
+  expect(JSON.stringify(reviewer.doGenerateCalls[0].prompt)).toContain('Actual content')
+  expect(reviewer.doGenerateCalls[0].tools ?? []).toHaveLength(0)
+  for (const output of ['{"approved":false}', 'invalid']) {
+    await expect(reviewDocumentCreation(model(output), messages, candidate, new AbortController().signal)).rejects.toThrow('could not be verified')
+  }
 })

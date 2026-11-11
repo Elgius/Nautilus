@@ -1,3 +1,6 @@
+import { createProgressSkill } from './progress/skill'
+import { reviewDocumentCreation, type CreationReview } from './edit-review'
+import { parseCreation, type DocumentCreation, type CreationResult } from './documents/creation'
 import { createPlannerSkill } from './planner/skill'
 import { reviewPlannerEdit } from './edit-review'
 import { createSchedulerSkill } from './scheduler/skill'
@@ -21,6 +24,7 @@ export type Proposal = {
   edits: Parameters<SkillBackend['edit']>[3]; changeSummary: string; status: 'proposed' | 'applying' | 'applied' | 'rejected'
 }
 type Dependencies = {
+  reviewCreation?: (creation: CreationReview, signal: AbortSignal) => Promise<void>
   review: (edit: EditReview, signal: AbortSignal) => Promise<void>
   backend: (profile: PrivateAgentProfile) => SkillBackend
   profiles: () => Promise<PrivateAgentProfile[]>
@@ -30,9 +34,10 @@ type Dependencies = {
 /** Specialists can prepare typed edits, but cannot call a shared-document writer. */
 export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRunContext, signal: AbortSignal, deps: Dependencies): AgentSkill[] {
   const proposals = new Map<string, Proposal>()
+  const creations = new Map<string, { input: DocumentCreation; status: Proposal['status'] }>()
   let delegated = 0
   const evidence = new Map<string, { version: string | null; kind: string; reads: unknown[] }>()
-  const tracked = (agent: PrivateAgentProfile, source: SkillBackend, write: SkillBackend['edit']): SkillBackend => ({
+  const tracked = (agent: PrivateAgentProfile, source: SkillBackend, write: SkillBackend['edit'], create?: SkillBackend['create']): SkillBackend => ({
     ...source,
     read: async (id, operation, args, activeSignal) => {
       await run.activity({ runId: run.id, agentId: agent.id, agentName: agent.name, color: agent.color, documentId: id,
@@ -46,6 +51,7 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
       return saved
     },
     edit: write,
+    create,
   })
   const source = deps.backend(profile)
   const commit: SkillBackend['edit'] = async (documentId, expectedVersionId, kind, edits, summary, activeSignal) => {
@@ -66,11 +72,36 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
     await run.committed({ documentId, versionId: result.versionId, versionNumber: result.versionNumber })
     return result
   }
-  return [...createOfficeSkills(tracked(profile, source, commit), signal), {
+  const create: NonNullable<SkillBackend['create']> = async (raw, activeSignal) => {
+    const active = AbortSignal.any([signal, ...(activeSignal ? [activeSignal] : [])])
+    active.throwIfAborted()
+    if (!source.create || !deps.reviewCreation) throw new HTTPException(422, { message: 'Document creation is unavailable.' })
+    const input = parseCreation(raw)
+    await source.authorize()
+    // A committed receipt is evidence of the original reviewed mutation. Replaying
+    // its result makes no new write and must not be rejected as a duplicate file.
+    const previous = await source.findCreation?.(input, active)
+    active.throwIfAborted()
+    if (previous) {
+      await run.committed({ documentId: previous.documentId, versionId: previous.versionId, versionNumber: previous.versionNumber })
+      return previous
+    }
+    const listing = await source.list({ title: input.title }, active)
+    const reads = [{ operation: 'listDocuments', result: listing }, ...[...evidence].map(([documentId, value]) => ({ documentId, ...value }))]
+    await deps.reviewCreation({ operation: 'create', documentId: input.requestId, input, reads }, active)
+    active.throwIfAborted()
+    await source.authorize()
+    await run.activity({ runId: run.id, agentId: profile.id, agentName: profile.name, color: profile.color, phase: 'applying', target: `Creating ${input.title}` }, profile.id)
+    const result = await source.create(input, active) as CreationResult
+    await run.committed({ documentId: result.documentId, versionId: result.versionId, versionNumber: result.versionNumber })
+    return result
+  }
+  return [...createOfficeSkills(tracked(profile, source, commit, source.create ? create : undefined), signal), {
     id: 'room-moderator',
     instructions: [
       'You are the room moderator acting as the selected agent for this private request.',
       'You alone may commit shared document edits. Humans cannot edit persisted room documents while this run holds the room lease.',
+      'Create requested documents and spreadsheets with createDocument/createSpreadsheet. Reuse the identical creation requestId and input when retrying uncertain outcomes. Creation saves version 1. Specialists may propose creations only when allowCreation is explicitly enabled for their assignment.',
       'For simple requests use document tools directly. For independent sections or sheets delegate bounded work to specialists using delegateWork.',
       'Sequence dependent work: commit changed assumptions first, then delegate summaries using the updated figures. Do not delegate dependent edits concurrently.',
       'Specialists only prepare proposals. Inspect the actual operations and read relevant content before accepting. Accept only changes within the user request; the independent commit review may reject uncertain or unrelated edits. Do not retry a rejected edit unchanged or claim it was saved.',
@@ -82,9 +113,9 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
     tools: {
       listSpecialists: tool({ description: 'List agents assigned to this room that can prepare scoped edit proposals.', inputSchema: z.strictObject({}),
         execute: async () => { await source.authorize(); return (await deps.profiles()).map(({ id, name, role }) => ({ id, name, role })) } }),
-      delegateWork: tool({ description: 'Run up to three independent specialist assignments in parallel. They may read only the named documents and return proposals; no shared edits are made.',
+      delegateWork: tool({ description: 'Run up to three independent specialist assignments in parallel. Read only named documents; allowCreation explicitly enables new-file proposals and permits an empty documentIds list. No shared writes are made.',
         inputSchema: z.strictObject({ assignments: z.array(z.strictObject({ agentId: z.string().min(1).max(200),
-          documentIds: z.array(z.string().min(1).max(200)).min(1).max(5), instruction: z.string().min(1).max(6000) })).min(1).max(3) }),
+          documentIds: z.array(z.string().min(1).max(200)).max(5), allowCreation: z.boolean().optional(), instruction: z.string().min(1).max(6000) })).min(1).max(3) }),
         execute: async ({ assignments }, { abortSignal }) => {
           await source.authorize(); signal.throwIfAborted()
           if (delegated + assignments.length > 6) throw new Error('Specialist budget reached. Finish with moderator tools.')
@@ -95,19 +126,29 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
             if (!agent || agent.id === profile.id) throw new Error('Choose another assigned agent as the specialist.')
             return { ...assignment, agent }
           })
+          if (assignments.some((item) => !item.documentIds.length && !item.allowCreation)) throw new Error('Name source documents or explicitly allow creation.')
           delegated += assignments.length
-          return Promise.all(selected.map(async ({ agent, documentIds, instruction }) => {
+          return Promise.all(selected.map(async ({ agent, documentIds, instruction, allowCreation }) => {
             const activeSignal = AbortSignal.any([signal, ...(abortSignal ? [abortSignal] : []), AbortSignal.timeout(60_000)])
             const allowed = new Set(documentIds), agentSource = deps.backend(agent)
             const ownProposals: string[] = []
             const assertScope = (id: string) => { if (!allowed.has(id)) throw new HTTPException(403, { message: 'This document is outside your assignment.' }) }
             const scoped: SkillBackend = {
               ...agentSource,
+              create: allowCreation && source.create ? async (raw) => {
+                activeSignal.throwIfAborted()
+                const input = parseCreation(raw)
+                if (proposals.size + creations.size >= 20 || new TextEncoder().encode(JSON.stringify(input)).byteLength > 100_000) throw new Error('Creation proposal budget reached. Narrow the request.')
+                const id = crypto.randomUUID(), proposal = { input, status: 'proposed' as const }
+                await run.checkpoint(id, proposal)
+                creations.set(id, proposal); ownProposals.push(id)
+                return { proposalId: id, status: 'proposed', saved: false }
+              } : undefined,
               list: async () => ({ documents: documentIds.map((id) => ({ id })) }),
               read: (id, operation, args, readSignal) => { assertScope(id); return agentSource.read(id, operation, args, readSignal) },
               edit: async (documentId, expectedVersionId, kind, edits, changeSummary) => {
                 assertScope(documentId); activeSignal.throwIfAborted()
-                if (proposals.size >= 20) throw new Error('Proposal budget reached.')
+                if (proposals.size + creations.size >= 20) throw new Error('Proposal budget reached.')
                 const proposal: Proposal = { id: crypto.randomUUID(), documentId, expectedVersionId, kind, edits, changeSummary, status: 'proposed' }
                 if (new TextEncoder().encode(JSON.stringify(proposal)).byteLength > 100_000) throw new Error('Narrow the proposal to a smaller edit batch.')
                 await run.checkpoint(proposal.id, proposal)
@@ -115,20 +156,20 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
                 return { proposalId: proposal.id, status: 'proposed', saved: false }
               },
             }
-            const skills = createOfficeSkills(tracked(agent, scoped, scoped.edit), activeSignal, 'proposal').map((skill) => ({
+            const skills = createOfficeSkills(tracked(agent, scoped, scoped.edit, scoped.create), activeSignal, 'proposal').map((skill) => ({
               ...skill,
               instructions: `${skill.instructions}\nYou are a specialist preparing proposals only. Your edit tools save proposals, never shared document versions. Do not claim edits are saved. Later proposals must not assume earlier proposals have been applied.`,
               tools: Object.fromEntries(Object.entries(skill.tools).map(([name, definition]) => {
-                return [name.replace(/^apply/, 'propose'), definition]
+                return [name.replace(/^apply/, 'propose').replace(/^create/, 'proposeCreate'), definition]
               })),
             }))
             try {
               await run.activity({ runId: run.id, agentId: agent.id, agentName: agent.name, color: agent.color,
                 documentId: documentIds[0], phase: 'proposing' }, agent.id)
               const report = await deps.specialist(agent, instruction, activeSignal, skills)
-              return { agentId: agent.id, report, proposals: ownProposals.map((id) => proposals.get(id)) }
+              return { agentId: agent.id, report, proposals: ownProposals.map((id) => proposals.get(id) ?? { id, ...creations.get(id) }) }
             } catch {
-              return { agentId: agent.id, error: 'Specialist did not finish. Review any prepared proposals before continuing.', proposals: ownProposals.map((id) => proposals.get(id)) }
+              return { agentId: agent.id, error: 'Specialist did not finish. Review any prepared proposals before continuing.', proposals: ownProposals.map((id) => proposals.get(id) ?? { id, ...creations.get(id) }) }
             } finally { if (!signal.aborted) await run.activity(null, agent.id) }
           }))
         },
@@ -136,6 +177,20 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
       acceptProposal: tool({ description: 'Commit a reviewed specialist proposal. Rejects stale document versions; repeated acceptance never reapplies it.',
         inputSchema: z.strictObject({ proposalId: z.string().uuid() }), execute: async ({ proposalId }, { abortSignal }) => {
           await source.authorize(); signal.throwIfAborted()
+          const creation = creations.get(proposalId)
+          if (creation) {
+            if (creation.status !== 'proposed') throw new Error(`Proposal is ${creation.status}; do not reapply it.`)
+            const active = AbortSignal.any([signal, ...(abortSignal ? [abortSignal] : [])])
+            creation.status = 'applying'; await run.checkpoint(proposalId, creation)
+            try {
+              const result = await create(creation.input, active)
+              creation.status = 'applied'; await run.checkpoint(proposalId, creation)
+              return result
+            } catch (error) {
+              creation.status = 'rejected'; if (!signal.aborted) await run.checkpoint(proposalId, creation)
+              throw error
+            }
+          }
           const proposal = proposals.get(proposalId)
           if (!proposal) throw new Error('Unknown proposal.')
           if (proposal.status !== 'proposed') throw new Error(`Proposal is ${proposal.status}; do not reapply it.`)
@@ -170,8 +225,9 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
   withDatabase: <T>(action: (db: Database) => Promise<T>) => Promise<T>) {
   const loggingContext = { roomId: identity.roomId, runId: run.id }
   const dependencies: Dependencies = {
+    reviewCreation: (creation, activeSignal) => reviewDocumentCreation(createAgentModel(env), messages, creation, activeSignal, loggingContext),
     review: (edit, activeSignal) => reviewDocumentEdit(createAgentModel(env), messages, edit, activeSignal, loggingContext),
-    backend: (agent) => createRoomSkillBackend(env, identity, agent.id, withDatabase, run.token),
+    backend: (agent) => createRoomSkillBackend(env, identity, agent.id, withDatabase, run.token, run.id),
     profiles: () => withDatabase(async (db) => {
       if (!await canChat(db, identity)) throw new Error('Access expired')
       const assignments = await db.roomAgent.findMany({ where: { organizationId: identity.organizationId, roomId: identity.roomId },
@@ -188,6 +244,7 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
     },
   }
   const skills = createModeratorSkills(profile, run, signal, dependencies)
+  skills.push(createProgressSkill(identity, { agentId: profile.id, workToken: run.token, runId: run.id }, withDatabase, signal))
   skills.push(createPlannerSkill(identity, profile, run, withDatabase, signal, { ...dependencies, review: (edit, active) => reviewPlannerEdit(createAgentModel(env), messages, edit, active, loggingContext) }))
   if (!identity.scheduledDeliveryId) skills.push(createSchedulerSkill(identity, profile.id, withDatabase, signal))
   return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, skills, { steps: 32, timeout: 175_000, preview: run.preview, loggingContext: { ...loggingContext, kind: 'moderator' } })

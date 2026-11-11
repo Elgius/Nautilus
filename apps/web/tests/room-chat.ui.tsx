@@ -24,7 +24,10 @@ const { createRoot } = await import('react-dom/client');
 const { useRoomChat } = await import('../components/room/use-room-chat');
 let chat: ReturnType<typeof useRoomChat>;
 function Chat() {
-  const state = useRoomChat('org', 'room', 'alice', true);
+  const state = useRoomChat('org', 'room', 'alice', true, {
+    messages: [{ id: 'bootstrap', text: 'Already visible', createdAt: '2026-01-01T00:00:00.000Z', editedAt: null, authorUserId: 'bob', authorUser: { name: 'Bob' }, authorAgent: null, documents: [] }],
+    nextCursor: 'older-bootstrap',
+  });
   useEffect(() => { chat = state; });
   return null;
 }
@@ -33,6 +36,8 @@ const root = createRoot(container);
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 try {
   await act(async () => { root.render(createElement(Chat)); });
+  assert.equal(chat!.messages[0].text, 'Already visible', 'bootstrap chat is visible before socket readiness');
+  assert.equal(chat!.nextCursor, 'older-bootstrap');
   assert.equal(sockets.length, 1);
   const socket = sockets[0];
   const receive = (event: object) => socket.onmessage?.({ data: JSON.stringify(event) });
@@ -50,7 +55,9 @@ try {
       id: `message-${index}`, text: `Burst ${index}`, authorUserId: 'bob', createdAt: new Date().toISOString(),
     } });
   });
-  assert.equal(chat!.messages.length, 40);
+  assert.equal(chat!.messages.length, 41);
+  assert.deepEqual(socket.sent.find((event) => event.type === 'sync'), { type: 'sync', requestId: 'sync', cursor: 'bootstrap' });
+  assert.equal(chat!.nextCursor, 'older-bootstrap', 'catch-up sync preserves older bootstrap pagination');
   assert.equal(receipts(), 1, 'a burst must not emit a receipt for every message');
   await act(async () => { chat!.sendMessage('My first message'); });
   assert.equal(socket.sent.filter((event) => event.type === 'send').length, 1);

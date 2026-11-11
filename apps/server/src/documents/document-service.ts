@@ -1,3 +1,4 @@
+import { creationContent, parseCreation, type DocumentCreation, type CreationResult } from './creation'
 import { HTTPException } from 'hono/http-exception'
 import type { Database } from '../db'
 import type { Bindings } from '../env'
@@ -77,6 +78,55 @@ export function createDocumentService(db: Database, env: Bindings, storage?: Sto
       throw error
     }
   }
+  async function findCreation(scope: Omit<DocumentScope, 'documentId'>, raw: DocumentCreation, userId: string): Promise<CreationResult | null> {
+    const parsed = (() => { try { return parseCreation(raw) } catch { throw new HTTPException(422, { message: 'Invalid document creation input.' }) } })()
+    const receipt = await db.documentCreationReceipt.findUnique({ where: {
+      organizationId_roomId_userId_requestId: { ...scope, userId, requestId: parsed.requestId },
+    } })
+    if (!receipt) return null
+    const requestHash = await digest(new TextEncoder().encode(JSON.stringify(parsed)))
+    if (receipt.requestHash !== requestHash) throw new HTTPException(409, { message: 'This creation request ID was already used with different content. Reuse the original input.' })
+    return { documentId: receipt.documentId, versionId: receipt.versionId, versionNumber: receipt.versionNumber, requestId: parsed.requestId, saved: true, replayed: true }
+  }
+  async function createDocument(scope: Omit<DocumentScope, 'documentId'>, raw: DocumentCreation,
+    actor: { agentId: string; workToken: string; userId: string; runId: string }, signal?: AbortSignal): Promise<CreationResult> {
+    signal?.throwIfAborted()
+    const parsed = (() => { try { return parseCreation(raw) } catch { throw new HTTPException(422, { message: 'Invalid document creation input.' }) } })()
+    const requestHash = await digest(new TextEncoder().encode(JSON.stringify(parsed)))
+    const key = { ...scope, userId: actor.userId, requestId: parsed.requestId }
+    const where = { organizationId_roomId_userId_requestId: key }
+    const replay = (receipt: { requestHash: string; documentId: string; versionId: string; versionNumber: number }): CreationResult => {
+      if (receipt.requestHash !== requestHash) throw new HTTPException(409, { message: 'This creation request ID was already used with different content. Reuse the original input.' })
+      return { documentId: receipt.documentId, versionId: receipt.versionId, versionNumber: receipt.versionNumber, requestId: parsed.requestId, saved: true, replayed: true }
+    }
+    // Identity and run ID are supplied by the authenticated coordinator, never the model.
+    if (!actor.userId || !actor.runId) throw new HTTPException(403, { message: 'Creation requires an authenticated agent run.' })
+    const documentId = crypto.randomUUID(), versionId = crypto.randomUUID()
+    await checkActor({ ...scope, documentId }, { agentId: actor.agentId, workToken: actor.workToken })
+    const existing = await db.documentCreationReceipt.findUnique({ where })
+    if (existing) return replay(existing)
+    const content = creationContent(parsed, documentId)
+    const payload = JSON.stringify(content), bytes = new TextEncoder().encode(payload), checksum = await digest(bytes)
+    const objectKey = `organizations/${scope.organizationId}/rooms/${scope.roomId}/documents/${documentId}/versions/${versionId}.json`
+    signal?.throwIfAborted()
+    await store().put(objectKey, payload)
+    // Storage cannot join the DB transaction. Unreferenced objects are left for reconciliation.
+    return db.$transaction(async (tx) => {
+      signal?.throwIfAborted()
+      // Serialize retries with all room writers, then recheck the durable receipt.
+      await guardRoomWrite(tx, scope, actor.workToken)
+      const existing = await tx.documentCreationReceipt.findUnique({ where })
+      if (existing) return replay(existing)
+      await tx.document.create({ data: { id: documentId, ...scope, title: parsed.title, category: parsed.category, kind: parsed.kind } })
+      await tx.documentVersion.create({ data: { id: versionId, ...scope, documentId, versionNumber: 1,
+        objectKey, mimeType: 'application/json', sizeBytes: bytes.byteLength, checksum,
+        authorAgentId: actor.agentId, changeSummary: parsed.changeSummary } })
+      await tx.document.update({ where: { id: documentId }, data: { currentVersionId: versionId } })
+      await tx.documentCreationReceipt.create({ data: { ...key, requestHash, documentId, versionId, versionNumber: 1, agentId: actor.agentId, runId: actor.runId } })
+      signal?.throwIfAborted()
+      return { documentId, versionId, versionNumber: 1, requestId: parsed.requestId, saved: true, replayed: false }
+    })
+  }
   async function editDocument(scope: DocumentScope, input: { expectedVersionId: string | null; edits: DocumentEdit[] | SpreadsheetEdit[]; changeSummary?: string }, actor: DocumentActor, signal?: AbortSignal) {
     signal?.throwIfAborted()
     await checkActor(scope, actor)
@@ -91,5 +141,5 @@ export function createDocumentService(db: Database, env: Bindings, storage?: Sto
     const version = await saveVersion(scope, { expectedVersionId: input.expectedVersionId, content, changeSummary: input.changeSummary }, actor, signal)
     return { content, version }
   }
-  return { readDocument, saveVersion, editDocument }
+  return { readDocument, saveVersion, editDocument, createDocument, findCreation }
 }

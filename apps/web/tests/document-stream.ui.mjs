@@ -20,7 +20,7 @@ function Editor({ initialContent, onReady, onDirty }) {
   }, [initialContent, onReady]);
   return createElement('div', { 'aria-label': 'Test editor' });
 }
-mock.module('next/dynamic', () => ({ default: () => Editor }));
+mock.module('../components/room/univer-editor', () => ({ default: Editor, preloadOfficeEditor: async () => {} }));
 const { RoomDocuments } = await import('../components/room/room-documents');
 const saved = (text, version) => ({ content: officeContent('DOCUMENT', 'doc', 'Live test', { format: 'markdown', text }), currentVersionId: version });
 let authoritative = saved('Hello world', 'v1');

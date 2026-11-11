@@ -92,3 +92,24 @@ legacy documents must first be opened and saved in the existing editor. Local
 uploads are not automatically shared, imported or saved. Unsaved browser edits
 are not visible here. Live screen updates and broadcasting are not implemented;
 do not claim that an open editor has refreshed after a saved edit.
+
+## Agent creation
+
+`createDocument` accepts a stable UUID `requestId`, `title`, optional `category`
+(default `Notes`), `changeSummary`, and `paragraphs: [{ text, style? }]`.
+Each paragraph is a single line; `style` supports `bold`, `italic`, `fontSize`,
+and a six-digit hex `color`. The server constructs the Univer snapshot, performs
+independent moderator review, and persists the document and version 1 under the
+active room lease. Read the new document before further edits.
+
+Reuse the same request ID and identical input after an uncertain result. Durable
+receipts are scoped to the authenticated user and room, survive job cleanup, and
+return the original document/version instead of creating another file. Different
+input with an already-used request ID is rejected. A new ID means a new creation.
+Specialists receive `proposeCreateDocument` only when their assignment explicitly
+sets `allowCreation: true`; the moderator reviews and accepts the proposal.
+Creation never captures browser drafts or uploads local files.
+
+Apply the `20261111100000_document_creation_receipts` database migration before
+running the updated server. Storage objects written before a failed transaction
+remain unreferenced, consistent with the existing version-save recovery policy.

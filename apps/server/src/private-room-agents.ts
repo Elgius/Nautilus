@@ -239,7 +239,10 @@ export class PrivateRoomAgents {
           await this.deps.storage.put(ACTIVITIES, [...activities.values()])
           await this.changed(entry.identity)
         },
-        committed: async (commit) => { job.commits = [...(job.commits ?? []), commit]; await save(); await this.changed(entry.identity) },
+        committed: async (commit) => {
+          if (!job.commits?.some((saved) => saved.documentId === commit.documentId && saved.versionId === commit.versionId)) job.commits = [...(job.commits ?? []), commit]
+          await save(); await this.changed(entry.identity)
+        },
         taskCommitted: async (commit) => { job.taskCommits = [...(job.taskCommits ?? []), commit]; await save(); await this.changed(entry.identity) },
         preview: async (toolCallId, input) => {
           signal.throwIfAborted()

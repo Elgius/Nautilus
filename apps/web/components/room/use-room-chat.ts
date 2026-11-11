@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { roomRequest, RoomRequestError, type RoomMessage } from "@/lib/room-client";
+import { roomRequest, RoomRequestError, type RoomMessage, type RoomDetail } from "@/lib/room-client";
 
 import type { ChatServerEvent, ChatUser, PrivateAgentJob, RoomAgentOption } from "../../../../shared/room-chat";
 
 export type PendingMessage = { id: string; text: string; status: "pending" | "failed" };
-export function useRoomChat(organizationId: string, roomId: string, userId: string, enabled: boolean) {
+export function useRoomChat(organizationId: string, roomId: string, userId: string, enabled: boolean, initialData?: Pick<RoomDetail, 'messages' | 'nextCursor'>) {
   const [agents, setAgents] = useState<RoomAgentOption[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [agentJobs, setAgentJobs] = useState<PrivateAgentJob[]>([]);
@@ -17,17 +17,17 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
   const [typing, setTyping] = useState<Record<string, { name: string; expiresAt: number }>>({});
   const [reads, setReads] = useState<Record<string, string>>({});
   const lastTyping = useRef(0);
-  const latestTime = useRef("");
-  const [messages, setMessages] = useState<RoomMessage[]>([]);
+  const latestTime = useRef(initialData?.messages.at(-1)?.createdAt ?? "");
+  const [messages, setMessages] = useState<RoomMessage[]>(() => initialData?.messages ?? []);
   const [pending, setPending] = useState<PendingMessage[]>([]);
   const [status, setStatus] = useState("Connecting…");
   const [notice, setNotice] = useState("");
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(initialData?.nextCursor ?? null);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const connection = useRef<WebSocket | null>(null);
   const ready = useRef(false);
   const outbox = useRef(new Map<string, string>());
-  const latest = useRef<string | undefined>(undefined);
+  const latest = useRef<string | undefined>(initialData?.messages.at(-1)?.id);
   useEffect(() => {
     if (!enabled) return;
     let disposed = false, attempt = 0;

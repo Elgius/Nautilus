@@ -3,8 +3,9 @@ import { createModeratorSkills, type Proposal } from '../src/room-moderator'
 import type { AgentRunContext, PrivateAgentProfile } from '../src/private-room-agents'
 import type { AgentSkill } from '../src/agent_interface'
 import type { SkillBackend } from '../src/agent_interface/skills'
+import type { DocumentCreation } from '../src/documents/creation'
 import { HTTPException } from 'hono/http-exception'
-import type { EditReview } from '../src/edit-review'
+import type { CreationReview, EditReview } from '../src/edit-review'
 
 const moderator = { id: 'moderator', name: 'Maya', role: 'Editor', rules: [] }
 const specialist = { id: 'specialist', name: 'Scout', role: 'Analyst', rules: [] }
@@ -18,12 +19,14 @@ async function execute(skills: AgentSkill[], name: string, input: unknown) {
   const run = definition.execute as unknown as (input: unknown, options: { toolCallId: string; messages: never[] }) => Promise<unknown>
   return run(input, { toolCallId: crypto.randomUUID(), messages: [] })
 }
-function harness(prepare?: (agent: PrivateAgentProfile, skills: AgentSkill[]) => Promise<string>, review: (edit: EditReview) => Promise<void> = async () => {}, signal: AbortSignal = new AbortController().signal, read?: SkillBackend['read']) {
+function harness(prepare?: (agent: PrivateAgentProfile, skills: AgentSkill[]) => Promise<string>, review: (edit: EditReview) => Promise<void> = async () => {}, signal: AbortSignal = new AbortController().signal, read?: SkillBackend['read'], creationReview: (creation: CreationReview) => Promise<void> = async () => {}, findCreation?: SkillBackend['findCreation']) {
   const writes: unknown[] = [], commits: unknown[] = [], checkpoints = new Map<string, Proposal>()
   let version = 'v1'
   const source: SkillBackend = {
+    findCreation,
     authorize: async () => {}, list: async () => [],
     read: read ?? (async () => ({ currentVersionId: version, kind: 'DOCUMENT', result: { text: 'Hello' } })),
+    create: async (input) => { writes.push(input); return { documentId: 'created', versionId: 'first', versionNumber: 1, requestId: input.requestId, saved: true, replayed: false } },
     edit: async (...args) => {
       if (args[1] !== version) throw new HTTPException(409, { message: 'A newer document version exists.' })
       writes.push(args); version = 'v2'; return { versionId: 'v2', versionNumber: 2 }
@@ -32,7 +35,7 @@ function harness(prepare?: (agent: PrivateAgentProfile, skills: AgentSkill[]) =>
   const run: AgentRunContext = { id: 'run', token: 'lease', activity: async () => {},
     committed: async (commit) => { commits.push(commit) }, checkpoint: async (id, value) => { checkpoints.set(id, structuredClone(value) as Proposal) } }
   const skills = createModeratorSkills(moderator, run, signal, {
-    review, backend: () => source, profiles: async () => [moderator, specialist, other],
+    review, reviewCreation: creationReview, backend: () => source, profiles: async () => [moderator, specialist, other],
     specialist: async (agent, _instruction, _signal, tools) => {
       if (prepare) return prepare(agent, tools)
       await execute(tools, 'readDocument', { documentId: 'doc' })
@@ -177,4 +180,65 @@ test('oversized failed reads do not retain evidence or prevent narrower reads an
     { operation: 'readDocument', args: {}, result: narrow },
   ] }])
   expect(h.writes).toHaveLength(1)
+})
+
+const creation: DocumentCreation = { kind: 'DOCUMENT', requestId: '00000000-0000-4000-8000-000000000002', title: 'Brief', category: 'Notes', changeSummary: 'Create brief', paragraphs: [{ text: 'Requested content' }] }
+const { kind: _creationKind, ...creationInput } = creation
+
+test('direct creation is independently reviewed with exact content and listing before a recorded commit', async () => {
+  const candidates: CreationReview[] = []
+  const h = harness(undefined, undefined, undefined, undefined, async (candidate) => {
+    expect(h.writes).toHaveLength(0); candidates.push(candidate)
+  })
+  expect(await execute(h.skills, 'createDocument', creationInput)).toMatchObject({ saved: true, versionNumber: 1 })
+  expect(candidates[0]).toMatchObject({ operation: 'create', input: creation, reads: [{ operation: 'listDocuments' }] })
+  expect(h.writes).toEqual([creation])
+  expect(h.commits).toEqual([{ documentId: 'created', versionId: 'first', versionNumber: 1 }])
+})
+
+test('rejected or cancelled creation review never reaches the writer', async () => {
+  const denied = harness(undefined, undefined, undefined, undefined, async () => { throw new HTTPException(422, { message: 'Creation rejected' }) })
+  await expect(execute(denied.skills, 'createDocument', creationInput)).rejects.toThrow('Creation rejected')
+  expect(denied.writes).toHaveLength(0)
+  const controller = new AbortController()
+  const cancelled = harness(undefined, undefined, controller.signal, undefined, async () => { controller.abort() })
+  await expect(execute(cancelled.skills, 'createDocument', creationInput)).rejects.toThrow()
+  expect(cancelled.writes).toHaveLength(0)
+})
+
+test('specialists cannot create unless assigned; authorized creations remain proposals until reviewed acceptance', async () => {
+  const noCreation = harness(async (_agent, skills) => {
+    expect(skills.some((skill) => 'createDocument' in skill.tools || 'proposeCreateDocument' in skill.tools)).toBe(false)
+    return 'No creation allowed'
+  })
+  await execute(noCreation.skills, 'delegateWork', assignment)
+  expect(noCreation.writes).toHaveLength(0)
+  const h = harness(async (_agent, skills) => {
+    expect(skills.some((skill) => 'createDocument' in skill.tools)).toBe(false)
+    expect(await execute(skills, 'proposeCreateDocument', creationInput)).toMatchObject({ saved: false, status: 'proposed' })
+    return 'Creation proposed'
+  })
+  await execute(h.skills, 'delegateWork', { assignments: [{ agentId: specialist.id, documentIds: [], allowCreation: true, instruction: 'Create a brief' }] })
+  expect(h.writes).toHaveLength(0)
+  const proposalId = [...h.checkpoints.keys()][0]
+  await execute(h.skills, 'acceptProposal', { proposalId })
+  expect(h.writes).toEqual([creation])
+  await expect(execute(h.skills, 'acceptProposal', { proposalId })).rejects.toThrow('applied')
+  expect(h.writes).toHaveLength(1)
+})
+
+test('spreadsheet tool submits structured formulas and values through creation review', async () => {
+  const h = harness()
+  const input = { requestId: creation.requestId, title: 'Budget', category: 'Notes', changeSummary: 'Create budget', sheets: [{ name: 'Budget', cells: [{ row: 0, column: 0, value: 5 }, { row: 0, column: 1, formula: '=A1*2' }] }] }
+  await execute(h.skills, 'createSpreadsheet', input)
+  expect(h.writes).toEqual([{ kind: 'SPREADSHEET', ...input }])
+})
+
+
+test('durable replay returns the original commit without a second mutation or duplicate-creation review', async () => {
+  const saved = { documentId: 'existing', versionId: 'first', versionNumber: 1, requestId: creation.requestId, saved: true as const, replayed: true }
+  const h = harness(undefined, undefined, undefined, undefined, async () => { throw new Error('A receipt must not require another review') }, async () => saved)
+  expect(await execute(h.skills, 'createDocument', creationInput)).toEqual(saved)
+  expect(h.writes).toHaveLength(0)
+  expect(h.commits).toEqual([{ documentId: 'existing', versionId: 'first', versionNumber: 1 }])
 })

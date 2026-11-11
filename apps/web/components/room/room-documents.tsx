@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useEffectEvent, useRef, useState, type FormEvent, type Dispatch } from 'react';
-import dynamic from 'next/dynamic';
 import { createPortal } from 'react-dom';
 import { Download, Plus, Save, Upload, FileText, Sheet, FileImage, File, FolderOpen, X, History, ChevronDown, MousePointer2, LockKeyhole, Trash2 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -13,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { errorMessage } from '@/lib/auth-client';
 import { roomRequest, uploadRoomAttachment, type RoomAttachment, type RoomDocument, type DocumentVersion, type DocumentVersionsPage } from '@/lib/room-client';
 import { downloadBlob, officeContent, type OfficeContent, type LegacyContent } from '@/lib/office-content';
-import type { OfficeEditorHandle } from './univer-editor';
+import UniverEditor, { preloadOfficeEditor, type OfficeEditorHandle } from './univer-editor';
 import { addLocalRoomFiles, MAX_LOCAL_FILES } from '@/lib/local-room-files';
 import type { RoomFileState, RoomFileAction } from '@/lib/room-file-state';
 import { LocalRoomFilePreview } from './local-room-file';
@@ -21,10 +20,6 @@ import { useRoomWork } from './use-room-work';
 import { avatarColorValues } from '../../../../shared/agent-appearance';
 import { parseDocumentPreview } from '../../../../shared/document-preview';
 import { previewDocument } from '@/lib/document-preview';
-
-const UniverEditor = dynamic(() => import('./univer-editor'), {
-  ssr: false, loading: () => <p role="status" className="p-6 text-sm">Loading editor…</p>,
-});
 
 function RoomFileIcon({ kind }: { kind: string }) {
   const Icon = kind === 'SPREADSHEET' || /\.(xlsx?|csv|tsv)$/i.test(kind) ? Sheet : /\.(png|jpe?g|gif|webp)$/i.test(kind) ? FileImage : kind === 'DOCUMENT' || /\.(docx?|txt|md|pdf)$/i.test(kind) ? FileText : File;
@@ -67,6 +62,26 @@ export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsCo
       .catch((error) => { if (!cancelled) setAttachmentError(errorMessage(error)); });
     return () => { cancelled = true; };
   }, [organizationId, roomId]);
+  // A stable key lets a slow metadata request finish across frequent work polls.
+  const missingDocumentIds = Object.keys(work.versions ?? {}).filter((id) => !documents.some((document) => document.id === id)).sort().join(',');
+  useEffect(() => {
+    if (!missingDocumentIds) return;
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    async function refresh() {
+      try {
+        const { documents: incoming } = await roomRequest<{ documents: RoomDocument[] }>(organizationId, `/${encodeURIComponent(roomId)}/documents`, 'GET', undefined, AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]));
+        if (!cancelled) setDocuments((previous) => {
+          const known = new Set(previous.map((document) => document.id));
+          return [...previous, ...incoming.filter((document) => !known.has(document.id))];
+        });
+      } catch { /* Retry missed metadata without touching editors or local files. */ }
+      finally { if (!cancelled) retry = setTimeout(refresh, 1500); }
+    }
+    void refresh();
+    return () => { cancelled = true; clearTimeout(retry); controller.abort(); };
+  }, [missingDocumentIds, organizationId, roomId]);
   async function saveLocalFile(id: string) {
     const entry = localFiles.find((file) => file.id === id);
     if (!entry || work.readOnly || !storageConfigured || savingFileIds.current.has(id) || savedFiles[id]) return;
@@ -95,7 +110,7 @@ export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsCo
       const result = await roomRequest<{ document: RoomDocument }>(organizationId, `/${roomId}/documents`, 'POST', {
         title: String(data.get('title')), kind: String(data.get('kind')),
       });
-      setDocuments((previous) => [...previous, result.document]);
+      setDocuments((previous) => [...previous.filter((document) => document.id !== result.document.id), result.document]);
       onSelect(result.document.id); setCreateOpen(false);
     } catch (error) { setError(errorMessage(error)); }
     finally { setCreating(false); }
@@ -249,6 +264,9 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
   const [saving, setSaving] = useState(false), [dirty, setDirty] = useState(false);
   const [converting, setConverting] = useState(false), [editorReady, setEditorReady] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false), [notice, setNotice] = useState('');
+  const [historyRevision, refreshHistory] = useState(0);
+  const [historyError, setHistoryError] = useState('');
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const editor = useRef<OfficeEditorHandle | null>(null);
   const savedContent = useRef<OfficeContent | null>(null);
@@ -265,16 +283,29 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
   const onDirty = useCallback(() => { revision.current++; setDirty(true); setNotice(''); }, []);
   useEffect(() => {
     let active = true;
-    Promise.all([
-      roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`),
-      roomRequest<DocumentVersionsPage>(organizationId, `${path}/versions`),
-    ]).then(([saved, history]) => {
-      if (!active) return;
-      adoptContent(officeContent(document.kind, document.id, document.title, saved.content));
-      setVersionId(saved.currentVersionId); setVersions(history.versions); setNextVersionCursor(history.nextCursor); onLoaded(document.id);
-    }).catch((error) => { if (active) setError(errorMessage(error)); });
-    return () => { active = false; };
+    // Start the kind-specific editor download alongside the content request.
+    // A preload failure is retried/reported by the editor when it renders.
+    void preloadOfficeEditor(document.kind).catch(() => {});
+    const controller = new AbortController();
+    roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`, 'GET', undefined, controller.signal)
+      .then((saved) => {
+        if (!active) return;
+        adoptContent(officeContent(document.kind, document.id, document.title, saved.content));
+        setVersionId(saved.currentVersionId); onLoaded(document.id);
+      }).catch((error) => { if (active) setError(errorMessage(error)); });
+    return () => { active = false; controller.abort(); };
   }, [organizationId, path, document.id, document.kind, document.title, onLoaded, adoptContent]);
+  useEffect(() => {
+    if (!historyOpen) return;
+    const controller = new AbortController();
+    roomRequest<DocumentVersionsPage>(organizationId, `${path}/versions`, 'GET', undefined, controller.signal)
+      .then((history) => {
+        if (controller.signal.aborted) return;
+        setVersions(history.versions); setNextVersionCursor(history.nextCursor);
+      }).catch((error) => { if (!controller.signal.aborted) setHistoryError(errorMessage(error)); })
+      .finally(() => { if (!controller.signal.aborted) setHistoryLoading(false); });
+    return () => controller.abort();
+  }, [historyOpen, organizationId, path, versionId, historyRevision]);
   const receivePreview = useEffectEvent((event: Event) => {
     const detail = (event as CustomEvent<{ organizationId: string; roomId: string; runId?: string; toolCallId?: string; input: string | null }>).detail;
     if (detail.organizationId !== organizationId || detail.roomId !== roomId) return;
@@ -283,15 +314,11 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
       if (!current || (detail.runId && detail.runId !== current.runId) || (detail.toolCallId && detail.toolCallId !== current.toolCallId)) return;
       // Reconcile to authoritative content after review, rejection, cancellation
       // or disconnect. Keep the preview visible until the saved result arrives.
-      void Promise.all([
-        roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`, 'GET', undefined, AbortSignal.timeout(5000)),
-        roomRequest<DocumentVersionsPage>(organizationId, `${path}/versions`, 'GET', undefined, AbortSignal.timeout(5000)),
-      ]).then(([saved, history]) => {
+      void roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`, 'GET', undefined, AbortSignal.timeout(5000)).then((saved) => {
           if (preview.current !== current) return;
           adoptContent(officeContent(document.kind, document.id, document.title, saved.content));
           setSupersededVersions((previous) => [...previous, versionId].slice(-50));
           setVersionId(saved.currentVersionId);
-          setVersions(history.versions); setNextVersionCursor(history.nextCursor);
         }).catch(() => {
           if (preview.current === current) editor.current?.updateContent?.(current.base);
         }).finally(() => {
@@ -326,14 +353,11 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     if (!newerVersion || dirty || saving || !content || preview.current) return;
     let cancelled = false;
     const started = revision.current;
-    Promise.all([
-      roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`),
-      roomRequest<DocumentVersionsPage>(organizationId, `${path}/versions`),
-    ]).then(([saved, history]) => {
+    roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`).then((saved) => {
       if (cancelled || started !== revision.current || preview.current) return;
       adoptContent(officeContent(document.kind, document.id, document.title, saved.content));
       setSupersededVersions((previous) => [...previous, versionId].slice(-50));
-      setVersionId(saved.currentVersionId); setVersions(history.versions); setNextVersionCursor(history.nextCursor);
+      setVersionId(saved.currentVersionId);
     }).catch((error) => { if (!cancelled) setError(errorMessage(error)); });
     return () => { cancelled = true; };
   }, [newerVersion, remoteVersionId, dirty, saving, content, organizationId, path, document.kind, document.id, document.title, versionId, previewing, adoptContent]);
@@ -425,7 +449,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="ghost" size="sm" />} aria-label="File menu">File<ChevronDown size={12} /></DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-52">
-          <DropdownMenuItem onClick={() => setHistoryOpen(true)}><History size={14} />Version history ({versions.length}{nextVersionCursor ? '+' : ''})</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => { setHistoryError(''); setHistoryLoading(true); setHistoryOpen(true); }}><History size={14} />Version history</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setImportOpen(true)} disabled={editingBlocked || !officeConfigured || !editorReady || converting || saving}><Upload size={14} />Import {isDoc ? 'Word document' : 'spreadsheet'}</DropdownMenuItem>
           <DropdownMenuItem onClick={exportFile} disabled={!officeConfigured || !editorReady || converting || saving}><Download size={14} />Export {isDoc ? '.docx' : '.xlsx'}</DropdownMenuItem>
@@ -462,9 +486,10 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
       }}>Open latest version</Button>
     </div>}
     {converting && <p role="status" className="p-2 text-sm">Converting file…</p>}
-    <Dialog open={historyOpen} onOpenChange={setHistoryOpen}><DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Version history</DialogTitle><DialogDescription>Saved versions of {document.title}.</DialogDescription></DialogHeader><ol className="max-h-80 overflow-auto text-sm" aria-label="Document versions">
+    <Dialog open={historyOpen} onOpenChange={setHistoryOpen}><DialogContent className="sm:max-w-xl"><DialogHeader><DialogTitle>Version history</DialogTitle><DialogDescription>Saved versions of {document.title}.</DialogDescription></DialogHeader>{historyError && <p role="alert">{historyError}<Button size="sm" variant="ghost" onClick={() => { setHistoryError(''); setHistoryLoading(true); refreshHistory((value) => value + 1); }}>Retry history</Button></p>}<ol className="max-h-80 overflow-auto text-sm" aria-label="Document versions">
       {versions.map((version) => <li key={version.id} className="flex items-center justify-between gap-2 py-1"><span>Version {version.versionNumber} · {version.authorUser?.name || version.authorAgent?.name} · {new Date(version.createdAt).toLocaleString()}</span><Button size="sm" variant="ghost" onClick={() => download(version.id)}>Download snapshot</Button></li>)}
-      {!versions.length && <li>No saved versions yet.</li>}
+      {historyLoading && <li role="status">Loading version history…</li>}
+      {!historyLoading && !historyError && !versions.length && <li>No saved versions yet.</li>}
       {nextVersionCursor && <li><Button size="sm" variant="ghost" onClick={loadOlderVersions} disabled={loadingVersions}>{loadingVersions ? 'Loading…' : 'Load older versions'}</Button></li>}
     </ol></DialogContent></Dialog>
     {!content && !error && <p role="status" className="p-6 text-sm">Loading document…</p>}

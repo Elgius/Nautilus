@@ -32,7 +32,7 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
   const panels = useRef<HTMLElement>(null);
   const [joined, setJoined] = useState(room.members.some(({ member }) => member.user.id === session.user.id));
   const [joining, setJoining] = useState(false);
-  const { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, cancelAgent, canSend, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage } = useRoomChat(organizationId, room.id, session.user.id, joined);
+  const { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, cancelAgent, canSend, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage } = useRoomChat(organizationId, room.id, session.user.id, joined, initialData);
   const suggestions = useRoomSuggestions(organizationId, room.id, session.user.id, joined, messages);
   const [mobilePanel, setMobilePanel] = useState<"chat" | "document">("chat");
   const [fileState, dispatchFiles] = useReducer(roomFileReducer, room.documents[0]?.id, initialRoomFileState);

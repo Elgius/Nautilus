@@ -11,7 +11,7 @@ import { object, parseRoom, text } from './room-validation'
 import { MAX_OFFICE_BYTES, validateOfficeContent } from './office-content'
 import { officeConfigured, officeRequest } from './office-service'
 import { createDocumentService, versionSelect } from './documents/document-service'
-import { canChat } from './room-chat-service'
+import { canChat, chatHistory } from './room-chat-service'
 import { agentAppearanceSelect } from './agents'
 import { guardRoomWrite } from './documents/room-write-lock'
 
@@ -114,8 +114,15 @@ rooms.post('/:roomId/socket-ticket', async (c) => {
 
 rooms.get('/:roomId', async (c) => {
   const organizationId = c.get('organizationId'), roomId = c.req.param('roomId'), db = c.get('db')
-  const room = await db.room.findUniqueOrThrow({ where: { id: roomId, organizationId }, include: roomInclude(c.get('session').user.id), omit: privateRoomFields })
-  return c.json({ room, messages: [], nextCursor: null, storageConfigured: storageConfigured(c.env), officeConfigured: officeConfigured(c.env) })
+  // Bootstrap only public room chat for a live session with room membership.
+  // Nonmembers can view the room shell but must join before reading chat.
+  const session = c.get('session')
+  const identity = { organizationId, roomId, userId: session.user.id, sessionId: session.session.id }
+  const [room, history] = await Promise.all([
+    db.room.findUniqueOrThrow({ where: { id: roomId, organizationId }, include: roomInclude(session.user.id), omit: privateRoomFields }),
+    canChat(db, identity).then((allowed) => allowed ? chatHistory(db, identity) : { messages: [], nextCursor: null }),
+  ])
+  return c.json({ room, ...history, storageConfigured: storageConfigured(c.env), officeConfigured: officeConfigured(c.env) })
 })
 
 // Shared activity contains names and targets only, never private instructions/replies.
@@ -168,6 +175,14 @@ rooms.post('/:roomId/members', async (c) => {
   await c.get('db').roomMember.upsert({ where: { roomId_organizationMemberId: { roomId, organizationMemberId: member.id } },
     create: { organizationId, roomId, organizationMemberId: member.id }, update: {} })
   return c.json({ success: true })
+})
+
+rooms.get('/:roomId/documents', async (c) => {
+  const documents = await c.get('db').document.findMany({
+    where: { organizationId: c.get('organizationId'), roomId: c.req.param('roomId') },
+    orderBy: { createdAt: 'asc' }, select: roomInclude(c.get('session').user.id).documents.select,
+  })
+  return c.json({ documents }, 200, { 'Cache-Control': 'no-store' })
 })
 
 rooms.post('/:roomId/documents', async (c) => {

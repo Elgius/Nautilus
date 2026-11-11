@@ -9,7 +9,7 @@ import type { SkillBackend } from './skills'
 type WithDatabase = <T>(action: (db: Database) => Promise<T>) => Promise<T>
 
 /** Identity is supplied by the authenticated socket, never by tool arguments. */
-export function createRoomSkillBackend(env: Bindings, identity: ChatIdentity, agentId: string, withDatabase: WithDatabase, workToken: string): SkillBackend {
+export function createRoomSkillBackend(env: Bindings, identity: ChatIdentity, agentId: string, withDatabase: WithDatabase, workToken: string, runId?: string): SkillBackend {
   const scope = (documentId: string) => ({ organizationId: identity.organizationId, roomId: identity.roomId, documentId })
   return {
     authorize: () => withDatabase(async (db) => {
@@ -38,6 +38,13 @@ export function createRoomSkillBackend(env: Bindings, identity: ChatIdentity, ag
       const response = await officeRequest(env, '/read', JSON.stringify({ content: saved.content, operation, ...args }), true, signal)
       return { currentVersionId: saved.currentVersionId, kind: saved.kind, result: await response.json() }
     }),
+    findCreation: (input, signal) => withDatabase(async (db) => {
+      signal?.throwIfAborted()
+      return createDocumentService(db, env).findCreation({ organizationId: identity.organizationId, roomId: identity.roomId }, input, identity.userId)
+    }),
+    ...(runId ? { create: (input, signal) => withDatabase((db) => createDocumentService(db, env).createDocument(
+      { organizationId: identity.organizationId, roomId: identity.roomId }, input,
+      { userId: identity.userId, agentId, workToken, runId }, signal)) } satisfies Pick<SkillBackend, 'create'> : {}),
     edit: (id, expectedVersionId, kind, edits, changeSummary, signal) => withDatabase(async (db) => {
       const service = createDocumentService(db, env)
       const saved = await service.readDocument(scope(id))

@@ -14,9 +14,11 @@
     "test:room-local-save": "bun tests/room-local-save.ui.tsx",
     "test:planner": "node tests/planner.ui.mjs",
     "test:planner-assignments": "bun tests/planner.ui.tsx",
+    "test:document-creation": "bun tests/room-document-creation.ui.tsx",
     "test:room-work": "bun tests/room-work.ui.tsx",
     "test:document-stream": "bun tests/document-stream.ui.mjs",
     "test:agent-avatar": "bun tests/agent-avatar.ui.tsx",
+    "test:instant-navigation": "node tests/instant-navigation.ui.mjs",
     "test:workspace-navigation": "API_ORIGIN=http://127.0.0.1:8791 bun run build && node tests/workspace-navigation.ui.mjs"
   },
   "dependencies": {

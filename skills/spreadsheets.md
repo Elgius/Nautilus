@@ -102,3 +102,21 @@ Only saved Univer workbooks are editable through the persistence service. Empty
 or legacy documents must first be opened and saved in the existing editor. Local
 uploads and unsaved browser edits are not available here. Live screen updates and
 broadcasting are deferred; do not claim an open editor has refreshed.
+
+## Agent creation
+
+`createSpreadsheet` accepts a stable UUID `requestId`, `title`, optional `category`
+(default `Notes`), `changeSummary`, and `sheets: [{ name, rows?, columns?, cells }]`.
+Cells are sparse `{ row, column, value?, formula?, style? }` entries with zero-based
+coordinates. Values are literal strings/numbers/booleans/null; use `formula` for
+formulas beginning with `=`. Never supply both. Styles support `bold`, `italic`,
+`fontSize`, and a six-digit hex `color`. Omitted dimensions grow to fit cells.
+Names must be unique; cells must be unique and fit explicit dimensions. Creation
+is limited to 100 sheets and 10,000 total cells. Formula results may require
+recalculation by the editor.
+
+The moderator independently reviews and saves the workbook's first version.
+Reuse the identical input and request ID for retries; durable user/room-scoped
+receipts return the original result. Read workbook metadata before editing it.
+Specialists can only propose creation through `proposeCreateSpreadsheet` when
+`allowCreation: true` is set on their assignment. They cannot persist files.
