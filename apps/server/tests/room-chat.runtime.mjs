@@ -164,6 +164,23 @@ try {
   assert.equal((await deliver()).status, 202)
   assert.equal((await (await mf.dispatchFetch('https://api.test/agent-calls')).json()).calls, callsBeforeRetry)
   for (const peer of [bob, other]) assert.equal(queues.get(peer).some((event) => JSON.stringify(event).includes('SCHEDULED_PRIVATE_TASK')), false)
+  // Cancel through a browser socket while a different job holds the room queue.
+  const blockerId = crypto.randomUUID(), cancelledId = 'c326b5dc-0fdd-4d70-b838-d155fe1ecacf'
+  send(alice, { type: 'agent.invoke', requestId: blockerId, agentId: 'agent-1', instruction: 'Blocking work' })
+  let blocker
+  do { blocker = await receive(alice, 'agent.update') } while (blocker.job.id !== blockerId || blocker.job.status !== 'running')
+  assert.equal((await deliver('valid-lease', 'room', cancelledId)).status, 202)
+  let cancelled
+  do { cancelled = await receive(alice, 'agent.update') } while (cancelled.job.id !== cancelledId)
+  assert.equal(cancelled.job.status, 'queued')
+  send(alice, { type: 'agent.cancel', jobId: cancelledId })
+  do { cancelled = await receive(alice, 'agent.update') } while (cancelled.job.id !== cancelledId || cancelled.job.status !== 'failed')
+  const readExecution = async () => (await (await mf.dispatchFetch('https://api.test/scheduler-results')).json())[cancelledId]
+  assert.deepEqual(await readExecution(), { executionState: 'failed', result: '', executionError: 'Cancelled before starting.' })
+  const refreshed = await connect('alice')
+  send(refreshed, { type: 'agent.history' })
+  assert.equal((await receive(refreshed, 'agent.history')).jobs.find((job) => job.id === cancelledId).status, 'failed')
+  assert.equal((await readExecution()).executionState, 'failed')
   await mf.dispatchFetch('https://api.test/revoke')
   const closed = new Promise((resolve) => bob.addEventListener('close', (event) => resolve(event.code), { once: true }))
   send(bob, { type: 'send', clientMessageId: crypto.randomUUID(), text: 'revoked' })

@@ -38,6 +38,10 @@ export function Planner({ mode, storageKey, organizationId }: { mode: "Kanban" |
   const [statusFilter, setStatusFilter] = useState("All tasks");
   const [fields, setFields] = useState({ description: false, status: true, date: true });
   const [dropTarget, setDropTarget] = useState<Status | null>(null);
+  const roomAgents = rooms.find((room) => room.id === draft?.roomId)?.agents.map(({ agent }) => agent) ?? [];
+  const assignmentOptions = [...roomAgents, ...(draft?.agentIds ?? [])
+    .filter((id) => !roomAgents.some((agent) => agent.id === id))
+    .map((id) => ({ id, name: `Removed agent (${id})` }))];
   const filtered = tasks.filter((task) => (!roomFilter || task.roomId === roomFilter) && (statusFilter === "All tasks" || task.status === statusFilter) && `${task.title} ${task.description}`.toLowerCase().includes(query.toLowerCase()));
 
   async function write(action: () => Promise<unknown>, message: string) {
@@ -140,7 +144,7 @@ export function Planner({ mode, storageKey, organizationId }: { mode: "Kanban" |
         <DialogContent className="max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>{tasks.some((task) => task.id === draft?.id) ? "Edit task" : "Add task"}</DialogTitle><DialogDescription>Track work on the board and add a due date to show it on your calendar.</DialogDescription></DialogHeader>
           {draft && <form onSubmit={save} className="space-y-4">
             <label className="block space-y-2 text-sm font-medium">Room<select className={selectClass} disabled={!!draft.revision} value={draft.roomId} onChange={(event) => setDraft({ ...draft, roomId: event.target.value, agentIds: [] })}>{rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></label>
-            <fieldset className="space-y-2"><legend className="text-sm font-medium">Assigned agents</legend>{rooms.find((room) => room.id === draft.roomId)?.agents.map(({ agent }) => <label key={agent.id} className="mr-3 inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.agentIds.includes(agent.id)} disabled={!draft.agentIds.includes(agent.id) && draft.agentIds.length >= 5} onChange={(event) => setDraft({ ...draft, agentIds: event.target.checked ? [...draft.agentIds, agent.id] : draft.agentIds.filter((id) => id !== agent.id) })} />{agent.name}</label>)}</fieldset>
+            <fieldset className="space-y-2"><legend className="text-sm font-medium">Assigned agents</legend>{assignmentOptions.map((agent) => <label key={agent.id} className="mr-3 inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.agentIds.includes(agent.id)} disabled={!draft.agentIds.includes(agent.id) && draft.agentIds.length >= 5} onChange={(event) => setDraft({ ...draft, agentIds: event.target.checked ? [...draft.agentIds, agent.id] : draft.agentIds.filter((id) => id !== agent.id) })} />{agent.name}</label>)}</fieldset>
             <label className="block space-y-2 text-sm font-medium">Title<Input autoFocus required maxLength={200} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
             <label className="block space-y-2 text-sm font-medium">Description<Textarea maxLength={4000} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
             <div className="grid grid-cols-2 gap-4"><label className="space-y-2 text-sm font-medium">Status<select className={selectClass} value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as Status })}>{statuses.map((status) => <option key={status}>{status}</option>)}</select></label><label className="space-y-2 text-sm font-medium">Due date<Input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} /></label></div>

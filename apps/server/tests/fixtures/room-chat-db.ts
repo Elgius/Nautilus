@@ -14,7 +14,7 @@ export function revoke() { revoked = true }
 export function createDatabase() {
   const db = {
     schedulerDelivery: { findFirst: async ({ where }: { where: { id: string; leaseToken?: string; schedule?: { event: { organizationId: string; roomId: string; ownerUserId: string } } } }) => {
-      if (!['c326b5dc-0fdd-4d70-b838-d155fe1ecacd', 'c326b5dc-0fdd-4d70-b838-d155fe1ecace'].includes(where.id)) return null
+      if (!['c326b5dc-0fdd-4d70-b838-d155fe1ecacd', 'c326b5dc-0fdd-4d70-b838-d155fe1ecace', 'c326b5dc-0fdd-4d70-b838-d155fe1ecacf'].includes(where.id)) return null
       if (where.leaseToken !== undefined && where.leaseToken !== 'valid-lease') return null
       const ownerUserId = where.id.endsWith('e') ? 'outsider' : 'alice'
       if (where.schedule && (where.schedule.event.organizationId !== 'org' || where.schedule.event.roomId !== 'room' || where.schedule.event.ownerUserId !== ownerUserId)) return null
