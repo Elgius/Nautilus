@@ -1,15 +1,17 @@
 import { redirect } from "next/navigation";
-import { requireSession } from "@/lib/auth-server";
+import { getWorkspaceSession } from "@/lib/auth-server";
+import { WorkspaceLoginRedirect } from "./workspace-login-redirect";
 import { WorkspaceSessionProvider } from "./workspace-session";
 
 export async function WorkspaceGate({
   children,
-  returnTo = "/",
+  returnTo,
 }: {
   children: React.ReactNode;
   returnTo?: string;
 }) {
-  const session = await requireSession(returnTo);
+  const session = await getWorkspaceSession();
+  if (!session) return <WorkspaceLoginRedirect returnTo={returnTo} />;
   if (!session.activeOrganization) redirect("/organizations");
   return (
     <WorkspaceSessionProvider

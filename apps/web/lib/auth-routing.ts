@@ -11,9 +11,14 @@ export function safeReturnTo(value: string | null | undefined) {
     const url = new URL(value, "https://nautilus.invalid");
     if (url.origin !== "https://nautilus.invalid") return "/";
     if (
-      !["/", "/dashboard", "/organizations", "/accept-invitation"].includes(
-        url.pathname,
-      ) &&
+      ![
+        "/",
+        "/dashboard",
+        "/calendar",
+        "/kanban",
+        "/organizations",
+        "/accept-invitation",
+      ].includes(url.pathname) &&
       !/^\/room-id=[\w%-]+$/.test(url.pathname)
     )
       return "/";

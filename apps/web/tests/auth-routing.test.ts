@@ -27,6 +27,13 @@ describe("authentication navigation", () => {
     );
     assert.equal(safeReturnTo(null), "/");
   });
+  it("preserves planner destinations after login", () => {
+    for (const path of ["/calendar", "/kanban"]) {
+      assert.equal(safeReturnTo(path), path);
+      assert.equal(safeReturnTo(`${path}?view=week`), `${path}?view=week`);
+      assert.equal(safeReturnTo(`${path}/unknown`), "/");
+    }
+  });
   it("encodes invitation IDs without allowing additional query parameters", () => {
     assert.equal(
       invitationPath("id&next=//other.example"),
