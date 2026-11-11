@@ -9,7 +9,7 @@ additional work.
 
 ## Tools
 
-- `scheduleEvent({ title, instruction, scheduledAt, agentIds })`: schedule an
+- `scheduleEvent({ title, instruction, scheduledAt, agentIds, taskId?, requestId? })`: schedule an
   explicitly requested future task for one to five distinct assigned agents.
 - `listScheduledEvents({ after? })`: list the requesting user's room schedules,
   50 per page. Pass `nextCursor` as `after` for more.
@@ -32,6 +32,12 @@ private history before creating a replacement that could repeat committed edits.
 Once a schedule is `started`, changing or cancelling it returns HTTP 409. Already
 queued agent work can be cancelled through the existing private `agent.cancel`
 operation, using the delivery ID as the request ID.
+
+Linked planner events accept optional `taskId` and stable UUID `requestId`. Recipients
+must be assigned to that active task. Completed/deleted tasks invalidate execution;
+pending linked schedules are cancelled. Delivery `executionState`, `result` and
+`executionError` are owner-only and distinct from dispatch acceptance. See
+`skills/planner.md` for planner tooling and HTTP cancellation.
 
 ## Runtime and reliability
 

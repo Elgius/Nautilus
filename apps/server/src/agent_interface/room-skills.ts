@@ -1,7 +1,7 @@
 import { HTTPException } from 'hono/http-exception'
 import type { Database } from '../db'
 import type { Bindings } from '../env'
-import { canChat, type ChatIdentity } from '../room-chat-service'
+import { canChat, scheduledTaskAvailable, type ChatIdentity } from '../room-chat-service'
 import { createDocumentService } from '../documents/document-service'
 import { officeRequest } from '../office-service'
 import type { SkillBackend } from './skills'
@@ -13,7 +13,7 @@ export function createRoomSkillBackend(env: Bindings, identity: ChatIdentity, ag
   const scope = (documentId: string) => ({ organizationId: identity.organizationId, roomId: identity.roomId, documentId })
   return {
     authorize: () => withDatabase(async (db) => {
-      if (!await canChat(db, identity) || !await db.roomAgent.findFirst({
+      if (!await canChat(db, identity) || !await scheduledTaskAvailable(db, identity) || !await db.roomAgent.findFirst({
         where: { organizationId: identity.organizationId, roomId: identity.roomId, agentId }, select: { agentId: true },
       })) throw new HTTPException(403, { message: 'Room or agent access expired.' })
     }),

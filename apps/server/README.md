@@ -534,3 +534,12 @@ apps/server/tests/private-room-agents.test.ts` and
 `bun run --filter @nautilus/server test:room-socket`. The runtime test exercises
 scheduled delivery, expired leases, room isolation, owner-only responses and
 idempotent acceptance with real Durable Object storage and a stub database/model.
+
+## Shared planner
+
+Kanban and Calendar now use persisted room tasks, reviewed agent tools and linked
+one-time scheduler events. Apply `20261109120000_planner` after the scheduler
+migration before release. See `skills/planner.md` for API contracts, permissions,
+revision handling, scheduling privacy and cancellation behavior. Task due dates
+never implicitly schedule agents. The frontend can import existing browser tasks
+into an explicitly selected joined room.

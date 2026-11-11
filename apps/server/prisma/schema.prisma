@@ -245,6 +245,7 @@ enum DocumentStatus {
 }
 
 model Room {
+  tasks PlannerTask[]
   scheduledEvents SchedulerEvent[]
   id              String       @id @default(uuid())
   organizationId  String
@@ -428,6 +429,8 @@ model RoomAttachment {
 
 // Event content is separate from timing and per-agent delivery state.
 model SchedulerEvent {
+  taskId String?
+  task PlannerTask? @relation(fields: [organizationId, roomId, taskId], references: [organizationId, roomId, id], onDelete: Cascade)
   id String @id @default(uuid())
   organizationId String
   roomId String
@@ -455,6 +458,9 @@ model SchedulerSchedule {
 }
 
 model SchedulerDelivery {
+  executionState String?
+  result String?
+  executionError String?
   id String @id @default(uuid())
   scheduleId String
   organizationId String
@@ -471,4 +477,40 @@ model SchedulerDelivery {
   @@unique([scheduleId, agentId])
   @@index([state, nextAttemptAt])
   @@map("schedulerDelivery")
+}
+
+model PlannerTask {
+  id String @id @default(uuid())
+  organizationId String
+  roomId String
+  title String @db.VarChar(200)
+  description String @default("") @db.VarChar(4000)
+  status String @default("To do")
+  date String @default("") @db.VarChar(10)
+  agentIds String[] @default([])
+  revision Int @default(1)
+  deletedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdByUserId String
+  room Room @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Cascade)
+  schedules SchedulerEvent[]
+  changes PlannerChange[]
+  @@unique([organizationId, roomId, id])
+  @@index([organizationId, roomId, deletedAt, id])
+  @@map("plannerTask")
+}
+model PlannerChange {
+  id String @id @default(uuid())
+  taskId String
+  revision Int
+  userId String
+  agentId String?
+  runId String?
+  summary String
+  snapshot Json
+  createdAt DateTime @default(now())
+  task PlannerTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  @@unique([taskId, revision])
+  @@map("plannerChange")
 }

@@ -3,14 +3,16 @@
 import { useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, Table2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { TaskSchedule } from '@/lib/planner-client';
 import type { Task } from "./planner";
 
 function dateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-export function TaskCalendar({ tasks, disabled, onAdd, onEdit }: {
+export function TaskCalendar({ tasks, schedules, disabled, onAdd, onEdit }: {
   tasks: Task[];
+  schedules: TaskSchedule[];
   disabled: boolean;
   onAdd: (date: string) => void;
   onEdit: (task: Task) => void;
@@ -58,12 +60,15 @@ export function TaskCalendar({ tasks, disabled, onAdd, onEdit }: {
                     {date.getDate() === 1 ? date.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : date.getDate()}
                   </button>
                 </div>
-                <div className="space-y-1.5">{dayTasks.map((task) => <button key={task.id} type="button" onClick={() => onEdit(task)} title={`${task.title} · ${task.status}`} className={`block w-full truncate rounded-md border px-2 py-1.5 text-left text-xs font-medium shadow-sm transition-colors focus-visible:outline-ring ${task.status === "In progress" ? "border-primary/20 bg-primary/10 text-primary hover:bg-primary/15" : "border-border bg-card text-card-foreground hover:bg-muted"}`}><span className={task.status === "Done" ? "text-muted-foreground line-through" : undefined}>{task.title}</span></button>)}</div>
+                <div className="space-y-1.5">{schedules.filter((schedule) => dateKey(new Date(schedule.scheduledAt)) === key && schedule.state !== 'cancelled').map((schedule) => {
+                  const task = tasks.find((task) => task.id === schedule.event.taskId);
+                  return task ? <button type="button" key={schedule.id} onClick={() => onEdit(task)} className="block w-full truncate rounded-md border border-dashed border-primary/40 bg-primary/5 px-2 py-1.5 text-left text-xs" title="Private scheduled execution">Run {new Date(schedule.scheduledAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} · {task.title}</button> : null;
+                })}{dayTasks.map((task) => <button key={task.id} type="button" onClick={() => onEdit(task)} title={`${task.title} · ${task.status}`} className={`block w-full truncate rounded-md border px-2 py-1.5 text-left text-xs font-medium shadow-sm transition-colors focus-visible:outline-ring ${task.status === "In progress" ? "border-primary/20 bg-primary/10 text-primary hover:bg-primary/15" : "border-border bg-card text-card-foreground hover:bg-muted"}`}><span className={task.status === "Done" ? "text-muted-foreground line-through" : undefined}>{task.title}</span></button>)}</div>
               </td>;
             })}</tr>)}</tbody>
           </table>
         </div>
-        <p className="mt-3 text-xs text-muted-foreground">Select a date to add a task, or a task to edit it. Undated tasks appear in Table and on the Kanban board.</p>
+        <p className="mt-3 text-xs text-muted-foreground">Select a date to add a task, or a task to edit it. Dashed entries show your scheduled agent execution times; solid entries show due dates. Undated tasks appear in Table and on the Kanban board.</p>
       </> : <div className="mt-4 overflow-x-auto rounded-xl border bg-card">
         <table className="w-full min-w-[540px] text-left text-sm" aria-label="Tasks table">
           <thead className="border-b bg-muted/40 text-xs text-muted-foreground"><tr><th scope="col" className="p-3 font-medium">Task</th><th scope="col" className="p-3 font-medium">Status</th><th scope="col" className="p-3 font-medium">Due date</th></tr></thead>

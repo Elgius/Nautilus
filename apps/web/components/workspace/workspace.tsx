@@ -412,7 +412,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
                 </Button>
               </div>
             )}
-            {(view === "Kanban" || view === "Calendar") && <Planner key={`${session.user.id}:${session.activeOrganization?.id}`} mode={view} storageKey={`nautilus:planner:v1:${session.user.id}:${session.activeOrganization?.id}`} />}
+            {(view === "Kanban" || view === "Calendar") && <Planner key={`${session.user.id}:${session.activeOrganization?.id}`} organizationId={session.activeOrganization!.id} mode={view} storageKey={`nautilus:planner:v1:${session.user.id}:${session.activeOrganization?.id}`} />}
             {view === "Documents" && <RoomDocumentLibrary organizationId={session.activeOrganization!.id} onOpen={openRoom} />}
             {(view === "Overview" || view === "Rooms") && (
               <>

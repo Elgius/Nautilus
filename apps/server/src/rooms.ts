@@ -1,3 +1,4 @@
+import { plannerRoutes } from './planner/routes'
 import { schedulerRoutes } from './scheduler/routes'
 import { Hono } from 'hono'
 import { roomAttachments } from './room-attachments'
@@ -59,6 +60,12 @@ rooms.get('/', async (c) => {
   }) })
 })
 
+rooms.get('/planner', async (c) => {
+  const rooms = await c.get('db').room.findMany({ where: { organizationId: c.get('organizationId'), members: { some: { member: { userId: c.get('session').user.id } } } },
+    select: { id: true, name: true, agents: { select: { agent: { select: { id: true, name: true } } } } }, orderBy: { name: 'asc' } })
+  return c.json({ rooms })
+})
+
 rooms.post('/', async (c) => {
   const { agentIds, ...data } = parseRoom(await body(c.req))
   const organizationId = c.get('organizationId'), userId = c.get('session').user.id, db = c.get('db')
@@ -78,6 +85,7 @@ rooms.use('/:roomId/*', async (c, next) => {
 
 rooms.route('/:roomId/attachments', roomAttachments)
 rooms.route('/:roomId/schedules', schedulerRoutes)
+rooms.route('/:roomId/tasks', plannerRoutes)
 
 // Server-authored identity only; the client cannot submit history or another user ID.
 rooms.post('/:roomId/suggestions', async (c) => {

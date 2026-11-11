@@ -6,7 +6,7 @@ import path from 'node:path'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const bundle = await build({
-  stdin: { contents: `import app from './src/index'; import { RoomChat } from './tests/fixtures/room-chat-lifecycle'; import { revoke, seed } from './tests/fixtures/room-chat-db'; import { privateAgentCalls } from './tests/fixtures/private-agent-stream'; export { RoomChat }; export default { fetch(request, env, ctx) { const url = new URL(request.url); if (url.pathname === '/agent-calls') return Response.json({ calls: privateAgentCalls() }); if (url.pathname === '/seed') { seed(); return new Response('ok'); } if (url.pathname === '/revoke') { revoke(); return new Response('ok'); } const room = url.searchParams.get('room') || 'room'; if (url.pathname === '/socket') { url.pathname = '/api/room-sockets/org/' + room; return app.fetch(new Request(url, request), env, ctx); } return env.ROOM_CHAT.get(env.ROOM_CHAT.idFromName(JSON.stringify(['org', room]))).fetch(request); } };`, resolveDir: root, loader: 'ts' },
+  stdin: { contents: `import app from './src/index'; import { RoomChat } from './tests/fixtures/room-chat-lifecycle'; import { revoke, seed, schedulerExecutions } from './tests/fixtures/room-chat-db'; import { privateAgentCalls } from './tests/fixtures/private-agent-stream'; export { RoomChat }; export default { fetch(request, env, ctx) { const url = new URL(request.url); if (url.pathname === '/scheduler-results') return Response.json(schedulerExecutions()); if (url.pathname === '/agent-calls') return Response.json({ calls: privateAgentCalls() }); if (url.pathname === '/seed') { seed(); return new Response('ok'); } if (url.pathname === '/revoke') { revoke(); return new Response('ok'); } const room = url.searchParams.get('room') || 'room'; if (url.pathname === '/socket') { url.pathname = '/api/room-sockets/org/' + room; return app.fetch(new Request(url, request), env, ctx); } return env.ROOM_CHAT.get(env.ROOM_CHAT.idFromName(JSON.stringify(['org', room]))).fetch(request); } };`, resolveDir: root, loader: 'ts' },
   bundle: true, write: false, format: 'esm', platform: 'browser', target: 'es2022', external: ['cloudflare:workers', 'node:*'],
   plugins: [{ name: 'test-database', setup(builder) { builder.onResolve({ filter: /^\.\/private-room-agent-stream$/ }, () => ({ path: path.join(root, 'tests/fixtures/private-agent-stream.ts') })); builder.onResolve({ filter: /^\.{1,2}\/db$/ }, () => ({ path: path.join(root, 'tests/fixtures/room-chat-db.ts') })) } }],
 })
@@ -157,6 +157,9 @@ try {
   let scheduledResult
   do { scheduledResult = await receive(alice, 'agent.update') } while (scheduledResult.job.id !== scheduledId || scheduledResult.job.status !== 'complete')
   assert.match(scheduledResult.job.reply, /SCHEDULED_PRIVATE_TASK/)
+  const persistedExecution = (await (await mf.dispatchFetch('https://api.test/scheduler-results')).json())[scheduledId]
+  assert.equal(persistedExecution.executionState, 'complete')
+  assert.match(persistedExecution.result, /SCHEDULED_PRIVATE_TASK/)
   const callsBeforeRetry = (await (await mf.dispatchFetch('https://api.test/agent-calls')).json()).calls
   assert.equal((await deliver()).status, 202)
   assert.equal((await (await mf.dispatchFetch('https://api.test/agent-calls')).json()).calls, callsBeforeRetry)

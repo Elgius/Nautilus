@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { HTTPException } from 'hono/http-exception'
 import type { Bindings } from './env'
 import { createDatabase, type Database } from './db'
-import { canChat, chatHistory, parseSend, saveChatMessage, type ChatIdentity } from './room-chat-service'
+import { canChat, scheduledTaskAvailable, chatHistory, parseSend, saveChatMessage, type ChatIdentity } from './room-chat-service'
 import { PrivateRoomAgents } from './private-room-agents'
 import { streamRoomModerator } from './room-moderator'
 import type { PrivateAgentEvent } from '../../../shared/room-chat'
@@ -39,6 +39,7 @@ export class RoomChat extends DurableObject<Bindings> {
     return this.privateAgents ??= new PrivateRoomAgents({
       storage: this.ctx.storage,
       profile: (identity, agentId) => this.withDatabase(async (db) => {
+        if (!await scheduledTaskAvailable(db, identity)) return null
         const assignment = await db.roomAgent.findFirst({ where: { organizationId: identity.organizationId, roomId: identity.roomId, agentId }, select: { agent: { select: { ...agentAppearanceSelect, role: true, rules: true } } } })
         return assignment?.agent ?? null
       }),
@@ -46,7 +47,15 @@ export class RoomChat extends DurableObject<Bindings> {
       acquire: (identity, token) => this.withDatabase((db) => acquireRoomWork(db, identity, token)),
       release: (identity, token) => this.withDatabase((db) => releaseRoomWork(db, identity, token)),
       stream: (profile, messages, signal, identity, run) => streamRoomModerator(this.env, identity, profile, messages, signal, run, (action) => this.withDatabase(action)),
-      send: (identity, event) => this.sendPrivate(identity, event),
+      send: async (identity, event) => {
+        if (identity.scheduledDeliveryId && event.type === 'agent.update') {
+          const job = event.job
+          await this.withDatabase((db) => db.schedulerDelivery.updateMany({ where: { id: identity.scheduledDeliveryId }, data: {
+            executionState: job.status, ...(job.status === 'complete' || job.status === 'failed' ? { result: job.reply, executionError: job.error ?? null } : {}),
+          } }))
+        }
+        await this.sendPrivate(identity, event)
+      },
       changed: (identity) => this.withDatabase(async (db) => {
         const room = await db.room.findUnique({ where: { id: identity.roomId, organizationId: identity.organizationId },
           select: { agentWorkToken: true, agentWorkExpiresAt: true, documents: { select: { id: true, currentVersionId: true } } } })
@@ -90,9 +99,20 @@ export class RoomChat extends DurableObject<Bindings> {
         if (!await canChat(db, identity) || !await db.roomAgent.findFirst({ where: { organizationId: event.organizationId, roomId: event.roomId, agentId: delivery.agentId } })) return new Response('Access expired', { status: 403 })
         try {
           await this.agentService.invoke(identity, { requestId: delivery.id, agentId: delivery.agentId,
-            instruction: `Scheduled event: ${event.title}\nScheduled for: ${delivery.schedule.scheduledAt.toISOString()}\n\n${event.instruction}` }, true)
+            instruction: `${event.taskId ? `Linked task ID: ${event.taskId}. Read its current state before acting.\n` : ''}Scheduled event: ${event.title}\nScheduled for: ${delivery.schedule.scheduledAt.toISOString()}\n\n${event.instruction}` }, true)
           return new Response(null, { status: 202 })
         } catch { return new Response('Queue unavailable', { status: 503 }) }
+      })
+    }
+    if (url.pathname === '/scheduler-cancel' && request.method === 'POST') {
+      const { identity, scheduleId, deliveryId } = await request.json<{ identity: ChatIdentity; scheduleId: string; deliveryId: string }>()
+      return this.withDatabase(async (db) => {
+        const expectedId = this.env.ROOM_CHAT?.idFromName(JSON.stringify([identity.organizationId, identity.roomId]))
+        if (!expectedId || !this.ctx.id.equals(expectedId) || !await canChat(db, identity)) return Response.json({ error: 'Room access expired.' }, { status: 403 })
+        const delivery = await db.schedulerDelivery.findFirst({ where: { id: deliveryId, scheduleId, schedule: { event: { organizationId: identity.organizationId, roomId: identity.roomId, ownerUserId: identity.userId } } } })
+        if (!delivery) return Response.json({ error: 'Delivery not found.' }, { status: 404 })
+        await this.agentService.cancel({ ...identity, scheduledDeliveryId: deliveryId }, deliveryId)
+        return Response.json({ cancelled: true })
       })
     }
     if (url.pathname === '/work' && request.method === 'GET') {

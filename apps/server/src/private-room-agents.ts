@@ -8,6 +8,7 @@ export type AgentRunContext = {
   id: string; token: string
   activity: (activity: AgentWorkActivity | null, agentId: string) => Promise<void>
   committed: (commit: NonNullable<PrivateAgentJob['commits']>[number]) => Promise<void>
+  taskCommitted?: (commit: { taskId: string; revision: number }) => Promise<void>
   checkpoint: (id: string, value: unknown) => Promise<void>
   preview?: (toolCallId: string, input: string | null) => Promise<void>
 }
@@ -163,7 +164,7 @@ export class PrivateRoomAgents {
       }
       if (!await this.deps.canAccess(entry.identity)) {
         job.status = 'failed'; job.error = 'Room access expired.'; job.revision++
-        await this.deps.storage.put(key, job); await this.remove(entry); continue
+        await this.deps.storage.put(key, job); await this.safeSend(entry.identity, job); await this.remove(entry); continue
       }
       const profile = await this.deps.profile(entry.identity, job.agentId)
       if (!profile) {
@@ -236,6 +237,7 @@ export class PrivateRoomAgents {
           await this.changed(entry.identity)
         },
         committed: async (commit) => { job.commits = [...(job.commits ?? []), commit]; await save(); await this.changed(entry.identity) },
+        taskCommitted: async (commit) => { job.taskCommits = [...(job.taskCommits ?? []), commit]; await save(); await this.changed(entry.identity) },
         preview: async (toolCallId, input) => {
           signal.throwIfAborted()
           // Ephemeral, owner-only drafts; never persist them as document versions.

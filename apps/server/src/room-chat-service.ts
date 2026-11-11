@@ -49,3 +49,13 @@ export async function chatHistory(db: Database, identity: ChatIdentity, cursorId
   const nextCursor = rows.length > 100 ? page[page.length - 1].id : null
   return { messages: direction === 'before' ? page.reverse() : page, nextCursor }
 }
+
+/** Separate resource availability from identity authorization so an agent may
+ * finish a response after an explicitly authorized Done transition. */
+export async function scheduledTaskAvailable(db: Database, identity: ChatIdentity) {
+  if (!identity.scheduledDeliveryId) return true
+  return !!await db.schedulerDelivery.findFirst({ where: { id: identity.scheduledDeliveryId, schedule: { event: {
+    organizationId: identity.organizationId, roomId: identity.roomId, ownerUserId: identity.userId,
+    OR: [{ taskId: null }, { task: { deletedAt: null, status: { not: 'Done' } } }],
+  } } }, select: { id: true } })
+}

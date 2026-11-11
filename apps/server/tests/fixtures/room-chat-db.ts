@@ -1,6 +1,8 @@
 // In-memory Prisma boundary for the workerd transport test. No real DB credentials.
 type Row = { id: string; roomId: string; organizationId: string; authorUserId: string; clientMessageId: string; createdAt: Date; text: string }
 const rows: Row[] = []
+const executions = new Map<string, Record<string, unknown>>()
+export function schedulerExecutions() { return Object.fromEntries(executions) }
 let revoked = false
 let nextHistory: (() => Promise<void>) | undefined
 export function pauseNextHistory(operation: () => Promise<void>) { nextHistory = operation }
@@ -17,6 +19,8 @@ export function createDatabase() {
       const ownerUserId = where.id.endsWith('e') ? 'outsider' : 'alice'
       if (where.schedule && (where.schedule.event.organizationId !== 'org' || where.schedule.event.roomId !== 'room' || where.schedule.event.ownerUserId !== ownerUserId)) return null
       return { id: where.id, agentId: 'agent-1', schedule: { state: 'started', scheduledAt: new Date('2026-01-01T00:00:00Z'), event: { organizationId: 'org', roomId: 'room', ownerUserId, title: 'Private scheduled event', instruction: 'SCHEDULED_PRIVATE_TASK' } } }
+    }, updateMany: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      executions.set(where.id, { ...executions.get(where.id), ...data }); return { count: 1 }
     } },
     session: { findFirst: async ({ where }: { where: { userId: string } }) => where.userId !== 'expired' && !(revoked && where.userId === 'bob') ? { id: 'session' } : null },
     roomAgent: {
