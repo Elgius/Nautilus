@@ -2,6 +2,22 @@ import { TextX, TextXActionType, type IDocumentBody } from '@univerjs/presets';
 import type { DocumentPreview } from '../../../shared/document-preview';
 import type { OfficeContent } from './office-content';
 
+/** Recover a typing target when a reconnect/poll delivers only a saved version. */
+export function savedDocumentPreview(base: OfficeContent, next: OfficeContent, versionId: string): DocumentPreview | null {
+  if (base.kind !== 'DOCUMENT' || next.kind !== 'DOCUMENT') return null;
+  const before = base.snapshot.body?.dataStream, after = next.snapshot.body?.dataStream;
+  if (!before?.endsWith('\r\n') || !after?.endsWith('\r\n') || before === after) return null;
+  let start = 0, end = before.length - 2, nextEnd = after.length - 2;
+  while (start < end && start < nextEnd && before[start] === after[start]) start++;
+  if (start && /[\uD800-\uDBFF]/.test(before[start - 1])) start--;
+  while (end > start && nextEnd > start && before[end - 1] === after[nextEnd - 1]) { end--; nextEnd--; }
+  if (/[\uDC00-\uDFFF]/.test(before[end] ?? '')) { end++; nextEnd++; }
+  const text = after.slice(start, nextEnd);
+  return { documentId: base.snapshot.id, expectedVersionId: versionId, edits: end === start
+    ? [{ type: 'insertText', index: start, text }]
+    : [{ type: 'replaceText', start, end, expectedText: before.slice(start, end), text }] };
+}
+
 /** Recompute from the saved base: repeated cumulative chunks never duplicate text. */
 export function previewDocument(base: OfficeContent, draft: DocumentPreview): Extract<OfficeContent, { kind: 'DOCUMENT' }> | null {
   if (base.kind !== 'DOCUMENT' || !base.snapshot.body) return null;

@@ -33,9 +33,13 @@ export function parseDocumentPreview(input: string): DocumentPreview | null {
     const edits: PreviewTextEdit[] = [];
     const index = (n: unknown): n is number => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
     for (const edit of value.edits) {
-      // Preview main-body text only. Unsupported operations wait for the save;
-      // subsequent offsets cannot safely be interpreted across those operations.
-      if (!edit || edit.segmentId || (edit.text !== undefined && (typeof edit.text !== 'string' || edit.text.length > 100_000))) break;
+      // Formatting does not move text offsets. Skip it so a styled title or
+      // paragraph earlier in the batch cannot suppress all subsequent text.
+      if (edit?.type === 'formatText' || edit?.type === 'formatParagraph') continue;
+      // Other segments have independent offsets; their text does not affect the
+      // main body. Unknown operations still stop the preview conservatively.
+      if (edit?.segmentId && ['insertText', 'replaceText', 'deleteText'].includes(edit.type)) continue;
+      if (!edit || (edit.text !== undefined && (typeof edit.text !== 'string' || edit.text.length > 100_000))) break;
       if (edit.type === 'insertText' && index(edit.index) && typeof edit.text === 'string') edits.push({ type: edit.type, index: edit.index, text: edit.text });
       else if ((edit.type === 'replaceText' || edit.type === 'deleteText') && index(edit.start) && index(edit.end) && edit.end > edit.start && typeof edit.expectedText === 'string' && (edit.type === 'deleteText' || typeof edit.text === 'string')) edits.push({ type: edit.type, start: edit.start, end: edit.end, expectedText: edit.expectedText, text: edit.type === 'deleteText' ? '' : edit.text });
       else break;

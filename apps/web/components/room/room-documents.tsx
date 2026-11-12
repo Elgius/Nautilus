@@ -19,7 +19,8 @@ import { LocalRoomFilePreview } from './local-room-file';
 import { useRoomWork } from './use-room-work';
 import { avatarColorValues } from '../../../../shared/agent-appearance';
 import { parseDocumentPreview } from '../../../../shared/document-preview';
-import { previewDocument } from '@/lib/document-preview';
+import { previewDocument, savedDocumentPreview } from '@/lib/document-preview';
+import { DocumentTypewriter } from '@/lib/document-typewriter';
 
 function RoomFileIcon({ kind }: { kind: string }) {
   const Icon = kind === 'SPREADSHEET' || /\.(xlsx?|csv|tsv)$/i.test(kind) ? Sheet : /\.(png|jpe?g|gif|webp)$/i.test(kind) ? FileImage : kind === 'DOCUMENT' || /\.(docx?|txt|md|pdf)$/i.test(kind) ? FileText : File;
@@ -270,7 +271,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
   const [importOpen, setImportOpen] = useState(false);
   const editor = useRef<OfficeEditorHandle | null>(null);
   const savedContent = useRef<OfficeContent | null>(null);
-  const preview = useRef<{ runId: string; toolCallId: string; base: OfficeContent } | null>(null);
+  const preview = useRef<{ runId: string; toolCallId: string; base: OfficeContent; writer: DocumentTypewriter; ending?: boolean } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const revision = useRef(0);
   const newerVersion = remoteVersionId !== undefined && remoteVersionId !== versionId && !supersededVersions.includes(remoteVersionId);
@@ -312,14 +313,21 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     if (detail.input === null) {
       const current = preview.current;
       if (!current || (detail.runId && detail.runId !== current.runId) || (detail.toolCallId && detail.toolCallId !== current.toolCallId)) return;
+      if (current.ending) return;
+      current.ending = true;
       // Reconcile to authoritative content after review, rejection, cancellation
       // or disconnect. Keep the preview visible until the saved result arrives.
-      void roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`, 'GET', undefined, AbortSignal.timeout(5000)).then((saved) => {
+      void roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`, 'GET', undefined, AbortSignal.timeout(5000)).then(async (saved) => {
+          // Successful saves must not skip the remaining typewriter frames.
+          // Rejected/cancelled drafts roll back immediately instead.
+          if (saved.currentVersionId !== versionId) await current.writer.finish();
+          else current.writer.cancel();
           if (preview.current !== current) return;
           adoptContent(officeContent(document.kind, document.id, document.title, saved.content));
           setSupersededVersions((previous) => [...previous, versionId].slice(-50));
           setVersionId(saved.currentVersionId);
         }).catch(() => {
+          current.writer.cancel();
           if (preview.current === current) editor.current?.updateContent?.(current.base);
         }).finally(() => {
           if (preview.current === current) { preview.current = null; setPreviewing(false); }
@@ -331,18 +339,25 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     if (!draft || draft.documentId !== document.id || draft.expectedVersionId !== versionId) return;
     const base = savedContent.current;
     if (!base) return;
-    try {
-      const next = previewDocument(base, draft);
-      if (next && editor.current.updateContent(next, true)) {
-        preview.current = { runId: detail.runId, toolCallId: detail.toolCallId, base };
-        setPreviewing(true);
-      }
-    } catch { /* Complex document structures wait for authoritative saved content. */ }
+    let current = preview.current;
+    if (!current || current.runId !== detail.runId || current.toolCallId !== detail.toolCallId) {
+      current?.writer.cancel();
+      const next = { runId: detail.runId, toolCallId: detail.toolCallId, base, writer: new DocumentTypewriter((partial) => {
+        if (preview.current !== next) return;
+        try {
+          const content = previewDocument(next.base, partial);
+          if (content) editor.current?.updateContent?.(content, true);
+        } catch { /* Complex structures wait for authoritative saved content. */ }
+      }) };
+      preview.current = current = next;
+      setPreviewing(true);
+    }
+    if (!current.ending) current.writer.update(draft);
   });
   useEffect(() => {
     const receive = (event: Event) => receivePreview(event);
     window.addEventListener('room-document-preview', receive);
-    return () => { window.removeEventListener('room-document-preview', receive); preview.current = null; };
+    return () => { window.removeEventListener('room-document-preview', receive); preview.current?.writer.cancel(); preview.current = null; };
   }, [organizationId, roomId, document.id]);
   useEffect(() => {
     if (!readOnly && preview.current) receivePreview(new CustomEvent('room-document-preview', { detail: { organizationId, roomId, input: null } }));
@@ -355,7 +370,30 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     const started = revision.current;
     roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`).then((saved) => {
       if (cancelled || started !== revision.current || preview.current) return;
-      adoptContent(officeContent(document.kind, document.id, document.title, saved.content));
+      const next = officeContent(document.kind, document.id, document.title, saved.content);
+      const base = savedContent.current;
+      const draft = base && editor.current?.updateContent ? savedDocumentPreview(base, next, versionId ?? '') : null;
+      if (base && draft) {
+        const current = { runId: 'saved-version', toolCallId: saved.currentVersionId ?? '', base, ending: true,
+          writer: new DocumentTypewriter((partial) => {
+            if (preview.current !== current) return;
+            try {
+              const content = previewDocument(base, partial);
+              if (content) editor.current?.updateContent?.(content, true);
+            } catch { /* The final saved snapshot restores complex structures. */ }
+          }) };
+        preview.current = current; setPreviewing(true);
+        current.writer.update(draft);
+        void current.writer.finish().then(() => {
+          if (preview.current !== current) return;
+          adoptContent(next);
+          setSupersededVersions((previous) => [...previous, versionId].slice(-50));
+          setVersionId(saved.currentVersionId);
+          preview.current = null; setPreviewing(false);
+        });
+        return;
+      }
+      adoptContent(next);
       setSupersededVersions((previous) => [...previous, versionId].slice(-50));
       setVersionId(saved.currentVersionId);
     }).catch((error) => { if (!cancelled) setError(errorMessage(error)); });

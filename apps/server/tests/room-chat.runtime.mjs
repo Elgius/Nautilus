@@ -116,6 +116,10 @@ try {
   send(alice, { type: 'send', clientMessageId: publicId, requestId: publicId, text: 'Public while agent runs' })
   assert.equal((await receive(alice, 'ack')).message.text, 'Public while agent runs')
   assert.equal(queues.get(alice).some((event) => event.type === 'agent.update' && event.job.status === 'complete'), false)
+  const draft = await receive(alice, 'agent.document-preview')
+  assert.equal(draft.runId, privateId)
+  assert.match(draft.input, /Partial ALICE_PRIVATE_INSTRUCTION_8381/)
+  assert.equal(queues.get(alice).some((event) => event.type === 'agent.update' && event.job.status === 'complete'), false, 'queued previews arrive over the real socket before completion')
   let privateResult
   do { privateResult = await receive(alice, 'agent.update') } while (privateResult.job.status !== 'complete')
   assert.equal(privateResult.job.instruction, secret)
