@@ -1,0 +1,42 @@
+.prisma-hero {
+  color-scheme: dark;
+  background: #18241e;
+}
+
+.prisma-background {
+  background: url("/images/nautilus-floating-island.png") 60% center / cover;
+}
+
+/* The workspace has unlayered h1 rules, which take priority over utilities. */
+.prisma-hero h1 {
+  max-width: none;
+  color: #e1e0cc;
+  font-size: 22vw;
+  font-weight: 500;
+  line-height: 0.85;
+  letter-spacing: -0.07em;
+}
+
+@media (min-width: 640px) {
+  .prisma-hero h1 { font-size: 22vw; }
+}
+
+@media (min-width: 768px) {
+  .prisma-hero h1 { font-size: 22vw; }
+}
+
+@media (min-width: 1024px) {
+  .prisma-hero h1 { font-size: 15vw; }
+}
+
+@media (min-width: 1280px) {
+  .prisma-hero h1 { font-size: 15vw; }
+}
+
+@media (min-width: 1536px) {
+  .prisma-hero h1 { font-size: 15vw; }
+}
+
+.prisma-hero .prisma-noise {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23fff' filter='url(%23noise)' opacity='.35' d='M0 0h180v180H0z'/%3E%3C/svg%3E");
+}
