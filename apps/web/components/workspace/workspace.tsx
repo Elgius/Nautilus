@@ -34,7 +34,6 @@ import {
   ChevronRight,
   Command,
   FileText,
-  Folder,
   LayoutGrid,
   Kanban,
   CalendarDays,
@@ -43,7 +42,6 @@ import {
   Plus,
   Search,
   ShieldCheck,
-  Sparkles,
   Star,
   Table2,
   Users,
@@ -76,6 +74,7 @@ import dynamic from "next/dynamic";
 import { useWorkspaceData } from "@/lib/workspace-data";
 import { ViewBoundary, ViewLoading } from "./view-boundary";
 
+const KnowledgeBase = dynamic(() => import("@/components/knowledge/knowledge-base").then((module) => module.KnowledgeBase), { loading: ViewLoading });
 const loadDocuments = () => import("./room-document-library");
 const loadPlanner = () => import("./planner");
 const RoomDocumentLibrary = dynamic(() => loadDocuments().then((module) => module.RoomDocumentLibrary), { loading: ViewLoading });
@@ -836,30 +835,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
                 />
               </section>
             )}
-            {view === "Knowledge" && (
-              <section className="knowledge-panel">
-                <div className="knowledge-illustration">
-                  <BookOpen size={34} />
-                  <span>
-                    <Sparkles size={16} />
-                  </span>
-                </div>
-                <Badge variant="outline">SHARED KNOWLEDGE</Badge>
-                <h2>Good work starts with good context.</h2>
-                <p>
-                  Room briefs are the first building block of your shared
-                  knowledge. Add a clear goal and useful context when creating a
-                  room.
-                </p>
-                <Button onClick={() => setModal("room")}>
-                  <Plus size={15} /> Create a room with a brief
-                </Button>
-                <div className="knowledge-note">
-                  <Folder size={17} /> Documents and connected sources are
-                  coming next.
-                </div>
-              </section>
-            )}
+            {view === "Knowledge" && <ViewBoundary><KnowledgeBase key={session.activeOrganization!.id} organizationId={session.activeOrganization!.id} /></ViewBoundary>}
             {view === "Settings" && (
               <>
               <ThemeSettings />

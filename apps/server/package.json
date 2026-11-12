@@ -15,6 +15,7 @@
     "db:bootstrap-admin": "bun scripts/bootstrap-admin.ts",
     "test": "bun test tests",
     "test:room-attachments-live": "bun tests/room-attachments.live.ts",
+    "test:knowledge-runtime": "node tests/knowledge.runtime.mjs",
     "test:room-socket": "node tests/room-chat.runtime.mjs"
   },
   "dependencies": {

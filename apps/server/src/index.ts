@@ -1,4 +1,6 @@
 import { runScheduler } from './scheduler'
+export { KnowledgeWorker } from './knowledge/worker'
+import { knowledgeRoutes } from './knowledge/routes'
 export { RoomChat } from './room-chat'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
@@ -122,6 +124,10 @@ const organizationMember = createMiddleware<AppEnv>(async (c, next) => {
 const documentLibraryPath = '/api/organizations/:organizationId/documents'
 app.use(documentLibraryPath, authenticated, organizationMember)
 app.route(documentLibraryPath, documentLibrary)
+
+const knowledgePath = '/api/organizations/:organizationId/knowledge'
+app.use(`${knowledgePath}/*`, authenticated, organizationMember)
+app.route(knowledgePath, knowledgeRoutes)
 
 const creatorPath = '/api/organizations/:organizationId/agent_creator_agent'
 app.use(creatorPath, authenticated, organizationMember)

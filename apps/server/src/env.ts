@@ -1,4 +1,5 @@
 export type Bindings = {
+  KNOWLEDGE_WORKER?: DurableObjectNamespace
   ROOM_CHAT?: DurableObjectNamespace
   ROOM_SOCKET_ORIGIN?: string
   DATABASE_URL: string

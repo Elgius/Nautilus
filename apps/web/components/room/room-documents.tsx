@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useEffectEvent, useRef, useState, type FormEvent, type Dispatch } from 'react';
+import { KnowledgeSourceTag } from '@/components/knowledge/source-tag';
 import { createPortal } from 'react-dom';
 import { Download, Plus, Save, Upload, FileText, Sheet, FileImage, File, FolderOpen, X, History, ChevronDown, MousePointer2, LockKeyhole, Trash2 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
@@ -484,6 +485,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     {active && actionsContainer && createPortal(<div className="room-document-toolbar">
       <div className="room-active-file"><RoomFileIcon kind={document.kind} /><strong title={document.title}>{document.title}</strong></div>
       <span className="room-save-status" role="status" title={!storageConfigured ? 'Room saving is unavailable. Export a copy to keep your work.' : undefined}>{previewing ? 'Agent writing · draft preview' : readOnly ? 'Read-only' : saving ? 'Saving…' : dirty ? 'Unsaved changes' : versionId ? 'Saved' : 'Not saved'}</span>
+      <KnowledgeSourceTag organizationId={organizationId} roomId={roomId} documentId={document.id} disabled={!versionId || previewing} />
       <DropdownMenu>
         <DropdownMenuTrigger render={<Button variant="ghost" size="sm" />} aria-label="File menu">File<ChevronDown size={12} /></DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-52">

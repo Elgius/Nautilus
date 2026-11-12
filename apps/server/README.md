@@ -543,3 +543,72 @@ migration before release. See `skills/planner.md` for API contracts, permissions
 revision handling, scheduling privacy and cancellation behavior. Task due dates
 never implicitly schedule agents. The frontend can import existing browser tasks
 into an explicitly selected joined room.
+
+## Knowledge agent
+
+Apply `20261112120000_knowledge_base` before running the updated API. The Worker
+adds a separate `KNOWLEDGE_WORKER` SQLite Durable Object (`knowledge-v1` migration).
+The existing minute cron dispatches due work; each enabled bucket is checked every
+**six hours**, with additional checks requested by tagging, manual refresh, saved
+document head/title changes, and edits to explicitly tagged messages. Cron never
+calls the model. A durable alarm processes one source chunk at a time, checkpointing
+findings and resuming after interruptions. Provider requests use the existing
+`OPENAI_API_KEY` and `LLM_MODEL`, with provider storage disabled.
+
+Knowledge uses a fixed, built-in agent rather than room agent profiles or private
+conversation history. It receives only one authorized tagged source chunk per model
+call. It has no document mutation, chat-history, browsing, or general search tools.
+Document text (including headers/footers), saved spreadsheet values/formulas, and
+legacy saved text/sheets are supported. No neighbouring messages, linked documents,
+attachments, unsaved drafts, local files, or uploaded-but-unconverted attachment
+blobs are ingested implicitly. File picking and conversion behavior is unchanged.
+
+- **Personal**: one bucket per organization/user, readable only by that user while
+  they remain an organization member and retain room access to the tagged source.
+- **Organization**: one shared bucket per organization. A room owner or organization
+  admin with room access explicitly approves the source for all current organization
+  members. Sharing authority and room access are rechecked before reads/publication.
+- Tagging selects exactly one saved document or individual public human-authored
+  message. Tagging a document includes future saved versions; a message tag never
+  includes its linked documents. Mentioning/assigning an agent grants no knowledge
+  access. Sources are never automatically promoted from Personal to Organization.
+- Removing a tag immediately excludes its findings/history and cancels active runs.
+  Loss of source access excludes findings/history on subsequent API reads. A changed
+  source invalidates the current report immediately; a replacement report and its
+  checkpoint commit atomically. Historical reports preserve exact citation excerpts,
+  document version IDs or message fingerprints, and source positions.
+- Organization admins can pause/resume the shared agent. Users manage their own
+  personal agent. Current members can request shared refreshes; unchanged sources
+  skip storage/model reads. The tag creator or an organization admin can remove a
+  shared tag. Pausing stops processing but leaves existing authorized knowledge visible.
+
+Routes (behind session, live organization membership, origin checks and no-store):
+
+- `GET /api/organizations/:organizationId/knowledge?scope=PERSONAL|ORGANIZATION&cursor=...`
+  returns bucket settings, source status, and current findings (25 sources/page).
+- `POST .../knowledge/sources` accepts `{ scope, roomId, documentId }` or
+  `{ scope, roomId, messageId }`. Other identity/agent/audience fields are rejected.
+- `DELETE .../knowledge/sources/:sourceId?scope=...` revokes the source.
+- `GET .../knowledge/sources/:sourceId/history?scope=...&before=...` returns
+  10 revisions/page with evidence and exact source versions.
+- `PATCH .../knowledge` accepts `{ scope, enabled }`.
+- `POST .../knowledge/refresh` accepts `{ scope }`, returning 202 for a queued check.
+
+`nextRefreshAt` and leases use absolute database timestamps. Database sessions must
+use UTC (the Neon default), consistent with the installed Prisma Neon adapter.
+No database migration or cloud deployment is performed by builds.
+
+Verification:
+
+```bash
+bun test apps/server/tests/knowledge.test.ts
+bun run --filter @nautilus/server test:knowledge-runtime
+bun run --filter @nautilus/web test:knowledge
+KNOWLEDGE_TEST_DATABASE_URL='<dedicated test database>' bun test apps/server/tests/knowledge.integration.test.ts
+```
+
+The integration test requires the committed migrations and creates/cleans its own
+organization/user fixtures. It checks tenant/bucket separation, sharing authority,
+six-hour scheduling, idempotency, checkpoint recovery, unchanged-source skipping,
+citations, and revocation during generation. AI calls are mocked; it never sends
+fixture data to an external model.

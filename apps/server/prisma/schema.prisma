@@ -16,6 +16,8 @@ datasource db {
 }
 
 model User {
+  knowledgeBases KnowledgeBase[]
+  knowledgeSources KnowledgeSource[]
   agentProgress AgentProgress[]
   id            String   @id
   name          String
@@ -90,6 +92,7 @@ model Verification {
 }
 
 model Organization {
+  knowledgeBases KnowledgeBase[]
   id          String   @id
   name        String
   slug        String   @unique
@@ -323,6 +326,7 @@ model RoomStar {
 }
 
 model RoomMessage {
+  knowledgeSources KnowledgeSource[]
   clientMessageId String?
   id             String   @id @default(uuid())
   organizationId String
@@ -346,6 +350,7 @@ model RoomMessage {
 }
 
 model Document {
+  knowledgeSources KnowledgeSource[]
   id               String         @id @default(uuid())
   organizationId   String
   roomId           String
@@ -580,4 +585,122 @@ model AgentProgressSave {
   @@id([organizationId, roomId, userId, agentId, requestId])
   @@index([organizationId, roomId, userId, agentId, progressId], map: "agentProgressSave_progress_idx")
   @@map("agentProgressSave")
+}
+
+// Knowledge has its own context and permissions; it never inherits room-agent chats.
+enum KnowledgeScope {
+  PERSONAL
+  ORGANIZATION
+}
+
+model KnowledgeBase {
+  id String @id @default(uuid())
+  organizationId String
+  scope KnowledgeScope
+  ownerUserId String?
+  enabled Boolean @default(true)
+  nextRefreshAt DateTime @default(now()) @db.Timestamptz(3)
+  lastCheckedAt DateTime? @db.Timestamptz(3)
+  createdAt DateTime @default(now())
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  owner User? @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  sources KnowledgeSource[]
+  @@unique([organizationId, id])
+  @@index([enabled, nextRefreshAt])
+  @@map("knowledgeBase")
+}
+
+model KnowledgeSource {
+  id String @id @default(uuid())
+  knowledgeBaseId String
+  organizationId String
+  roomId String
+  documentId String?
+  messageId String?
+  taggedByUserId String
+  taggedAt DateTime @default(now())
+  revokedAt DateTime?
+  revision Int @default(1)
+  lastProcessedRevision Int?
+  lastProcessedVersionId String?
+  lastProcessedHash String?
+  lastError String?
+  base KnowledgeBase @relation(fields: [organizationId, knowledgeBaseId], references: [organizationId, id], onDelete: Cascade)
+  document Document? @relation(fields: [organizationId, roomId, documentId], references: [organizationId, roomId, id], onDelete: Cascade)
+  message RoomMessage? @relation(fields: [organizationId, roomId, messageId], references: [organizationId, roomId, id], onDelete: Cascade)
+  taggedBy User @relation(fields: [taggedByUserId], references: [id], onDelete: Cascade)
+  entry KnowledgeEntry?
+  runs KnowledgeRun[]
+  @@unique([knowledgeBaseId, documentId])
+  @@unique([knowledgeBaseId, messageId])
+  @@index([organizationId, roomId])
+  @@index([knowledgeBaseId, revokedAt, id])
+  @@map("knowledgeSource")
+}
+
+model KnowledgeEntry {
+  id String @id @default(uuid())
+  sourceId String @unique
+  title String @db.VarChar(200)
+  body String
+  revision Int @default(1)
+  sourceRevision Int
+  updatedAt DateTime @updatedAt
+  source KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  revisions KnowledgeEntryRevision[]
+  @@map("knowledgeEntry")
+}
+
+model KnowledgeEntryRevision {
+  id String @id @default(uuid())
+  entryId String
+  revision Int
+  sourceRevision Int
+  title String
+  body String
+  runId String @unique
+  createdAt DateTime @default(now())
+  entry KnowledgeEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  run KnowledgeRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  citations KnowledgeCitation[]
+  @@unique([entryId, revision])
+  @@map("knowledgeEntryRevision")
+}
+
+model KnowledgeCitation {
+  id String @id @default(uuid())
+  entryRevisionId String
+  documentVersionId String?
+  messageHash String?
+  locator String
+  quote String @default("") @db.VarChar(500)
+  entryRevision KnowledgeEntryRevision @relation(fields: [entryRevisionId], references: [id], onDelete: Cascade)
+  @@index([entryRevisionId])
+  @@map("knowledgeCitation")
+}
+
+// Each alarm processes one chunk. Checkpoints contain findings, never raw chats.
+model KnowledgeRun {
+  id String @id @default(uuid())
+  sourceId String
+  sourceRevision Int
+  status String @default("pending")
+  trigger String
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now()) @db.Timestamptz(3)
+  leaseToken String?
+  leaseExpiresAt DateTime? @db.Timestamptz(3)
+  nextChunk Int @default(0)
+  findings Json @default("[]")
+  documentVersionId String?
+  sourceHash String?
+  startedAt DateTime?
+  finishedAt DateTime?
+  error String?
+  createdAt DateTime @default(now())
+  source KnowledgeSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  entryRevision KnowledgeEntryRevision?
+  @@index([status, nextAttemptAt])
+  @@index([sourceId, createdAt])
+  @@map("knowledgeRun")
 }

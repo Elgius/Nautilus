@@ -18,6 +18,7 @@ import { errorMessage } from "@/lib/auth-client";
 import { roomRequest, type RoomDetail } from "@/lib/room-client";
 import { useRoomChat } from "./use-room-chat";
 import { useRoomSuggestions } from "./use-room-suggestions";
+import { KnowledgeSourceTag } from "@/components/knowledge/source-tag";
 import { RoomDocuments } from "./room-documents";
 import { useRoomLayout } from "./use-room-layout";
 import { clampChatWidth } from "@/lib/room-layout";
@@ -96,10 +97,11 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
             const own = message.authorUserId === session.user.id, author = message.authorUser?.name || 'Unknown author';
             return <MessageScrollerItem key={message.id} messageId={message.id} scrollAnchor={Boolean(message.authorUserId)}>
               <Message align={own ? 'end' : 'start'} className={`room-message ${own ? 'is-own' : ''}`} aria-label={`${author}, ${new Date(message.createdAt).toLocaleString()}`}>
-              <div className="room-message-avatar">{initials(author)}</div>
+              <div id={`message-${message.id}`} className="room-message-avatar">{initials(author)}</div>
               <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>{own ? 'You' : author}</strong><time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></MessageHeader>
                 <Bubble variant={own ? 'muted' : 'ghost'} align={own ? 'end' : 'start'}><BubbleContent className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</BubbleContent></Bubble>
                 {own && message.id === latestOutgoingId && <span className="room-message-meta">{Object.entries(reads).filter(([id, readAt]) => id !== session.user.id && readAt >= message.createdAt).length ? 'Seen' : 'Sent'}</span>}
+                {joined && <KnowledgeSourceTag organizationId={organizationId} roomId={room.id} messageId={message.id} />}
                 {message.documents.map((attachment) => <Button variant="ghost" size="sm" key={attachment.documentId} className="room-document-reference" onClick={() => { dispatchFiles({ type: 'select', id: attachment.documentId }); setMobilePanel('document'); }}><FileText size={15} />{attachment.document.title}</Button>)}
               </MessageContent>
             </Message></MessageScrollerItem>;

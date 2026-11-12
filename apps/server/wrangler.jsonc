@@ -6,8 +6,8 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
-  "durable_objects": { "bindings": [{ "name": "ROOM_CHAT", "class_name": "RoomChat" }] },
-  "migrations": [{ "tag": "room-chat-v1", "new_sqlite_classes": ["RoomChat"] }],
+  "durable_objects": { "bindings": [{ "name": "ROOM_CHAT", "class_name": "RoomChat" }, { "name": "KNOWLEDGE_WORKER", "class_name": "KnowledgeWorker" }] },
+  "migrations": [{ "tag": "room-chat-v1", "new_sqlite_classes": ["RoomChat"] }, { "tag": "knowledge-v1", "new_sqlite_classes": ["KnowledgeWorker"] }],
   "triggers": { "crons": ["* * * * *"] },
   "build": {
     "watch_dir": "src"
