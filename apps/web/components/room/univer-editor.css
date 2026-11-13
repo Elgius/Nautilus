@@ -11,3 +11,23 @@
   color-scheme: light;
 }
 .nautilus-office-editor [contenteditable] { outline: none; }
+
+.document-stream-cursor {
+  position: absolute;
+  z-index: 10;
+  border-left: 2px solid currentColor;
+  pointer-events: none;
+}
+.document-stream-cursor > span {
+  position: absolute;
+  left: -2px;
+  bottom: 100%;
+  max-width: 280px;
+  padding: 3px 7px;
+  border-radius: 4px 4px 4px 0;
+  background: var(--stream-cursor-color);
+  color: white;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
