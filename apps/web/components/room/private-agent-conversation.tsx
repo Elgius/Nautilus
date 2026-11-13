@@ -25,7 +25,7 @@ export function PrivateAgentConversation({ jobs, agents = [], canSend, busy, ret
   agents?: (AgentAppearance & { id: string; name: string })[];
   canSend: boolean;
   busy: boolean;
-  retry: (agent: RoomAgentOption, instruction: string) => boolean;
+  retry: (agent: RoomAgentOption, instruction: string) => boolean | Promise<boolean>;
   cancel?: (jobId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);

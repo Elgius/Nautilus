@@ -19,12 +19,14 @@ type Props = {
   agentBusy: boolean;
   loadAgents: () => void;
   sendMessage: (text: string) => boolean;
-  invokeAgent: (agent: RoomAgentOption, instruction: string) => boolean;
+  invokeAgent: (agent: RoomAgentOption, instruction: string) => boolean | Promise<boolean>;
   sendTyping: () => void;
 };
 const reasoningLevels = ["Low", "Medium", "High"];
 
 export function RoomChatComposer({ suggestions = defaultRoomSuggestions, canSend, agents, agentsLoading, agentBusy, loadAgents, sendMessage, invokeAgent, sendTyping }: Props) {
+  const [preparing, setPreparing] = useState(false);
+  const submitting = useRef(false);
   const [draft, setDraft] = useState("");
   const [selected, setSelected] = useState<RoomAgentOption | null>(null);
   const [instruction, setInstruction] = useState("");
@@ -46,11 +48,16 @@ export function RoomChatComposer({ suggestions = defaultRoomSuggestions, canSend
     setDraft(result.roomDraft); setInstruction(result.instruction); setSelected(agent); setDismissed(false);
     textarea.current?.focus();
   }
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!canSend || attachments.length) return;
+    if (!canSend || attachments.length || submitting.current) return;
     if (selected) {
-      if (!agentBusy && invokeAgent(selected, instruction)) setInstruction("");
+      if (agentBusy) return;
+      submitting.current = true; setPreparing(true);
+      const sentInstruction = instruction;
+      try {
+        if (await invokeAgent(selected, sentInstruction)) setInstruction((current) => current === sentInstruction ? '' : current);
+      } finally { submitting.current = false; setPreparing(false); }
     } else if (mention) {
       // An unresolved mention must never fall through to a public room message.
       setDismissed(false); loadAgents();
@@ -119,7 +126,7 @@ export function RoomChatComposer({ suggestions = defaultRoomSuggestions, canSend
             {reasoningLevels.map((level) => <SelectItem key={level} value={level}>{level}</SelectItem>)}
           </SelectContent>
         </Select>
-        <InputGroupButton variant="default" size="icon-sm" className="ml-auto rounded-full" type="submit" disabled={!canSend || attachments.length > 0 || (selected ? agentBusy || !instruction.trim() : !draft.trim() || Boolean(mention))} aria-label={selected ? 'Send private instruction' : 'Send message'}><ArrowUp size={17} /></InputGroupButton>
+        <InputGroupButton variant="default" size="icon-sm" className="ml-auto rounded-full" type="submit" disabled={preparing || !canSend || attachments.length > 0 || (selected ? agentBusy || !instruction.trim() : !draft.trim() || Boolean(mention))} aria-label={selected ? 'Send private instruction' : 'Send message'}><ArrowUp size={17} /></InputGroupButton>
       </InputGroupAddon>
     </InputGroup>
     <p className="room-local-note">Enter to send · Shift + Enter for a new line · Reasoning is a UI preview</p>

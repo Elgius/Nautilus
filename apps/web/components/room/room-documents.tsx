@@ -23,6 +23,7 @@ import { parseDocumentPreview } from '../../../../shared/document-preview';
 import { previewDocument, savedDocumentPreview } from '@/lib/document-preview';
 import type { PrivateAgentEvent } from '../../../../shared/room-chat';
 import { DocumentTypewriter } from '@/lib/document-typewriter';
+import type { RoomDocumentSaveRequest } from '@/lib/room-document-save';
 
 function RoomFileIcon({ kind }: { kind: string }) {
   const Icon = kind === 'SPREADSHEET' || /\.(xlsx?|csv|tsv)$/i.test(kind) ? Sheet : /\.(png|jpe?g|gif|webp)$/i.test(kind) ? FileImage : kind === 'DOCUMENT' || /\.(docx?|txt|md|pdf)$/i.test(kind) ? FileText : File;
@@ -265,6 +266,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false), [dirty, setDirty] = useState(false);
+  const [editRevision, setEditRevision] = useState(0);
   const [converting, setConverting] = useState(false), [editorReady, setEditorReady] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false), [notice, setNotice] = useState('');
   const [historyRevision, refreshHistory] = useState(0);
@@ -276,14 +278,32 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
   const preview = useRef<{ runId: string; toolCallId: string; base: OfficeContent; writer: DocumentTypewriter; ending?: boolean } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const revision = useRef(0);
+  const savedRevision = useRef(0);
+  const currentVersion = useRef(document.currentVersionId);
+  const saveInFlight = useRef<Promise<void> | null>(null);
+  const failedSaveRevision = useRef<number | null>(null);
+  // Conversion remains local until the user explicitly saves the imported copy.
+  const importedDraft = useRef(false);
+  const adoptVersion = useCallback((id: string | null) => {
+    currentVersion.current = id;
+    setVersionId(id);
+  }, []);
   const newerVersion = remoteVersionId !== undefined && remoteVersionId !== versionId && !supersededVersions.includes(remoteVersionId);
   const editingBlocked = readOnly || newerVersion || previewing;
   const adoptContent = useCallback((next: OfficeContent) => {
+    importedDraft.current = false;
+    savedRevision.current = revision.current;
+    failedSaveRevision.current = null;
     savedContent.current = next;
     if (!editor.current?.updateContent?.(next)) setContent(next);
   }, []);
   const onReady = useCallback((handle: OfficeEditorHandle | null) => { editor.current = handle; setEditorReady(!!handle); }, []);
-  const onDirty = useCallback(() => { revision.current++; setDirty(true); setNotice(''); }, []);
+  const onDirty = useCallback(() => { revision.current++; setEditRevision(revision.current); setDirty(true); setNotice(''); }, []);
+  useEffect(() => {
+    if (notice !== 'Saved to room.') return;
+    const timer = setTimeout(() => setNotice(''), 3000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   useEffect(() => {
     let active = true;
     // Start the kind-specific editor download alongside the content request.
@@ -294,10 +314,10 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
       .then((saved) => {
         if (!active) return;
         adoptContent(officeContent(document.kind, document.id, document.title, saved.content));
-        setVersionId(saved.currentVersionId); onLoaded(document.id);
+        adoptVersion(saved.currentVersionId); onLoaded(document.id);
       }).catch((error) => { if (active) setError(errorMessage(error)); });
     return () => { active = false; controller.abort(); };
-  }, [organizationId, path, document.id, document.kind, document.title, onLoaded, adoptContent]);
+  }, [organizationId, path, document.id, document.kind, document.title, onLoaded, adoptContent, adoptVersion]);
   useEffect(() => {
     if (!historyOpen) return;
     const controller = new AbortController();
@@ -327,7 +347,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
           if (preview.current !== current) return;
           adoptContent(officeContent(document.kind, document.id, document.title, saved.content));
           setSupersededVersions((previous) => [...previous, versionId].slice(-50));
-          setVersionId(saved.currentVersionId);
+          adoptVersion(saved.currentVersionId);
         }).catch(() => {
           current.writer.cancel();
           if (preview.current === current) editor.current?.updateContent?.(current.base);
@@ -401,17 +421,17 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
           if (preview.current !== current) return;
           adoptContent(next);
           setSupersededVersions((previous) => [...previous, versionId].slice(-50));
-          setVersionId(saved.currentVersionId);
+          adoptVersion(saved.currentVersionId);
           preview.current = null; editor.current?.streamCursor?.(null); setPreviewing(false);
         });
         return;
       }
       adoptContent(next);
       setSupersededVersions((previous) => [...previous, versionId].slice(-50));
-      setVersionId(saved.currentVersionId);
+      adoptVersion(saved.currentVersionId);
     }).catch((error) => { if (!cancelled) setError(errorMessage(error)); });
     return () => { cancelled = true; };
-  }, [newerVersion, remoteVersionId, dirty, saving, content, organizationId, path, document.kind, document.id, document.title, versionId, previewing, adoptContent]);
+  }, [newerVersion, remoteVersionId, dirty, saving, content, organizationId, path, document.kind, document.id, document.title, versionId, previewing, adoptContent, adoptVersion]);
   useEffect(() => {
     onDirtyChange(document.id, dirty);
     return () => onDirtyChange(document.id, false);
@@ -422,21 +442,63 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
-  async function save() {
-    if (saving || editingBlocked || !editor.current) return;
-    setSaving(true); setError(''); setNotice('');
-    try {
-      const snapshot = await editor.current.snapshot(), savedRevision = revision.current;
-      const { version } = await roomRequest<{ version: DocumentVersion }>(organizationId, `${path}/versions`, 'POST', {
-        expectedVersionId: versionId, content: snapshot,
-      });
-      setSupersededVersions((previous) => [...previous, versionId].slice(-50));
-      setVersionId(version.id); setVersions((previous) => [version, ...previous]);
-      savedContent.current = snapshot;
-      if (revision.current === savedRevision) { setDirty(false); setNotice('Version saved.'); }
-    } catch (error) { setError(errorMessage(error)); }
-    finally { setSaving(false); }
-  }
+  const save = useCallback(async function saveDocument(mode: 'automatic' | 'manual' | 'flush' = 'manual'): Promise<void> {
+    while (saveInFlight.current) await saveInFlight.current;
+    if (mode === 'automatic' && failedSaveRevision.current === revision.current) return;
+    if (importedDraft.current && mode !== 'manual') {
+      if (mode === 'flush') throw new Error('Save the imported copy before starting an agent.');
+      return;
+    }
+    const pending = revision.current !== savedRevision.current || !currentVersion.current;
+    if (!pending && mode !== 'flush') return;
+    if (editingBlocked || converting || !content || (active && !editor.current) || !storageConfigured) {
+      if (!pending) return;
+      throw new Error('Could not save the room document. Wait until editing and room saving are available, then retry.');
+    }
+    const operation = (async () => {
+      setSaving(true); setError(''); setNotice('');
+      try {
+        const snapshot = editor.current ? await editor.current.snapshot({ commit: mode !== 'automatic' }) : content;
+        const capturedRevision = revision.current;
+        if (currentVersion.current && JSON.stringify(snapshot) === JSON.stringify(savedContent.current)) {
+          savedRevision.current = capturedRevision; importedDraft.current = false; setDirty(false);
+          return;
+        }
+        const expectedVersionId = currentVersion.current;
+        const { version } = await roomRequest<{ version: DocumentVersion }>(organizationId, `${path}/versions`, 'POST', {
+          expectedVersionId, content: snapshot,
+        });
+        setSupersededVersions((previous) => [...previous, expectedVersionId].slice(-50));
+        adoptVersion(version.id); setVersions((previous) => [version, ...previous]);
+        savedContent.current = snapshot;
+        savedRevision.current = capturedRevision;
+        importedDraft.current = false;
+        if (revision.current === capturedRevision) { setDirty(false); setNotice('Saved to room.'); }
+      } catch (error) { failedSaveRevision.current = revision.current; setError(errorMessage(error)); throw error; }
+      finally { setSaving(false); }
+    })();
+    saveInFlight.current = operation;
+    try { await operation; }
+    finally { if (saveInFlight.current === operation) saveInFlight.current = null; }
+    // An agent must see edits made while the previous version was being saved.
+    if (mode === 'flush' && revision.current !== savedRevision.current) await saveDocument(mode);
+  }, [editingBlocked, converting, content, active, storageConfigured, organizationId, path, adoptVersion]);
+  const flush = useEffectEvent(() => save('flush'));
+  useEffect(() => {
+    const receive = (event: Event) => {
+      const { detail } = event as CustomEvent<RoomDocumentSaveRequest>;
+      if (detail.organizationId === organizationId && detail.roomId === roomId) detail.waitUntil(flush());
+    };
+    window.addEventListener('room-document-save', receive);
+    return () => window.removeEventListener('room-document-save', receive);
+  }, [organizationId, roomId]);
+  // Debounce edits, initialize new documents, and resume pending saves after a run.
+  // Failed saves stay dirty and are retried by the next edit or explicit attempt.
+  useEffect(() => {
+    if (failedSaveRevision.current === revision.current || (!dirty && versionId) || saving || editingBlocked || converting || !content || (active && !editorReady) || !storageConfigured || importedDraft.current) return;
+    const timer = setTimeout(() => { void save('automatic').catch(() => {}); }, 750);
+    return () => clearTimeout(timer);
+  }, [dirty, editRevision, versionId, saving, editingBlocked, converting, content, active, editorReady, storageConfigured, save]);
   async function loadOlderVersions() {
     if (!nextVersionCursor || loadingVersions) return;
     setLoadingVersions(true); setError('');
@@ -463,6 +525,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
       const form = new FormData(); form.set('file', file);
       const response = await checkResponse(await fetch(`${endpoint}/import`, { method: 'POST', credentials: 'include', body: form }));
       const result = await response.json() as { content: OfficeContent };
+      importedDraft.current = true;
       setContent(officeContent(document.kind, document.id, document.title, result.content));
       onDirty(); setNotice(`${file.name} opened. Save to keep it in this room.`); setImportOpen(false);
     } catch (error) { setError(errorMessage(error)); }
@@ -511,7 +574,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      {storageConfigured && <Button size="sm" onClick={save} disabled={editingBlocked || saving || converting || !editorReady || (!dirty && !!versionId)}><Save size={14} />{saving ? 'Saving…' : 'Save'}</Button>}
+      {storageConfigured && <Button size="sm" onClick={() => { void save().catch(() => {}); }} disabled={editingBlocked || saving || converting || !editorReady || (!dirty && !!versionId)}><Save size={14} />{saving ? 'Saving…' : 'Save'}</Button>}
     </div>, actionsContainer)}
     <Dialog open={importOpen} onOpenChange={(open) => { if (!converting) setImportOpen(open); }}>
       <DialogContent showCloseButton={!converting} className="sm:max-w-lg">
@@ -533,7 +596,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
         if (!window.confirm('Discard this unsaved draft and open the latest saved version? Download your draft first to keep a copy.')) return;
         try {
           const saved = await roomRequest<{ content: OfficeContent | LegacyContent | null; currentVersionId: string | null }>(organizationId, `${path}/content`);
-          adoptContent(officeContent(document.kind, document.id, document.title, saved.content)); setVersionId(saved.currentVersionId); setDirty(false);
+          adoptContent(officeContent(document.kind, document.id, document.title, saved.content)); adoptVersion(saved.currentVersionId); setDirty(false);
         } catch (error) { setError(errorMessage(error)); }
       }}>Open latest version</Button>
     </div>}

@@ -11,7 +11,7 @@ export type StreamCursor = { offset: number; label: string; color: string };
 
 export type OfficeEditorHandle = {
   streamCursor?: (cursor: StreamCursor | null) => void;
-  snapshot: () => Promise<OfficeContent>;
+  snapshot: (options?: { commit?: boolean }) => Promise<OfficeContent>;
   updateContent?: (content: OfficeContent, preview?: boolean) => boolean;
 };
 
@@ -64,11 +64,11 @@ export default function UniverEditorCore({ initialContent, onReady, onDirty, onE
           if (!preview) savedContent = next;
           return true;
         } finally { applyingRemote = false; }
-      }, snapshot: async () => {
+      }, snapshot: async ({ commit = true } = {}) => {
         // Unreviewed previews are never exported, saved, or retained as drafts.
         if (previewing) return structuredClone(savedContent);
         // Read at save/export time, including the latest committed cell editor value.
-        container.current?.querySelector<HTMLElement>(':focus')?.blur();
+        if (commit) container.current?.querySelector<HTMLElement>(':focus')?.blur();
         if (isDoc) {
           const document = univerAPI.getActiveDocument();
           if (!document) throw new Error('The document editor is not ready.');
@@ -76,7 +76,7 @@ export default function UniverEditorCore({ initialContent, onReady, onDirty, onE
         }
         const workbook = univerAPI.getActiveWorkbook();
         if (!workbook) throw new Error('The spreadsheet editor is not ready.');
-        await workbook.endEditingAsync(true);
+        if (commit) await workbook.endEditingAsync(true);
         return { format: 'univer', kind: 'SPREADSHEET', snapshot: structuredClone(workbook.save()) };
       } });
       subscription = univerAPI.addEvent(univerAPI.Event.CommandExecuted, (event) => {
