@@ -19,14 +19,14 @@ const { act, createElement, useEffect, Fragment } = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { officeContent } = await import('../lib/office-content');
 const { initialRoomFileState } = await import('../lib/room-file-state');
-let mounts = 0, dirty, visible;
+let mounts = 0, dirty, visible, cursor;
 const updates = [], dirtyStates = [];
 function Editor({ initialContent, onReady, onDirty }) {
   dirty = onDirty;
   useEffect(() => {
     mounts++;
     visible = initialContent;
-    onReady({ snapshot: async () => visible, updateContent: (content, preview = false) => { visible = content; updates.push({ content, preview }); return true; } });
+    onReady({ streamCursor: (next) => { cursor = next; }, snapshot: async () => visible, updateContent: (content, preview = false) => { visible = content; updates.push({ content, preview }); return true; } });
     return () => onReady(null);
   }, [initialContent, onReady]);
   return createElement('div', { 'aria-label': 'Test editor' });
@@ -70,10 +70,12 @@ try {
   assert.equal(mounts, 1);
   await act(async () => { emit({ roomId: 'another-room', input: input('v1', 'ocean') }); });
   assert.equal(updates.length, 0, 'ignore events from another room');
-  await act(async () => { emit({ input: input('v1', 'oce') }); });
+  await act(async () => { emit({ input: input('v1', 'oce'), author: { agentId: 'agent', agentName: 'Research Agent', color: 'violet', requestedBy: { id: 'alice', name: 'Alice' } } }); });
   assert.equal(visible.snapshot.body.dataStream, 'Hello world\r\n', 'network events queue text without revealing it all at once');
   await act(async () => advance(16));
   assert.equal(visible.snapshot.body.dataStream, 'Hello o\r\n');
+  assert.equal(cursor.offset, 7, 'cursor tracks the streamed insertion in document offsets');
+  assert.equal(cursor.label, 'Research Agent · requested by Alice');
   await act(async () => advance(64));
   assert.equal(visible.snapshot.body.dataStream, 'Hello oce\r\n');
   assert.match(actions.textContent, /Agent writing/);
@@ -88,6 +90,7 @@ try {
   await act(async () => advance(100));
   assert.equal(visible.snapshot.body.dataStream, 'Hello ocean\r\n');
   assert.equal(updates.at(-1).preview, false);
+  assert.equal(cursor, null, 'completion removes the cursor');
   assert.equal(mounts, 1, 'final saved content must update in place');
   assert.doesNotMatch(actions.textContent, /draft preview/);
   // A rejected edit returns to the same saved version, even without a version change.
@@ -96,6 +99,7 @@ try {
   assert.match(visible.snapshot.body.dataStream, /^Unreviewed/);
   await act(async () => { emit({ input: null }); });
   assert.equal(visible.snapshot.body.dataStream, 'Hello ocean\r\n');
+  assert.equal(cursor, null, 'rejection removes the cursor');
   // Even one full backend chunk followed immediately by its saved result must
   // type progressively, rather than flash the complete saved snapshot.
   const burst = 'A buffered backend response. '.repeat(8);

@@ -21,6 +21,7 @@ import { useRoomWork } from './use-room-work';
 import { avatarColorValues } from '../../../../shared/agent-appearance';
 import { parseDocumentPreview } from '../../../../shared/document-preview';
 import { previewDocument, savedDocumentPreview } from '@/lib/document-preview';
+import type { PrivateAgentEvent } from '../../../../shared/room-chat';
 import { DocumentTypewriter } from '@/lib/document-typewriter';
 
 function RoomFileIcon({ kind }: { kind: string }) {
@@ -309,7 +310,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     return () => controller.abort();
   }, [historyOpen, organizationId, path, versionId, historyRevision]);
   const receivePreview = useEffectEvent((event: Event) => {
-    const detail = (event as CustomEvent<{ organizationId: string; roomId: string; runId?: string; toolCallId?: string; input: string | null }>).detail;
+    const detail = (event as CustomEvent<{ organizationId: string; roomId: string; runId?: string; toolCallId?: string; input: string | null; author?: Extract<PrivateAgentEvent, { type: 'agent.document-preview' }>['author'] }>).detail;
     if (detail.organizationId !== organizationId || detail.roomId !== roomId) return;
     if (detail.input === null) {
       const current = preview.current;
@@ -331,7 +332,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
           current.writer.cancel();
           if (preview.current === current) editor.current?.updateContent?.(current.base);
         }).finally(() => {
-          if (preview.current === current) { preview.current = null; setPreviewing(false); }
+          if (preview.current === current) { preview.current = null; editor.current?.streamCursor?.(null); setPreviewing(false); }
         });
       return;
     }
@@ -343,11 +344,19 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     let current = preview.current;
     if (!current || current.runId !== detail.runId || current.toolCallId !== detail.toolCallId) {
       current?.writer.cancel();
+      editor.current.streamCursor?.(null);
       const next = { runId: detail.runId, toolCallId: detail.toolCallId, base, writer: new DocumentTypewriter((partial) => {
         if (preview.current !== next) return;
         try {
           const content = previewDocument(next.base, partial);
-          if (content) editor.current?.updateContent?.(content, true);
+          if (content && editor.current?.updateContent?.(content, true)) {
+            const edit = partial.edits.at(-1);
+            if (edit) editor.current.streamCursor?.({
+              offset: (edit.type === 'insertText' ? edit.index : edit.start) + edit.text.replace(/\r\n|\n/g, '\r').length,
+              label: detail.author ? `${detail.author.agentName} · requested by ${detail.author.requestedBy.name}` : 'Agent writing',
+              color: avatarColorValues[detail.author?.color ?? 'violet'],
+            });
+          }
         } catch { /* Complex structures wait for authoritative saved content. */ }
       }) };
       preview.current = current = next;
@@ -380,7 +389,10 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
             if (preview.current !== current) return;
             try {
               const content = previewDocument(base, partial);
-              if (content) editor.current?.updateContent?.(content, true);
+              if (content && editor.current?.updateContent?.(content, true)) {
+                const edit = partial.edits.at(-1);
+                if (edit) editor.current.streamCursor?.({ offset: (edit.type === 'insertText' ? edit.index : edit.start) + edit.text.replace(/\r\n|\n/g, '\r').length, label: 'Saved document update', color: avatarColorValues.violet });
+              }
             } catch { /* The final saved snapshot restores complex structures. */ }
           }) };
         preview.current = current; setPreviewing(true);
@@ -390,7 +402,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
           adoptContent(next);
           setSupersededVersions((previous) => [...previous, versionId].slice(-50));
           setVersionId(saved.currentVersionId);
-          preview.current = null; setPreviewing(false);
+          preview.current = null; editor.current?.streamCursor?.(null); setPreviewing(false);
         });
         return;
       }

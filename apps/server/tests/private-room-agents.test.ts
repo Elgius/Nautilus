@@ -61,10 +61,10 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
 
 test('document previews are ephemeral and sent only through the requesting user’s private channel', async () => {
   const h = harness({ preview: 'PRIVATE_UNREVIEWED_DOCUMENT_TEXT' })
-  await h.invoke(alice); await Promise.all(h.tasks)
+  await h.invoke({ ...alice, name: 'Alice' }); await Promise.all(h.tasks)
   const previews = h.events.filter(({ event }) => event.type === 'agent.document-preview')
   expect(previews).toHaveLength(1)
-  expect(previews[0]).toMatchObject({ userId: 'alice', event: { type: 'agent.document-preview', toolCallId: 'write', input: 'PRIVATE_UNREVIEWED_DOCUMENT_TEXT' } })
+  expect(previews[0]).toMatchObject({ userId: 'alice', event: { type: 'agent.document-preview', toolCallId: 'write', input: 'PRIVATE_UNREVIEWED_DOCUMENT_TEXT', author: { agentId: 'scout', agentName: 'Scout', requestedBy: { id: 'alice', name: 'Alice' } } } })
   expect(JSON.stringify([...h.values.values()])).not.toContain('PRIVATE_UNREVIEWED_DOCUMENT_TEXT')
   expect(await h.service.history(bob)).toEqual([])
 })

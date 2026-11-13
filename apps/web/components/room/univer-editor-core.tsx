@@ -7,7 +7,10 @@ import type { OfficeContent } from '@/lib/office-content';
 import { updateUniverDocument } from '@/lib/univer-document-update';
 import './univer-editor.css';
 
+export type StreamCursor = { offset: number; label: string; color: string };
+
 export type OfficeEditorHandle = {
+  streamCursor?: (cursor: StreamCursor | null) => void;
   snapshot: () => Promise<OfficeContent>;
   updateContent?: (content: OfficeContent, preview?: boolean) => boolean;
 };
@@ -21,7 +24,7 @@ export type OfficeEditorProps = {
   readOnly?: boolean;
 };
 
-type EditorFactory = (container: HTMLDivElement) => ReturnType<typeof createUniver>;
+type EditorFactory = (container: HTMLDivElement) => ReturnType<typeof createUniver> & { streamCursor?: (cursor: StreamCursor | null) => void };
 
 export default function UniverEditorCore({ initialContent, onReady, onDirty, onError, onSuspend, readOnly = false, createEditor }: OfficeEditorProps & { createEditor: EditorFactory }) {
   const container = useRef<HTMLDivElement>(null);
@@ -37,7 +40,7 @@ export default function UniverEditorCore({ initialContent, onReady, onDirty, onE
     mount.style.height = '100%';
     container.current.append(mount);
     const isDoc = initialContent.kind === 'DOCUMENT';
-    const { univer, univerAPI } = createEditor(mount);
+    const { univer, univerAPI, streamCursor } = createEditor(mount);
     let subscription: { dispose: () => void } | undefined;
     let applyingRemote = false;
     let previewing = false;
@@ -51,7 +54,7 @@ export default function UniverEditorCore({ initialContent, onReady, onDirty, onE
         else univerAPI.getActiveWorkbook()?.setEditable(!value);
       };
       void permission.current(currentReadOnly()).catch(() => reportError('Could not update editor permissions. Reload this document.'));
-      ready({ updateContent: (next, preview = false) => {
+      ready({ streamCursor, updateContent: (next, preview = false) => {
         if (!isDoc) return false;
         applyingRemote = true;
         try {
@@ -89,6 +92,7 @@ export default function UniverEditorCore({ initialContent, onReady, onDirty, onE
       const workbook = !isDoc ? univerAPI.getActiveWorkbook() : null;
       if (document) suspend(previewing ? structuredClone(savedContent) : { format: 'univer', kind: 'DOCUMENT', snapshot: structuredClone(document.save()) }, initialContent);
       if (workbook) suspend({ format: 'univer', kind: 'SPREADSHEET', snapshot: structuredClone(workbook.save()) }, initialContent);
+      streamCursor?.(null);
       subscription?.dispose(); ready(null); mount.remove();
       permission.current = null;
       // Univer owns a separate React root. Dispose after the host's commit.
