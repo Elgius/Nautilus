@@ -8,6 +8,9 @@ const span = { start: index, end: index, ...segment }
 const style = z.record(z.string(), z.json())
 const operation = <T extends string, S extends z.ZodRawShape>(type: T, shape: S) => z.strictObject({ type: z.literal(type), ...shape })
 export const documentEdits = z.array(z.discriminatedUnion('type', [
+  operation('insertTable', { index, cells: z.array(z.array(z.string().max(10_000)).min(1).max(20)).min(1).max(100), headerRow: z.boolean().optional(), columnWidths: z.array(z.number().positive()).min(1).max(20).optional() }),
+  operation('setTableCell', { tableId: z.string().min(1).max(200), row: index, column: index, expectedText: text, text: z.string().max(10_000) }),
+  operation('formatFont', { ...span, style: z.strictObject({ fontFamily: z.string().trim().min(1).max(200).optional(), fontSize: z.number().positive().max(400).optional(), bold: z.boolean().optional(), italic: z.boolean().optional(), color: z.string().regex(/^#[0-9a-f]{6}$/i).optional() }) }),
   operation('insertText', { index, text, ...segment }),
   operation('replaceText', { ...span, expectedText: text, text }),
   operation('deleteText', { ...span, expectedText: text }),

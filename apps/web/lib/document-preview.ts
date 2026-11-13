@@ -5,6 +5,10 @@ import type { OfficeContent } from './office-content';
 /** Recover a typing target when a reconnect/poll delivers only a saved version. */
 export function savedDocumentPreview(base: OfficeContent, next: OfficeContent, versionId: string): DocumentPreview | null {
   if (base.kind !== 'DOCUMENT' || next.kind !== 'DOCUMENT') return null;
+  // Native structures must be published as one coherent snapshot. Typing their
+  // sentinel characters without matching metadata can leave an invalid editor.
+  if (JSON.stringify(base.snapshot.tableSource) !== JSON.stringify(next.snapshot.tableSource)
+    || JSON.stringify(base.snapshot.body?.tables) !== JSON.stringify(next.snapshot.body?.tables)) return null;
   const before = base.snapshot.body?.dataStream, after = next.snapshot.body?.dataStream;
   if (!before?.endsWith('\r\n') || !after?.endsWith('\r\n') || before === after) return null;
   let start = 0, end = before.length - 2, nextEnd = after.length - 2;
@@ -13,6 +17,7 @@ export function savedDocumentPreview(base: OfficeContent, next: OfficeContent, v
   while (end > start && nextEnd > start && before[end - 1] === after[nextEnd - 1]) { end--; nextEnd--; }
   if (/[\uDC00-\uDFFF]/.test(before[end] ?? '')) { end++; nextEnd++; }
   const text = after.slice(start, nextEnd);
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text) || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(before.slice(start, end))) return null;
   return { documentId: base.snapshot.id, expectedVersionId: versionId, edits: end === start
     ? [{ type: 'insertText', index: start, text }]
     : [{ type: 'replaceText', start, end, expectedText: before.slice(start, end), text }] };

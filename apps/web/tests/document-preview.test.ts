@@ -5,6 +5,7 @@ import { previewDocument, savedDocumentPreview } from '../lib/document-preview';
 import { updateUniverDocument } from '../lib/univer-document-update';
 import { officeContent, type OfficeContent } from '../lib/office-content';
 import { createEditingRuntime } from '../../office/src/editing/runtime';
+import { applyDocumentEdits } from '../../office/src/editing/docs';
 
 const base = officeContent('DOCUMENT', 'doc', 'Live document', { format: 'markdown', text: 'Hello world' }) as Extract<OfficeContent, { kind: 'DOCUMENT' }>;
 const input = JSON.stringify({ documentId: 'doc', expectedVersionId: 'v1', edits: [{ type: 'replaceText', start: 6, end: 11, expectedText: 'world', text: 'ocean\nSecond paragraph 🌊' }] });
@@ -14,6 +15,20 @@ test('a saved response received after reconnect can also be typed from the curre
   const draft = savedDocumentPreview(base, next, 'v1')!;
   assert.equal(previewDocument(base, draft)?.snapshot.body?.dataStream, next.kind === 'DOCUMENT' ? next.snapshot.body?.dataStream : '');
   assert.equal(savedDocumentPreview(base, base, 'v1'), null);
+});
+
+test('native tables apply as one coherent saved snapshot in the existing document unit', () => {
+  const next = applyDocumentEdits(base, [{ type: 'insertTable', index: 11, cells: [['Whale', 'Length'], ['Blue whale', '24–30 m']] }]);
+  assert.equal(savedDocumentPreview(base, next, 'v1'), null, 'never type native structure sentinels');
+  const runtime = createEditingRuntime();
+  try {
+    const doc = runtime.api.createDocument(structuredClone(base.snapshot));
+    const model = doc.getDocumentDataModel();
+    assert.equal(updateUniverDocument(runtime.api, next), true);
+    assert.equal(doc.getDocumentDataModel(), model);
+    assert.equal(doc.save().body?.tables?.length, 1);
+    assert.deepEqual(doc.save().tableSource, next.snapshot.tableSource);
+  } finally { runtime.dispose(); }
 });
 
 test('unfinished tool JSON produces progressively longer document previews without duplicating text', () => {

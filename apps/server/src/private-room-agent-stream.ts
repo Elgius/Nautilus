@@ -10,13 +10,15 @@ export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAge
   let finished = false
   type Input = { text: string; sent: number; delivered?: string; delivery?: Promise<void>; failure?: { error: unknown } }
   const inputs = new Map<string, Input>()
+  const failedPreviewDocuments = new Set<string>()
   const checkFailure = (input: Input) => { if (input.failure) throw input.failure.error }
   const sendPreview = (id: string, input: Input, force = false) => {
     if (!options.preview || input.delivery || input.delivered === input.text || (!force && Date.now() - input.sent < 120)) return
     checkFailure(input)
     // Incomplete IDs/keys are not renderable. Avoid a database round trip for
     // those prefixes, especially before the first text delta arrives.
-    if (!parseDocumentPreview(input.text)) return
+    const draft = parseDocumentPreview(input.text)
+    if (!draft || failedPreviewDocuments.has(draft.documentId)) return
     const text = input.text
     input.sent = Date.now()
     input.delivery = Promise.resolve().then(() => options.preview!(id, text))
@@ -49,7 +51,12 @@ export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAge
         if (input) await flushPreview(part.id, input)
       }
       if ((part.type === 'tool-result' || part.type === 'tool-error') && inputs.has(part.toolCallId)) {
-        await inputs.get(part.toolCallId)!.delivery
+        const input = inputs.get(part.toolCallId)!
+        await input.delivery
+        const draft = parseDocumentPreview(input.text)
+        // Subsequent recovery attempts may still execute, but must not repeatedly
+        // paint and erase an uncommitted draft after an edit has already failed.
+        if (part.type === 'tool-error' && draft) failedPreviewDocuments.add(draft.documentId)
         inputs.delete(part.toolCallId)
         await options.preview?.(part.toolCallId, null)
       }

@@ -4,6 +4,7 @@ import { createAgentInterface, createOfficeSkills, createRoomSkillBackend, type 
 import type { Database } from '../src/db'
 import type { Bindings } from '../src/env'
 import { documentEdits, spreadsheetEdits } from '../src/agent_interface/schemas'
+import { SkillOperationError } from '../src/skill-operation-error'
 
 const profile = { id: 'scout', name: 'Scout', role: 'Edit documents', rules: ['Be concise.'] }
 const usage = { inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 2, text: 2, reasoning: undefined } }
@@ -67,6 +68,36 @@ test('an already applied version cannot be written twice in one run', async () =
   const model = new MockLanguageModelV4({ doGenerate: [call('readDocument', { documentId: 'doc-1' }, 'read'), call('applyDocumentEdits', edit, 'edit1'), call('applyDocumentEdits', edit, 'edit2'), done] })
   await createAgentInterface(profile, model, createOfficeSkills(h.backend, new AbortController().signal)).generate({ prompt: 'Edit' })
   expect(h.edits).toHaveLength(1)
+})
+
+test('native table calls reach the versioned backend and capability discovery does not grant write evidence', async () => {
+  const h = harness()
+  const table = { documentId: 'doc-1', expectedVersionId: 'v1', changeSummary: 'Add whale table', edits: [{ type: 'insertTable', index: 5, cells: [['Whale', 'Approximate length'], ['Blue whale', '24–30 m']], headerRow: true }] }
+  const model = new MockLanguageModelV4({ doGenerate: [
+    call('getDocumentCapabilities', { documentId: 'doc-1' }, 'capabilities'),
+    call('applyDocumentEdits', table, 'before-read'),
+    call('readDocument', { documentId: 'doc-1' }, 'read'),
+    call('applyDocumentEdits', table, 'native-table'), done,
+  ] })
+  await createAgentInterface(profile, model, createOfficeSkills(h.backend, new AbortController().signal)).generate({ prompt: 'Add a whale size comparison table.' })
+  expect(h.edits).toHaveLength(1)
+  expect(h.edits[0]).toEqual(['doc-1', 'v1', 'DOCUMENT', table.edits, 'Add whale table'])
+  expect(JSON.stringify(model.doGenerateCalls[2].prompt)).toContain('Read this document')
+})
+
+test('an unchanged rejected edit is blocked after rereading but a corrected edit may execute', async () => {
+  const h = harness()
+  let attempts = 0
+  h.backend.edit = async () => { attempts++; throw new SkillOperationError('REVIEW_REJECTED', 'review', 'Outside requested scope.') }
+  const corrected = { ...edit, edits: [{ ...edit.edits[0], text: 'Hi' }] }
+  const model = new MockLanguageModelV4({ doGenerate: [
+    call('readDocument', { documentId: 'doc-1' }, 'r1'), call('applyDocumentEdits', edit, 'first'),
+    call('readDocument', { documentId: 'doc-1' }, 'r2'), call('applyDocumentEdits', edit, 'repeat'),
+    call('applyDocumentEdits', corrected, 'corrected'), done,
+  ] })
+  await createAgentInterface(profile, model, createOfficeSkills(h.backend, new AbortController().signal)).generate({ prompt: 'Edit the greeting.' })
+  expect(attempts).toBe(2)
+  expect(JSON.stringify(model.doGenerateCalls[4].prompt)).toContain('EDIT_ALREADY_REJECTED')
 })
 
 test('skill schemas reject unknown edits and malformed spreadsheet values', () => {
