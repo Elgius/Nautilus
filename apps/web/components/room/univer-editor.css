@@ -12,9 +12,14 @@
 }
 .nautilus-office-editor [contenteditable] { outline: none; }
 
-.document-stream-cursor {
+.document-stream-overlay {
   position: absolute;
   z-index: 10;
+  overflow: hidden;
+  pointer-events: none;
+}
+.document-stream-cursor {
+  position: absolute;
   border-left: 2px solid currentColor;
   pointer-events: none;
 }

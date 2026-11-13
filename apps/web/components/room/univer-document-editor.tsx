@@ -14,10 +14,11 @@ const createEditor = (container: HTMLDivElement) => {
   });
   let frame: number | null = null;
   let cursor: StreamCursor | null = null;
+  let overlay: HTMLDivElement | null = null;
   let marker: HTMLDivElement | null = null;
   const draw = () => {
     frame = null;
-    if (!cursor || !marker) return;
+    if (!cursor || !marker || !overlay) return;
     marker.hidden = true;
     const doc = editor.univerAPI.getActiveDocument();
     const render = doc && editor.univer.__getInjector().get(IRenderManagerService).getRenderUnitById(doc.id);
@@ -31,13 +32,19 @@ const createEditor = (container: HTMLDivElement) => {
         const canvas = render.engine.getCanvasElement().getBoundingClientRect();
         const host = container.getBoundingClientRect();
         const viewport = render.scene.getDefaultViewport();
+        // Match the renderer's clip bounds; the host also includes the toolbar.
+        const viewportLeft = canvas.left - host.left + viewport.left;
+        const viewportTop = canvas.top - host.top + viewport.top;
+        const width = viewport.width ?? 0;
+        const viewportHeight = viewport.height ?? 0;
+        Object.assign(overlay.style, { left: `${viewportLeft}px`, top: `${viewportTop}px`, width: `${width}px`, height: `${viewportHeight}px` });
         const left = canvas.left - host.left + position.left * render.scene.ancestorScaleX - viewport.viewportScrollX;
         const top = canvas.top - host.top + position.top * render.scene.ancestorScaleY - viewport.viewportScrollY;
         const height = Math.max(16, position.height * render.scene.ancestorScaleY);
-        if (left >= 0 && left < host.width && top >= 0 && top + height < host.height) {
+        if (left >= viewportLeft && left < viewportLeft + width && top + height > viewportTop && top < viewportTop + viewportHeight) {
           marker.hidden = false;
-          marker.style.left = `${left}px`;
-          marker.style.top = `${top}px`;
+          marker.style.left = `${left - viewportLeft}px`;
+          marker.style.top = `${top - viewportTop}px`;
           marker.style.height = `${height}px`;
         }
       }
@@ -50,14 +57,18 @@ const createEditor = (container: HTMLDivElement) => {
       if (frame !== null) cancelAnimationFrame(frame);
       frame = null;
       marker?.remove(); marker = null;
+      overlay?.remove(); overlay = null;
       return;
     }
     if (!marker) {
+      overlay = document.createElement('div');
+      overlay.className = 'document-stream-overlay';
       marker = document.createElement('div');
       marker.className = 'document-stream-cursor';
       marker.setAttribute('role', 'status');
       marker.append(document.createElement('span'));
-      container.append(marker);
+      overlay.append(marker);
+      container.append(overlay);
     }
     marker.style.color = next.color;
     marker.style.setProperty('--stream-cursor-color', next.color);
