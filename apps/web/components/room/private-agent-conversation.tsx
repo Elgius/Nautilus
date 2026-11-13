@@ -32,7 +32,7 @@ export function PrivateAgentConversation({ jobs, agents = [], canSend, busy, ret
   const historyId = useId();
   if (!jobs.length) return null;
   const latest = jobs[jobs.length - 1];
-  const visibleJobs = expanded ? jobs : latest.status === 'queued' ? [latest] : [];
+  const visibleJobs = expanded ? jobs : [latest];
   return <section className="room-private-conversation" aria-label="Your private agent conversation" data-expanded={expanded}>
     <button type="button" className="room-private-conversation-toggle" aria-expanded={expanded} aria-controls={historyId} onClick={() => setExpanded((value) => !value)}><LockKeyhole size={14} aria-hidden="true" /><span>Your agent · Only you</span><ChevronDown className="room-private-conversation-chevron" size={16} aria-hidden="true" /></button>
     <div id={historyId} className="room-private-conversation-content" hidden={!visibleJobs.length}>

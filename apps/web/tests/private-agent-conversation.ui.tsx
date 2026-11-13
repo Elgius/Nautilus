@@ -22,12 +22,13 @@ async function toggle() {
 try {
   await render([job('old', 'complete')]);
   assert.equal(container.querySelector('button')?.getAttribute('aria-expanded'), 'false');
-  assert.deepEqual(turns(), []);
+  assert.deepEqual(turns(), ['You: old']);
   await render([job('old', 'complete'), job('latest', 'queued')]);
   assert.deepEqual(turns(), ['You: latest']);
   for (const status of ['running', 'complete', 'failed'] as const) {
-    await render([job('old', 'queued'), job('latest', status)]);
-    assert.deepEqual(turns(), [], 'Do not show older queued messages when the latest leaves the queue');
+    await render([job('old', 'queued'), { ...job('latest', status), reply: 'Latest agent reply' }]);
+    assert.deepEqual(turns(), ['You: latest'], 'The latest message remains visible throughout its lifecycle');
+    assert.equal(container.querySelector('.room-private-reply')?.textContent, 'Latest agent reply');
   }
   await toggle();
   assert.deepEqual(turns(), ['You: old', 'You: latest']);
@@ -37,10 +38,10 @@ try {
   await toggle();
   assert.deepEqual(turns(), ['You: latest']);
   await render([job('old', 'complete'), job('latest', 'complete')]);
-  assert.deepEqual(turns(), []);
+  assert.deepEqual(turns(), ['You: latest']);
   await toggle();
   assert.equal(turns().length, 2, 'Completed messages remain in history');
-  console.log('Agent accordion checks passed: closed default, latest queued preview, lifecycle transitions, and full history.');
+  console.log('Agent accordion checks passed: closed default, latest message preview, replies, lifecycle transitions, and full history.');
 } finally {
   await act(async () => root.unmount());
   await dom.happyDOM.close();
