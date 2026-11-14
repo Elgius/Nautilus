@@ -9,9 +9,12 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } fro
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { agentMention, selectAgentMention } from "@/lib/agent-mention";
 import { defaultRoomSuggestions } from "./use-room-suggestions";
+import { withDocumentSelection, type DocumentSelection } from '@/lib/document-selection';
 import type { RoomAgentOption } from "../../../../shared/room-chat";
 
 type Props = {
+  selection?: DocumentSelection | null;
+  onClearSelection?: (expected?: DocumentSelection) => void;
   suggestions?: string[];
   canSend: boolean;
   agents: RoomAgentOption[];
@@ -24,7 +27,8 @@ type Props = {
 };
 const reasoningLevels = ["Low", "Medium", "High"];
 
-export function RoomChatComposer({ suggestions = defaultRoomSuggestions, canSend, agents, agentsLoading, agentBusy, loadAgents, sendMessage, invokeAgent, sendTyping }: Props) {
+export function RoomChatComposer({ selection, onClearSelection, suggestions = defaultRoomSuggestions, canSend, agents, agentsLoading, agentBusy, loadAgents, sendMessage, invokeAgent, sendTyping }: Props) {
+  const [submitError, setSubmitError] = useState("");
   const [preparing, setPreparing] = useState(false);
   const submitting = useRef(false);
   const [draft, setDraft] = useState("");
@@ -51,17 +55,25 @@ export function RoomChatComposer({ suggestions = defaultRoomSuggestions, canSend
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!canSend || attachments.length || submitting.current) return;
+    if (selected && !instruction.trim()) return;
+    const sentSelection = selection;
+    const text = withDocumentSelection(selected ? instruction : draft, sentSelection, Boolean(selected));
+    if (text.length > 20000) { setSubmitError('Message and selected excerpt exceed 20,000 characters. Shorten the message or remove the excerpt.'); return; }
+    setSubmitError('');
     if (selected) {
       if (agentBusy) return;
       submitting.current = true; setPreparing(true);
       const sentInstruction = instruction;
       try {
-        if (await invokeAgent(selected, sentInstruction)) setInstruction((current) => current === sentInstruction ? '' : current);
+        if (await invokeAgent(selected, text)) {
+          setInstruction((current) => current === sentInstruction ? '' : current);
+          if (sentSelection) onClearSelection?.(sentSelection);
+        }
       } finally { submitting.current = false; setPreparing(false); }
     } else if (mention) {
       // An unresolved mention must never fall through to a public room message.
       setDismissed(false); loadAgents();
-    } else if (draft.trim() && sendMessage(draft)) setDraft("");
+    } else if (draft.trim() && sendMessage(text)) { setDraft(""); if (sentSelection) onClearSelection?.(sentSelection); }
   }
   function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
@@ -97,6 +109,14 @@ export function RoomChatComposer({ suggestions = defaultRoomSuggestions, canSend
       <p className="room-local-note">Instructions and replies are visible only to you.</p>
     </div>}
     <InputGroup className="room-composer">
+      {selection && <InputGroupAddon align="block-start" className="room-selection-quote" aria-label="Selected document excerpt">
+        <div className="min-w-0 flex-1 border-l-2 border-primary pl-3">
+          <p className="truncate text-xs font-medium" title={`${selection.title} · ${selection.location}`}>{selection.title} · {selection.location}</p>
+          <blockquote className="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-sm text-muted-foreground">{selection.text}</blockquote>
+          {selection.truncated && <p className="text-xs text-muted-foreground">Excerpt shortened</p>}
+        </div>
+        <InputGroupButton size="icon-sm" variant="ghost" aria-label="Remove selected excerpt" onClick={() => onClearSelection?.()}><X size={14} /></InputGroupButton>
+      </InputGroupAddon>}
       {attachments.length > 0 && <InputGroupAddon align="block-start" className="room-prompt-attachments" aria-label="Local attachments">
         {attachments.map(({ id, file }) => <Attachment key={id}>
           <AttachmentMedia><FileText size={16} /></AttachmentMedia>
@@ -106,7 +126,7 @@ export function RoomChatComposer({ suggestions = defaultRoomSuggestions, canSend
       </InputGroupAddon>}
       {selected && <InputGroupAddon align="block-start" className="room-private-target"><RoomAgentAvatar agent={selected} /><strong>@{selected.name}</strong><span><LockKeyhole size={12} /> Only you</span><Button type="button" size="icon-sm" variant="ghost" aria-label="Return to room chat" onClick={() => {
         // Never move private instruction text into the public room draft.
-        setSelected(null); textarea.current?.focus();
+        setSelected(null); onClearSelection?.(); textarea.current?.focus();
       }}><X size={14} /></Button></InputGroupAddon>}
       <InputGroupTextarea ref={textarea} aria-label={selected ? `Private instruction to ${selected.name}` : "Message to room"} placeholder={selected ? `Instruct ${selected.name} privately…` : 'Message the room, or type @ for your agent…'}
         aria-describedby={attachments.length ? attachmentNoteId : undefined}
@@ -129,6 +149,7 @@ export function RoomChatComposer({ suggestions = defaultRoomSuggestions, canSend
         <InputGroupButton variant="default" size="icon-sm" className="ml-auto rounded-full" type="submit" disabled={preparing || !canSend || attachments.length > 0 || (selected ? agentBusy || !instruction.trim() : !draft.trim() || Boolean(mention))} aria-label={selected ? 'Send private instruction' : 'Send message'}><ArrowUp size={17} /></InputGroupButton>
       </InputGroupAddon>
     </InputGroup>
+    {submitError && <p role="alert" className="room-local-note">{submitError}</p>}
     <p className="room-local-note">Enter to send · Shift + Enter for a new line · Reasoning is a UI preview</p>
     {attachments.length > 0 && <p id={attachmentNoteId} role="status" className="room-local-note">Files stay on this device. Remove attachments to send a text message.</p>}
     <p className="room-local-note">{selected ? 'Only you can see this instruction and the agent’s reply.' : 'Room messages are shared with members. Use @ for private agent instructions.'}</p>

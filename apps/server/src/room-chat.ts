@@ -193,7 +193,8 @@ export class RoomChat extends DurableObject<Bindings> {
         await this.agentService.cancel(state.identity, input.jobId)
       } else if (input.type === 'send') {
         const parsed = parseSend(input)
-        if (/(^|\s)@/.test(parsed.text)) throw new Error('Invalid room message. Select an agent to send an @ instruction privately.')
+        // Quoted document excerpts may contain @ text; only instructions need a private target.
+        if (/(^|\s)@/.test(parsed.text.replace(/^>.*$/gm, ''))) throw new Error('Invalid room message. Select an agent to send an @ instruction privately.')
         const message = await saveChatMessage(db, state.identity, parsed)
         await this.broadcast(db, { type: 'message', message })
         this.send(socket, { type: 'ack', requestId, message })

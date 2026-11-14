@@ -22,12 +22,14 @@ import { KnowledgeSourceTag } from "@/components/knowledge/source-tag";
 import { RoomDocuments } from "./room-documents";
 import { useRoomLayout } from "./use-room-layout";
 import { clampChatWidth } from "@/lib/room-layout";
+import type { DocumentSelection } from '@/lib/document-selection';
 import { initialRoomFileState, roomFileReducer } from "@/lib/room-file-state";
 
 export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
   const { session } = useWorkspaceSession();
   const organizationId = session.activeOrganization!.id;
   const { room } = initialData;
+  const [selection, setSelection] = useState<DocumentSelection | null>(null);
   const [chatLayout, updateChatLayout] = useRoomLayout(session.user.id);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const panels = useRef<HTMLElement>(null);
@@ -122,7 +124,7 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
         <div className="room-composer-area">
           {!joined && <Button variant="outline" size="sm" disabled={joining} onClick={joinRoom}>{joining ? 'Joining…' : 'Join room chat'}</Button>}
           {typingNames && <p role="status">{typingNames} typing…</p>}
-          <RoomChatComposer suggestions={suggestions} canSend={canSend} agents={agents} agentsLoading={agentsLoading} agentBusy={agentBusy} loadAgents={loadAgents} sendMessage={sendMessage} invokeAgent={invokeAgent} sendTyping={sendTyping} />
+          <RoomChatComposer selection={selection} onClearSelection={(expected) => setSelection((current) => !expected || current === expected ? null : current)} suggestions={suggestions} canSend={canSend} agents={agents} agentsLoading={agentsLoading} agentBusy={agentBusy} loadAgents={loadAgents} sendMessage={sendMessage} invokeAgent={invokeAgent} sendTyping={sendTyping} />
         </div>
       </section>
       <div className="room-panel-resizer" role="separator" tabIndex={chatLayout.collapsed ? -1 : 0} aria-label="Resize room chat" aria-orientation="vertical" aria-valuemin={18} aria-valuemax={45} aria-valuenow={Math.round(dragWidth ?? chatLayout.width)}
@@ -136,7 +138,7 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
         <div className="room-document-navigation" ref={setDocumentNavigation} />
         <div className="room-document-actions" ref={setDocumentActions} />
       </nav>
-        <RoomDocuments dirtyDocumentIds={dirtyDocumentIds} navigationContainer={documentNavigation} actionsContainer={documentActions} organizationId={organizationId} roomId={room.id} initialDocuments={room.documents} storageConfigured={initialData.storageConfigured} officeConfigured={initialData.officeConfigured} fileState={fileState} dispatchFiles={(action) => { dispatchFiles(action); if (action.type === 'add') setMobilePanel('document'); }} onSelect={(id) => { dispatchFiles({ type: 'select', id }); setMobilePanel('document'); }} onDirtyChange={onDocumentDirtyChange} />
+        <RoomDocuments onSelection={setSelection} dirtyDocumentIds={dirtyDocumentIds} navigationContainer={documentNavigation} actionsContainer={documentActions} organizationId={organizationId} roomId={room.id} initialDocuments={room.documents} storageConfigured={initialData.storageConfigured} officeConfigured={initialData.officeConfigured} fileState={fileState} dispatchFiles={(action) => { dispatchFiles(action); if (action.type === 'add') setMobilePanel('document'); }} onSelect={(id) => { dispatchFiles({ type: 'select', id }); setMobilePanel('document'); }} onDirtyChange={onDocumentDirtyChange} />
       </section>
     </main>
     <RoomConnectionStatus joined={joined} status={status} />
