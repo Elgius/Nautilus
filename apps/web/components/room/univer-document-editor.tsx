@@ -1,9 +1,10 @@
 'use client';
 
 import { createUniver, LocaleType } from '@univerjs/presets';
-import { DocSkeletonManagerService, Documents, IRenderManagerService, getTextRangeFromCharIndex, UniverDocsCorePreset } from '@univerjs/preset-docs-core';
+import { DocSelectionManagerService, DocSkeletonManagerService, Documents, IRenderManagerService, getTextRangeFromCharIndex, UniverDocsCorePreset } from '@univerjs/preset-docs-core';
 import DocsEnUS from '@univerjs/preset-docs-core/locales/en-US';
 import UniverEditorCore, { type OfficeEditorProps, type StreamCursor } from './univer-editor-core';
+import { MAX_SELECTION_TEXT, type OfficeSelection } from '@/lib/document-selection';
 import '@univerjs/preset-docs-core/lib/index.css';
 
 const createEditor = (container: HTMLDivElement) => {
@@ -51,7 +52,20 @@ const createEditor = (container: HTMLDivElement) => {
     }
     frame = requestAnimationFrame(draw);
   };
-  return { ...editor, streamCursor: (next: StreamCursor | null) => {
+  return { ...editor, observeSelection: (notify: (selection: OfficeSelection) => void) => {
+    const selections = editor.univer.__getInjector().get(DocSelectionManagerService);
+    const subscription = selections.textSelection$.subscribe((event) => {
+      const range = selections.getActiveTextRange();
+      const doc = editor.univerAPI.getActiveDocument();
+      if (!range || range.collapsed || !doc || event.unitId !== doc.id) return;
+      const start = Math.min(range.startOffset, range.endOffset);
+      const end = Math.max(range.startOffset, range.endOffset);
+      const text = doc.getBody(event.segmentId).dataStream.slice(start, Math.min(end, start + MAX_SELECTION_TEXT)).replace(/\r\n?/g, '\n');
+      if (!text.trim()) return;
+      notify({ text, location: `${event.segmentId || 'body'}: characters ${start}–${end}`, truncated: end - start > MAX_SELECTION_TEXT });
+    });
+    return { dispose: () => subscription.unsubscribe() };
+  }, streamCursor: (next: StreamCursor | null) => {
     cursor = next;
     if (!next) {
       if (frame !== null) cancelAnimationFrame(frame);

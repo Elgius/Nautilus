@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test tests",
     "test:knowledge": "bun tests/knowledge.ui.tsx",
+    "test:document-selection": "bun tests/document-selection.browser.mjs",
     "test:room-composer": "bun tests/room-chat-composer.ui.tsx",
     "test:room-chat": "bun tests/room-chat.ui.tsx",
     "test:room-local-save": "bun tests/room-local-save.ui.tsx",

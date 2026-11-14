@@ -23,6 +23,7 @@ import { parseDocumentPreview } from '../../../../shared/document-preview';
 import { previewDocument, savedDocumentPreview } from '@/lib/document-preview';
 import type { PrivateAgentEvent } from '../../../../shared/room-chat';
 import { DocumentTypewriter } from '@/lib/document-typewriter';
+import type { DocumentSelection } from '@/lib/document-selection';
 import type { RoomDocumentSaveRequest } from '@/lib/room-document-save';
 
 function RoomFileIcon({ kind }: { kind: string }) {
@@ -30,7 +31,8 @@ function RoomFileIcon({ kind }: { kind: string }) {
   return <Icon size={15} className="room-file-icon" aria-hidden="true" />;
 }
 
-export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsContainer, organizationId, roomId, initialDocuments, storageConfigured, officeConfigured = false, fileState, dispatchFiles, onSelect, onDirtyChange }: {
+export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsContainer, organizationId, roomId, initialDocuments, storageConfigured, officeConfigured = false, fileState, dispatchFiles, onSelect, onDirtyChange, onSelection }: {
+  onSelection?: (selection: DocumentSelection) => void;
   dirtyDocumentIds: ReadonlySet<string>;
   navigationContainer: HTMLDivElement | null; actionsContainer: HTMLDivElement | null;
   organizationId: string; roomId: string; initialDocuments: RoomDocument[]; storageConfigured: boolean; officeConfigured?: boolean;
@@ -193,7 +195,7 @@ export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsCo
     </div>}
     {documents.filter((document) => document.id === selectedId || visitedIds.includes(document.id)).map((document) =>
       <div key={document.id} id={`file-panel-${document.id}`} role="tabpanel" aria-labelledby={`file-tab-${document.id}`} className="min-h-0 flex-1 flex-col" style={{ display: document.id === selectedId ? 'flex' : 'none' }}>
-        <RoomDocumentEditor readOnly={work.readOnly} remoteVersionId={work.versions?.[document.id]} actionsContainer={actionsContainer} active={document.id === selectedId} organizationId={organizationId} roomId={roomId} document={document} storageConfigured={storageConfigured} officeConfigured={officeConfigured} onLoaded={markLoaded} onDirtyChange={onDirtyChange} />
+        <RoomDocumentEditor readOnly={work.readOnly} remoteVersionId={work.versions?.[document.id]} actionsContainer={actionsContainer} active={document.id === selectedId} organizationId={organizationId} roomId={roomId} document={document} storageConfigured={storageConfigured} officeConfigured={officeConfigured} onLoaded={markLoaded} onDirtyChange={onDirtyChange} onSelection={onSelection} />
       </div>)}
     {attachmentError && <p role="alert" className="p-3 text-sm text-destructive">{attachmentError}</p>}
     {selectedAttachment && <div id={`file-panel-${selectedAttachment.id}`} role="tabpanel" aria-labelledby={`file-tab-${selectedAttachment.id}`} className="min-h-0 flex-1">
@@ -248,7 +250,8 @@ function SavedRoomAttachment({ attachment, organizationId, roomId, actionsContai
   </section>;
 }
 
-function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, document, storageConfigured, officeConfigured, onLoaded, onDirtyChange, readOnly, remoteVersionId }: {
+function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, document, storageConfigured, officeConfigured, onLoaded, onDirtyChange, readOnly, remoteVersionId, onSelection }: {
+  onSelection?: (selection: DocumentSelection) => void;
   readOnly: boolean; remoteVersionId?: string | null;
   actionsContainer: HTMLDivElement | null;
   active: boolean;
@@ -609,7 +612,7 @@ function RoomDocumentEditor({ actionsContainer, active, organizationId, roomId, 
     </ol></DialogContent></Dialog>
     {!content && !error && <p role="status" className="p-6 text-sm">Loading document…</p>}
     {content && active && <div className="flex min-h-0 flex-1 flex-col" inert={converting} aria-busy={converting}>
-      <UniverEditor initialContent={content} readOnly={editingBlocked} onReady={onReady} onDirty={onDirty} onError={setError}
+      <UniverEditor onSelection={(selection) => onSelection?.({ ...selection, documentId: document.id, title: document.title, versionId })} initialContent={content} readOnly={editingBlocked} onReady={onReady} onDirty={onDirty} onError={setError}
         onSuspend={(snapshot, source) => setContent((current) => current === source ? snapshot : current)} />
     </div>}
   </div>;

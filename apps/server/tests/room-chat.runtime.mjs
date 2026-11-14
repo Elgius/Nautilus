@@ -151,6 +151,10 @@ try {
   assert.equal(JSON.stringify(publicHistory).includes('BOB_PRIVATE'), false)
   send(alice, { type: 'send', clientMessageId: crypto.randomUUID(), text: '@Scout ' + secret })
   assert.match((await receive(alice, 'error')).error, /Select an agent/)
+  const excerptMessage = 'Explain this excerpt\n\n> Contact @Scout for details';
+  const excerptId = crypto.randomUUID();
+  send(alice, { type: 'send', requestId: excerptId, clientMessageId: excerptId, text: excerptMessage });
+  assert.equal((await receive(alice, 'ack')).message.text, excerptMessage);
   // Scheduler delivery uses real Durable Object storage and owner-only delivery.
   const scheduledId = 'c326b5dc-0fdd-4d70-b838-d155fe1ecacd'
   const deliver = (leaseToken = 'valid-lease', room = 'room', deliveryId = scheduledId) => mf.dispatchFetch(`https://api.test/scheduler?room=${room}`, { method: 'POST', body: JSON.stringify({ deliveryId, leaseToken }) })
