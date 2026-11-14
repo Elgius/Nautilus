@@ -68,7 +68,8 @@ export function TaskCalendar({ tasks, schedules, disabled, onAdd, onEdit }: {
             })}</tr>)}</tbody>
           </table>
         </div>
-        <p className="mt-3 text-xs text-muted-foreground">Select a date to add a task, or a task to edit it. Dashed entries show your scheduled agent execution times; solid entries show due dates. Undated tasks appear in Table and on the Kanban board.</p>
+        <p className="mt-3 text-xs text-muted-foreground">Dashed entries show your scheduled agent runs. Solid entries show due dates.
+          {tasks.some((task) => !task.date) && " Undated tasks appear in Table and on the Kanban board."}</p>
       </> : <div className="mt-4 overflow-x-auto rounded-xl border bg-card">
         <table className="w-full min-w-[540px] text-left text-sm" aria-label="Tasks table">
           <thead className="border-b bg-muted/40 text-xs text-muted-foreground"><tr><th scope="col" className="p-3 font-medium">Task</th><th scope="col" className="p-3 font-medium">Status</th><th scope="col" className="p-3 font-medium">Due date</th></tr></thead>

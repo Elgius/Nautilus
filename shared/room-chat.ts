@@ -23,6 +23,7 @@ export type ChatServerEvent<Message> = PrivateAgentEvent
   | { type: 'error'; requestId?: string; error: string };
 
 export type RoomAgentOption = AgentAppearance & { id: string; name: string; role: string };
+export type AgentRunMode = 'read' | 'write';
 export type PrivateAgentJob = {
   id: string;
   agentId: string;
@@ -34,6 +35,7 @@ export type PrivateAgentJob = {
   createdAt: string;
   updatedAt: string;
   revision: number;
+  mode?: AgentRunMode;
   taskCommits?: { taskId: string; revision: number }[];
   commits?: { documentId: string; versionId: string; versionNumber: number }[];
 };

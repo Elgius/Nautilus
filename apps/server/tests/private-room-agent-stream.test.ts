@@ -23,14 +23,17 @@ test('a failed edit rolls its preview back once and later attempts do not repain
     ] }) },
   ] })
   let attempts = 0, reply = ''
+  const stages: string[] = []
   const previews: { id: string; input: string | null }[] = []
   const skills = [{ id: 'test', instructions: 'Write.', tools: {
     applyDocumentEdits: tool({ inputSchema: z.object({ documentId: z.string(), expectedVersionId: z.string(), edits: z.array(z.object({ type: z.literal('insertText'), index: z.number(), text: z.string() })) }), execute: async (): Promise<{ saved: boolean }> => { attempts++; throw new Error('Rejected edit') } }),
   } }]
   for await (const text of streamPrivateRoomAgent({} as Bindings, profile, [{ role: 'user', content: 'Add a whale table.' }], new AbortController().signal, () => model, skills, {
+    stage: (stage) => { stages.push(stage) },
     preview: async (id, input) => { previews.push({ id, input }) },
   })) reply += text
   expect(attempts).toBe(2)
+  expect(stages).toEqual(['model.started', 'model.first-delta'])
   expect(previews.filter((preview) => preview.input !== null).map((preview) => preview.id)).toEqual(['first'])
   expect(previews).toContainEqual({ id: 'first', input: null })
   expect(reply).toBe('The edit failed.')

@@ -1,0 +1,141 @@
+diff --git a/node_modules/@univerjs/engine-render/.bun-tag-f928ef0d9e5b6fd7 b/.bun-tag-f928ef0d9e5b6fd7
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/lib/cjs/index.js b/lib/cjs/index.js
+index bc318ff940e79a7badc925434441272c12906af1..4813a4ff5af0ecb6082a019f0c21752613a65395 100644
+--- a/lib/cjs/index.js
++++ b/lib/cjs/index.js
+@@ -14966,7 +14966,7 @@ function stepTableSkeletonsBuild(state) {
+ 	const minimumHeight = traditional && rowSource.trHeight.hRule === _univerjs_core.TableRowHeightRule.AT_LEAST ? getRowMinimumHeight(state.table, state.rowIndex, true) : 0;
+ 	const reusePrecomputedRow = state.cellPageHeights == null && canReusePrecomputedTableRow(state.curPage, state.createCache, rowSource, precomputedRow, firstBorderHeight, minimumHeight);
+ 	if (!reusePrecomputedRow && cellNode != null && !isCoveredTableCell(cellConfig)) {
+-		const pageContentHeight = getAvailableHeight(state.curPage, state.createCache, traditional && state.rowIndex >= state.createCache.repeatRows.length) - nextBorderHeight;
++		const pageContentHeight = getAvailableHeight(state.curPage, state.createCache, state.rowIndex >= state.createCache.repeatRows.length) - nextBorderHeight;
+ 		const availableHeight = getAvailableHeight(state.curPage, state.createCache, true) - nextBorderHeight;
+ 		const canRowSplit = rowSource.cantSplit !== _univerjs_core.BooleanNumber.TRUE && rowSource.trHeight.hRule !== _univerjs_core.TableRowHeightRule.EXACT;
+ 		const needOpenNewTable = state.createCache.remainHeight <= firstBorderHeight || minimumHeight <= availableHeight && minimumHeight + firstBorderHeight > state.createCache.remainHeight;
+@@ -15126,7 +15126,7 @@ function dealWithTableRow(ctx, curPage, skeTables, viewModel, sectionBreakConfig
+ 	const traditional = isTraditionalDocumentCompatibility(documentCompatibilityPolicy);
+ 	const firstBorderHeight = getTableBorderHeight(((_getCurTableSkeleton$2 = getCurTableSkeleton(skeTables).rows[0]) === null || _getCurTableSkeleton$2 === void 0 ? void 0 : _getCurTableSkeleton$2.rowSource) ?? rowSource, rowSource, traditional);
+ 	const nextBorderHeight = getTableBorderHeight(rowSource, rowSource, traditional);
+-	const pageContentHeight = getAvailableHeight(curPage, cache, traditional && !isRepeatRow && row >= cache.repeatRows.length) - nextBorderHeight;
++	const pageContentHeight = getAvailableHeight(curPage, cache, !isRepeatRow && row >= cache.repeatRows.length) - nextBorderHeight;
+ 	const availableHeight = getAvailableHeight(curPage, cache, true) - nextBorderHeight;
+ 	const { trHeight, cantSplit } = rowSource;
+ 	const { hRule, val } = trHeight;
+@@ -15201,7 +15201,7 @@ function dealWithTableRow(ctx, curPage, skeTables, viewModel, sectionBreakConfig
+ 	while (rowSkeletons.length > 0) {
+ 		var _curTableSkeleton$row, _cache$notes;
+ 		const rowSkeleton = rowSkeletons.shift();
+-		const lastRow = curTableSkeleton.rows[curTableSkeleton.rows.length - 1];
++		// Continuation fragments need the same repeated headers as new body rows.
+ 		const borderHeight = getTableBorderHeight(((_curTableSkeleton$row = curTableSkeleton.rows[0]) === null || _curTableSkeleton$row === void 0 ? void 0 : _curTableSkeleton$row.rowSource) ?? rowSource, rowSource, traditional);
+ 		const rowOverflowHeight = rowSkeleton.height + borderHeight - cache.remainHeight;
+ 		const geometryOverflow = cache.remainHeight <= 0 || forcedPageBreakRows.has(rowSkeleton) || rowOverflowHeight > documentCompatibilityPolicy.table.rowOverflowTolerance;
+@@ -15210,12 +15210,12 @@ function dealWithTableRow(ctx, curPage, skeTables, viewModel, sectionBreakConfig
+ 			var _cache$notes2, _cache$notes3, _cache$notes4;
+ 			(_cache$notes2 = cache.notes) === null || _cache$notes2 === void 0 || _cache$notes2.nextPage();
+ 			if (cache.notes && skeTables.length === 1 && curTableSkeleton.rows.length === 0) cache.fromCurrentPage = false;
+-			cache.remainHeight = getAvailableHeight(curPage, cache, row !== 0 && (traditional || rowSkeleton.index !== (lastRow === null || lastRow === void 0 ? void 0 : lastRow.index)));
++			cache.remainHeight = getAvailableHeight(curPage, cache, !isRepeatRow && row >= cache.repeatRows.length);
+ 			cache.rowTop = 0;
+ 			if (curTableSkeleton.rows.length > 0) {
+ 				curTableSkeleton = getNullTableSkeleton(startIndex, endIndex, table);
+ 				skeTables.push(curTableSkeleton);
+-				if (cache.repeatRows.length > 0 && isRepeatRow === false && row >= cache.repeatRows.length && (traditional || rowSkeleton.index !== lastRow.index)) {
++				if (cache.repeatRows.length > 0 && isRepeatRow === false && row >= cache.repeatRows.length) {
+ 					cache.remainHeight = getAvailableHeight(curPage, cache, false);
+ 					cache.repeatRows.forEach((repeatRow, repeatRowIndex) => {
+ 						dealWithTableRow(ctx, curPage, skeTables, viewModel, sectionBreakConfig, repeatRow, repeatRowIndex, table, cache, true);
+diff --git a/lib/es/index.js b/lib/es/index.js
+index 084e6968b2150f1e26b27749169457d9fbc22488..fecc4278788df8abf42acc02af58f40b482bc2e8 100644
+--- a/lib/es/index.js
++++ b/lib/es/index.js
+@@ -14965,7 +14965,7 @@ function stepTableSkeletonsBuild(state) {
+ 	const minimumHeight = traditional && rowSource.trHeight.hRule === TableRowHeightRule.AT_LEAST ? getRowMinimumHeight(state.table, state.rowIndex, true) : 0;
+ 	const reusePrecomputedRow = state.cellPageHeights == null && canReusePrecomputedTableRow(state.curPage, state.createCache, rowSource, precomputedRow, firstBorderHeight, minimumHeight);
+ 	if (!reusePrecomputedRow && cellNode != null && !isCoveredTableCell(cellConfig)) {
+-		const pageContentHeight = getAvailableHeight(state.curPage, state.createCache, traditional && state.rowIndex >= state.createCache.repeatRows.length) - nextBorderHeight;
++		const pageContentHeight = getAvailableHeight(state.curPage, state.createCache, state.rowIndex >= state.createCache.repeatRows.length) - nextBorderHeight;
+ 		const availableHeight = getAvailableHeight(state.curPage, state.createCache, true) - nextBorderHeight;
+ 		const canRowSplit = rowSource.cantSplit !== BooleanNumber.TRUE && rowSource.trHeight.hRule !== TableRowHeightRule.EXACT;
+ 		const needOpenNewTable = state.createCache.remainHeight <= firstBorderHeight || minimumHeight <= availableHeight && minimumHeight + firstBorderHeight > state.createCache.remainHeight;
+@@ -15125,7 +15125,7 @@ function dealWithTableRow(ctx, curPage, skeTables, viewModel, sectionBreakConfig
+ 	const traditional = isTraditionalDocumentCompatibility(documentCompatibilityPolicy);
+ 	const firstBorderHeight = getTableBorderHeight(((_getCurTableSkeleton$2 = getCurTableSkeleton(skeTables).rows[0]) === null || _getCurTableSkeleton$2 === void 0 ? void 0 : _getCurTableSkeleton$2.rowSource) ?? rowSource, rowSource, traditional);
+ 	const nextBorderHeight = getTableBorderHeight(rowSource, rowSource, traditional);
+-	const pageContentHeight = getAvailableHeight(curPage, cache, traditional && !isRepeatRow && row >= cache.repeatRows.length) - nextBorderHeight;
++	const pageContentHeight = getAvailableHeight(curPage, cache, !isRepeatRow && row >= cache.repeatRows.length) - nextBorderHeight;
+ 	const availableHeight = getAvailableHeight(curPage, cache, true) - nextBorderHeight;
+ 	const { trHeight, cantSplit } = rowSource;
+ 	const { hRule, val } = trHeight;
+@@ -15200,7 +15200,7 @@ function dealWithTableRow(ctx, curPage, skeTables, viewModel, sectionBreakConfig
+ 	while (rowSkeletons.length > 0) {
+ 		var _curTableSkeleton$row, _cache$notes;
+ 		const rowSkeleton = rowSkeletons.shift();
+-		const lastRow = curTableSkeleton.rows[curTableSkeleton.rows.length - 1];
++		// Continuation fragments need the same repeated headers as new body rows.
+ 		const borderHeight = getTableBorderHeight(((_curTableSkeleton$row = curTableSkeleton.rows[0]) === null || _curTableSkeleton$row === void 0 ? void 0 : _curTableSkeleton$row.rowSource) ?? rowSource, rowSource, traditional);
+ 		const rowOverflowHeight = rowSkeleton.height + borderHeight - cache.remainHeight;
+ 		const geometryOverflow = cache.remainHeight <= 0 || forcedPageBreakRows.has(rowSkeleton) || rowOverflowHeight > documentCompatibilityPolicy.table.rowOverflowTolerance;
+@@ -15209,12 +15209,12 @@ function dealWithTableRow(ctx, curPage, skeTables, viewModel, sectionBreakConfig
+ 			var _cache$notes2, _cache$notes3, _cache$notes4;
+ 			(_cache$notes2 = cache.notes) === null || _cache$notes2 === void 0 || _cache$notes2.nextPage();
+ 			if (cache.notes && skeTables.length === 1 && curTableSkeleton.rows.length === 0) cache.fromCurrentPage = false;
+-			cache.remainHeight = getAvailableHeight(curPage, cache, row !== 0 && (traditional || rowSkeleton.index !== (lastRow === null || lastRow === void 0 ? void 0 : lastRow.index)));
++			cache.remainHeight = getAvailableHeight(curPage, cache, !isRepeatRow && row >= cache.repeatRows.length);
+ 			cache.rowTop = 0;
+ 			if (curTableSkeleton.rows.length > 0) {
+ 				curTableSkeleton = getNullTableSkeleton(startIndex, endIndex, table);
+ 				skeTables.push(curTableSkeleton);
+-				if (cache.repeatRows.length > 0 && isRepeatRow === false && row >= cache.repeatRows.length && (traditional || rowSkeleton.index !== lastRow.index)) {
++				if (cache.repeatRows.length > 0 && isRepeatRow === false && row >= cache.repeatRows.length) {
+ 					cache.remainHeight = getAvailableHeight(curPage, cache, false);
+ 					cache.repeatRows.forEach((repeatRow, repeatRowIndex) => {
+ 						dealWithTableRow(ctx, curPage, skeTables, viewModel, sectionBreakConfig, repeatRow, repeatRowIndex, table, cache, true);
+diff --git a/lib/index.js b/lib/index.js
+index 084e6968b2150f1e26b27749169457d9fbc22488..fecc4278788df8abf42acc02af58f40b482bc2e8 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -14965,7 +14965,7 @@ function stepTableSkeletonsBuild(state) {
+ 	const minimumHeight = traditional && rowSource.trHeight.hRule === TableRowHeightRule.AT_LEAST ? getRowMinimumHeight(state.table, state.rowIndex, true) : 0;
+ 	const reusePrecomputedRow = state.cellPageHeights == null && canReusePrecomputedTableRow(state.curPage, state.createCache, rowSource, precomputedRow, firstBorderHeight, minimumHeight);
+ 	if (!reusePrecomputedRow && cellNode != null && !isCoveredTableCell(cellConfig)) {
+-		const pageContentHeight = getAvailableHeight(state.curPage, state.createCache, traditional && state.rowIndex >= state.createCache.repeatRows.length) - nextBorderHeight;
++		const pageContentHeight = getAvailableHeight(state.curPage, state.createCache, state.rowIndex >= state.createCache.repeatRows.length) - nextBorderHeight;
+ 		const availableHeight = getAvailableHeight(state.curPage, state.createCache, true) - nextBorderHeight;
+ 		const canRowSplit = rowSource.cantSplit !== BooleanNumber.TRUE && rowSource.trHeight.hRule !== TableRowHeightRule.EXACT;
+ 		const needOpenNewTable = state.createCache.remainHeight <= firstBorderHeight || minimumHeight <= availableHeight && minimumHeight + firstBorderHeight > state.createCache.remainHeight;
+@@ -15125,7 +15125,7 @@ function dealWithTableRow(ctx, curPage, skeTables, viewModel, sectionBreakConfig
+ 	const traditional = isTraditionalDocumentCompatibility(documentCompatibilityPolicy);
+ 	const firstBorderHeight = getTableBorderHeight(((_getCurTableSkeleton$2 = getCurTableSkeleton(skeTables).rows[0]) === null || _getCurTableSkeleton$2 === void 0 ? void 0 : _getCurTableSkeleton$2.rowSource) ?? rowSource, rowSource, traditional);
+ 	const nextBorderHeight = getTableBorderHeight(rowSource, rowSource, traditional);
+-	const pageContentHeight = getAvailableHeight(curPage, cache, traditional && !isRepeatRow && row >= cache.repeatRows.length) - nextBorderHeight;
++	const pageContentHeight = getAvailableHeight(curPage, cache, !isRepeatRow && row >= cache.repeatRows.length) - nextBorderHeight;
+ 	const availableHeight = getAvailableHeight(curPage, cache, true) - nextBorderHeight;
+ 	const { trHeight, cantSplit } = rowSource;
+ 	const { hRule, val } = trHeight;
+@@ -15200,7 +15200,7 @@ function dealWithTableRow(ctx, curPage, skeTables, viewModel, sectionBreakConfig
+ 	while (rowSkeletons.length > 0) {
+ 		var _curTableSkeleton$row, _cache$notes;
+ 		const rowSkeleton = rowSkeletons.shift();
+-		const lastRow = curTableSkeleton.rows[curTableSkeleton.rows.length - 1];
++		// Continuation fragments need the same repeated headers as new body rows.
+ 		const borderHeight = getTableBorderHeight(((_curTableSkeleton$row = curTableSkeleton.rows[0]) === null || _curTableSkeleton$row === void 0 ? void 0 : _curTableSkeleton$row.rowSource) ?? rowSource, rowSource, traditional);
+ 		const rowOverflowHeight = rowSkeleton.height + borderHeight - cache.remainHeight;
+ 		const geometryOverflow = cache.remainHeight <= 0 || forcedPageBreakRows.has(rowSkeleton) || rowOverflowHeight > documentCompatibilityPolicy.table.rowOverflowTolerance;
+@@ -15209,12 +15209,12 @@ function dealWithTableRow(ctx, curPage, skeTables, viewModel, sectionBreakConfig
+ 			var _cache$notes2, _cache$notes3, _cache$notes4;
+ 			(_cache$notes2 = cache.notes) === null || _cache$notes2 === void 0 || _cache$notes2.nextPage();
+ 			if (cache.notes && skeTables.length === 1 && curTableSkeleton.rows.length === 0) cache.fromCurrentPage = false;
+-			cache.remainHeight = getAvailableHeight(curPage, cache, row !== 0 && (traditional || rowSkeleton.index !== (lastRow === null || lastRow === void 0 ? void 0 : lastRow.index)));
++			cache.remainHeight = getAvailableHeight(curPage, cache, !isRepeatRow && row >= cache.repeatRows.length);
+ 			cache.rowTop = 0;
+ 			if (curTableSkeleton.rows.length > 0) {
+ 				curTableSkeleton = getNullTableSkeleton(startIndex, endIndex, table);
+ 				skeTables.push(curTableSkeleton);
+-				if (cache.repeatRows.length > 0 && isRepeatRow === false && row >= cache.repeatRows.length && (traditional || rowSkeleton.index !== lastRow.index)) {
++				if (cache.repeatRows.length > 0 && isRepeatRow === false && row >= cache.repeatRows.length) {
+ 					cache.remainHeight = getAvailableHeight(curPage, cache, false);
+ 					cache.repeatRows.forEach((repeatRow, repeatRowIndex) => {
+ 						dealWithTableRow(ctx, curPage, skeTables, viewModel, sectionBreakConfig, repeatRow, repeatRowIndex, table, cache, true);

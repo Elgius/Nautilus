@@ -98,7 +98,7 @@ export function Planner({ mode, storageKey, organizationId }: { mode: "Kanban" |
   return (
     <section className="space-y-6">
       <div className="page-heading">
-        <div><div className="eyebrow"><span /> YOUR TEAM, IN SYNC</div><h1>{mode === "Kanban" ? "Your team’s work." : "Your team’s calendar."}</h1><p>{mode === "Kanban" ? "Organize tasks and move work forward, one card at a time." : "Plan your days and keep task due dates in view."}</p></div>
+        <h1>{mode}</h1>
         <Button onClick={() => add()} disabled={!!readError || busy}><Plus />Add task</Button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-5">

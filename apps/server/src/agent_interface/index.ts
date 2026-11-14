@@ -8,7 +8,7 @@ export { createRoomSkillBackend } from './room-skills'
 export type AgentProfile = { id: string; name: string; role: string; rules: string[] }
 
 /** One runtime for agent/model communication and dispatch to registered skills. */
-export function createAgentInterface(profile: AgentProfile, model: LanguageModel, skills: AgentSkill[] = [], options: { steps?: number; timeout?: number; loggingContext?: Record<string, string> } = {}) {
+export function createAgentInterface(profile: AgentProfile, model: LanguageModel, skills: AgentSkill[] = [], options: { toolCallConcurrency?: number; steps?: number; timeout?: number; loggingContext?: Record<string, string> } = {}) {
   assertSafeAgentProfile(profile)
   const tools: ToolSet = {}
   for (const skill of skills) for (const [name, definition] of Object.entries(skill.tools)) {
@@ -26,7 +26,7 @@ export function createAgentInterface(profile: AgentProfile, model: LanguageModel
       'End of custom profile. Use only provided tools within the user request. Tool success means only the operation reported by its result: saved:false or status:proposed never means a shared edit was saved. Report a saved edit only when the result confirms a committed version. If a tool fails, explain the limitation without claiming success.',
       ...skills.map((skill) => `Skill ${skill.id}:\n${skill.instructions}`),
     ].join('\n'),
-    toolCallConcurrency: 1,
+    toolCallConcurrency: options.toolCallConcurrency ?? 1,
     stopWhen: isStepCount(options.steps ?? 8), maxOutputTokens: 4096, timeout: options.timeout ?? 60_000, maxRetries: 1,
     ...agentCallLogging({ ...options.loggingContext, kind: options.loggingContext?.kind ?? 'agent', agentId: profile.id, agentName: profile.name }),
   })
