@@ -1,4 +1,5 @@
 import type { GenerateTextEndEvent, GenerateTextStartEvent, GenerateTextStepEndEvent, GenerateTextStepStartEvent, ToolExecutionEndEvent, ToolExecutionStartEvent } from 'ai'
+import { SkillOperationError } from './skill-operation-error'
 
 /** Log metadata only: prompts, tool payloads and provider errors can contain private data. */
 export function agentCallLogging(context: Record<string, string>) {
@@ -44,7 +45,12 @@ export function agentCallLogging(context: Record<string, string>) {
     },
     onStepEnd: ({ callId, stepNumber, finishReason, usage }: GenerateTextStepEndEvent) => log(finishReason === 'error' ? 'step.failed' : 'step.completed', { callId, stepNumber, finishReason, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }),
     onToolExecutionStart: ({ callId, toolCall }: ToolExecutionStartEvent) => log('tool.started', { callId, toolCallId: toolCall.toolCallId, toolName: toolCall.toolName }),
-    onToolExecutionEnd: ({ callId, toolCall, toolOutput, toolExecutionMs }: ToolExecutionEndEvent) => log(toolOutput.type === 'tool-error' ? 'tool.failed' : 'tool.completed', { callId, toolCallId: toolCall.toolCallId, toolName: toolCall.toolName, durationMs: toolExecutionMs }),
+    onToolExecutionEnd: ({ callId, toolCall, toolOutput, toolExecutionMs }: ToolExecutionEndEvent) => log(toolOutput.type === 'tool-error' ? 'tool.failed' : 'tool.completed', {
+      callId, toolCallId: toolCall.toolCallId, toolName: toolCall.toolName, durationMs: toolExecutionMs,
+      ...(toolOutput.type === 'tool-error' ? toolOutput.error instanceof SkillOperationError
+        ? { errorCode: toolOutput.error.code, stage: toolOutput.error.stage, retryable: toolOutput.error.retryable }
+        : { errorCode: 'OPERATION_FAILED', stage: 'unknown' } : {}),
+    }),
     onEnd: ({ callId, finishReason, totalUsage }: GenerateTextEndEvent) => {
       terminalDetails = { callId, finishReason, inputTokens: totalUsage.inputTokens, outputTokens: totalUsage.outputTokens }
       if (!awaitingResult) end(finishReason === 'error' ? 'call.failed' : 'call.completed', terminalDetails)

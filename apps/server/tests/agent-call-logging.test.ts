@@ -2,12 +2,25 @@ import { expect, spyOn, test } from 'bun:test'
 import { MockLanguageModelV4 } from 'ai/test'
 import { reviewDocumentEdit, type EditReview } from '../src/edit-review'
 import { generateRoomSuggestions } from '../src/room-suggestions'
+import { agentCallLogging } from '../src/agent-call-logging'
+import { SkillOperationError } from '../src/skill-operation-error'
 
 const edit: EditReview = {
   documentId: 'doc', expectedVersionId: 'v1', kind: 'DOCUMENT', changeSummary: 'Greeting',
   edits: [{ type: 'replaceText', start: 0, end: 5, expectedText: 'Hello', text: 'World' }], reads: [{ text: 'Hello' }],
 }
 const suggestions = { suggestions: ['Compare the options', 'Summarize next steps', 'Draft a checklist'] }
+
+test('tool failures log safe codes and stages without messages, payloads or provider secrets', async () => {
+  for (const error of [new SkillOperationError('OFFICE_REJECTED', 'office', 'private-document-text'), new Error('private-provider-secret')]) {
+    const { records } = await capture(async () => {
+      const logging = agentCallLogging({ runId: 'run' })
+      logging.onToolExecutionEnd({ callId: 'call', toolCall: { toolCallId: 'write', toolName: 'applyDocumentEdits', input: { secret: 'private-payload' } }, toolOutput: { type: 'tool-error', toolCallId: 'write', toolName: 'applyDocumentEdits', input: {}, error }, toolExecutionMs: 10 } as Parameters<typeof logging.onToolExecutionEnd>[0])
+    })
+    expect(records[0]).toMatchObject({ event: 'tool.failed', errorCode: error instanceof SkillOperationError ? 'OFFICE_REJECTED' : 'OPERATION_FAILED', stage: error instanceof SkillOperationError ? 'office' : 'unknown' })
+    expect(JSON.stringify(records)).not.toContain('private-')
+  }
+})
 function model(text: string, finishReason: 'stop' | 'tool-calls' = 'stop') {
   return new MockLanguageModelV4({ doGenerate: {
     content: text ? [{ type: 'text', text }] : [], warnings: [],
@@ -39,7 +52,7 @@ for (const kind of ['edit-review', 'room-suggestions'] as const) {
     : generateRoomSuggestions([], reviewer)
 
   test(`${kind} logs success once after valid structured output`, async () => {
-    const { records, rejected } = await capture(() => generate(model(JSON.stringify(kind === 'edit-review' ? { approved: true } : suggestions))))
+    const { records, rejected } = await capture(() => generate(model(JSON.stringify(kind === 'edit-review' ? { approved: true, reason: null } : suggestions))))
     expect(rejected).toBe(false)
     const terminal = records.filter(({ event }) => ['call.completed', 'call.failed', 'call.aborted'].includes(String(event)))
     expect(terminal).toHaveLength(1)

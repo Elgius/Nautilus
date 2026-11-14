@@ -35,7 +35,7 @@ export function parseDocumentPreview(input: string): DocumentPreview | null {
     for (const edit of value.edits) {
       // Formatting does not move text offsets. Skip it so a styled title or
       // paragraph earlier in the batch cannot suppress all subsequent text.
-      if (edit?.type === 'formatText' || edit?.type === 'formatParagraph') continue;
+      if (edit?.type === 'formatText' || edit?.type === 'formatFont' || edit?.type === 'formatParagraph') continue;
       // Other segments have independent offsets; their text does not affect the
       // main body. Unknown operations still stop the preview conservatively.
       if (edit?.segmentId && ['insertText', 'replaceText', 'deleteText'].includes(edit.type)) continue;

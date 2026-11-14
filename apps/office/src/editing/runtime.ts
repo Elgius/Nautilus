@@ -10,6 +10,19 @@ import '@univerjs/docs/facade'
 import '@univerjs/sheets/facade'
 import { requireEdit } from './common'
 
+/** Exchange emits this envelope even for documents without drawings. It has no
+ * anchors to invalidate; populated or unfamiliar resource shapes remain blocked. */
+function emptyDrawingResource(name: string, data: string): boolean {
+  if (name !== 'DOC_DRAWING_PLUGIN') return false
+  try {
+    const value = JSON.parse(data)
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+      && Object.keys(value).every((key) => key === 'data' || key === 'order')
+      && value.data !== null && typeof value.data === 'object' && !Array.isArray(value.data) && Object.keys(value.data).length === 0
+      && Array.isArray(value.order) && value.order.length === 0
+  } catch { return false }
+}
+
 /** One isolated, disposable headless instance per edit batch; never share units across requests. */
 export function createEditingRuntime() {
   const univer = new Univer({ locale: LocaleType.EN_US, locales: { [LocaleType.EN_US]: mergeLocales(SheetsEnUS) }, logLevel: LogLevel.ERROR })
@@ -22,7 +35,7 @@ export function createEditingRuntime() {
     api: FUniver.newAPI(univer),
     assertStructuralResources(resources: IResources | undefined) {
       const loaded = new Set(univer.__getInjector().get(IResourceManagerService).getAllResourceHooks().map((hook) => hook.pluginName as string))
-      const unsupported = resources?.filter((resource) => !loaded.has(resource.name) && !['', '{}', '[]', 'null'].includes(resource.data.trim())) ?? []
+      const unsupported = resources?.filter((resource) => !loaded.has(resource.name) && !['', '{}', '[]', 'null'].includes(resource.data.trim()) && !emptyDrawingResource(resource.name, resource.data)) ?? []
       requireEdit(!unsupported.length, `Structural edits require these Univer plugins: ${unsupported.map((resource) => resource.name).join(', ')}.`)
     },
     dispose: () => univer.dispose(),

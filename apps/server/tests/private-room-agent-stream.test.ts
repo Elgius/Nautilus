@@ -6,6 +6,36 @@ import { streamPrivateRoomAgent } from '../src/private-room-agent-stream'
 import type { Bindings } from '../src/env'
 const profile = { id: 'scout', name: 'Scout', role: 'Research', rules: ['Keep replies concise'] }
 
+test('a failed edit rolls its preview back once and later attempts do not repaint the document', async () => {
+  const input = JSON.stringify({ documentId: 'doc', expectedVersionId: 'v1', edits: [{ type: 'insertText', index: 0, text: '| Whale | Size |\n| --- | --- |\n| Blue whale | 30 m |' }] })
+  const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 1, text: 1, reasoning: undefined } }
+  const model = new MockLanguageModelV4({ doStream: [
+    ...['first', 'retry'].map((id) => ({ stream: simulateReadableStream({ initialDelayInMs: null, chunkDelayInMs: null, chunks: [
+      { type: 'tool-input-start' as const, id, toolName: 'applyDocumentEdits' },
+      { type: 'tool-input-delta' as const, id, delta: input },
+      { type: 'tool-input-end' as const, id },
+      { type: 'tool-call' as const, toolCallId: id, toolName: 'applyDocumentEdits', input },
+      { type: 'finish' as const, finishReason: { unified: 'tool-calls' as const, raw: undefined }, usage },
+    ] }) })),
+    { stream: simulateReadableStream({ initialDelayInMs: null, chunkDelayInMs: null, chunks: [
+      { type: 'text-start', id: 'answer' }, { type: 'text-delta', id: 'answer', delta: 'The edit failed.' }, { type: 'text-end', id: 'answer' },
+      { type: 'finish', finishReason: { unified: 'stop', raw: undefined }, usage },
+    ] }) },
+  ] })
+  let attempts = 0, reply = ''
+  const previews: { id: string; input: string | null }[] = []
+  const skills = [{ id: 'test', instructions: 'Write.', tools: {
+    applyDocumentEdits: tool({ inputSchema: z.object({ documentId: z.string(), expectedVersionId: z.string(), edits: z.array(z.object({ type: z.literal('insertText'), index: z.number(), text: z.string() })) }), execute: async (): Promise<{ saved: boolean }> => { attempts++; throw new Error('Rejected edit') } }),
+  } }]
+  for await (const text of streamPrivateRoomAgent({} as Bindings, profile, [{ role: 'user', content: 'Add a whale table.' }], new AbortController().signal, () => model, skills, {
+    preview: async (id, input) => { previews.push({ id, input }) },
+  })) reply += text
+  expect(attempts).toBe(2)
+  expect(previews.filter((preview) => preview.input !== null).map((preview) => preview.id)).toEqual(['first'])
+  expect(previews).toContainEqual({ id: 'first', input: null })
+  expect(reply).toBe('The edit failed.')
+})
+
 test('slow preview delivery does not block stream consumption and flushes the latest draft before closing', async () => {
   const gate = Promise.withResolvers<void>()
   const input = JSON.stringify({ documentId: 'doc', expectedVersionId: 'v1', edits: [{ type: 'insertText', index: 0, text: 'ocean' }] })

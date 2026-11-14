@@ -5,7 +5,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { UniverInstanceType, type IDocumentData, type IWorkbookData } from '@univerjs/core'
 import { ExchangeError, ExchangeFormat, exportToBuffer, importBuffer, type ISheetImportOptions } from '@univerjs-pro/exchange-node'
 import { MAX_OFFICE_BYTES, validateOfficeContent } from '../../server/src/office-content'
-import { applyDocumentEdits, readDocument, findText, type DocumentEdit } from './editing/docs'
+import { applyDocumentEdits, readDocument, findText, readTable, documentCapabilities, type DocumentEdit } from './editing/docs'
 import { applySpreadsheetEdits, readWorkbook, readRange, type CellRange, type SpreadsheetEdit } from './editing/spreadsheets'
 
 export function createOfficeApp(secret: string) {
@@ -41,6 +41,8 @@ export function createOfficeApp(secret: string) {
     const input = await c.req.json().catch(() => { throw new HTTPException(400, { message: 'Provide valid JSON.' }) })
     if (!input || typeof input !== 'object') throw new HTTPException(400, { message: 'Provide a read operation.' })
     if (input.operation === 'readDocument') return c.json(readDocument(input.content, input.segmentId))
+    if (input.operation === 'readTable') return c.json(readTable(input.content, input.tableId))
+    if (input.operation === 'getDocumentCapabilities') return c.json(documentCapabilities(input.content))
     if (input.operation === 'findText') return c.json(findText(input.content, input.text, input.segmentId))
     if (input.operation === 'readWorkbook') return c.json(readWorkbook(input.content))
     if (input.operation === 'readRange') {

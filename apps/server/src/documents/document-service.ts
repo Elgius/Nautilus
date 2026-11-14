@@ -9,6 +9,7 @@ import { officeRequest } from '../office-service'
 import type { DocumentEdit } from '../../../office/src/editing/docs'
 import type { SpreadsheetEdit } from '../../../office/src/editing/spreadsheets'
 import { guardRoomWrite } from './room-write-lock'
+import { SkillOperationError } from '../skill-operation-error'
 
 export type DocumentScope = { organizationId: string; roomId: string; documentId: string }
 export type DocumentActor = { userId: string; agentId?: never; workToken?: never } | { agentId: string; userId?: never; workToken: string }
@@ -138,7 +139,16 @@ export function createDocumentService(db: Database, env: Bindings, storage?: Sto
     const response = await officeRequest(env, '/edit', JSON.stringify({ content: saved.content, edits: input.edits }), true, signal)
     const result = await response.json() as { content: unknown }
     const content = validateOfficeContent(saved.kind, result.content)
-    const version = await saveVersion(scope, { expectedVersionId: input.expectedVersionId, content, changeSummary: input.changeSummary }, actor, signal)
+    let version
+    try { version = await saveVersion(scope, { expectedVersionId: input.expectedVersionId, content, changeSummary: input.changeSummary }, actor, signal) }
+    catch (error) {
+      signal?.throwIfAborted()
+      if (error instanceof HTTPException) {
+        if (error.status === 409) throw new SkillOperationError('VERSION_CONFLICT', 'persistence', 'A newer document version exists. Read it again before editing.', true, 409)
+        throw error
+      }
+      throw new SkillOperationError('PERSISTENCE_FAILED', 'persistence', 'The document save could not be confirmed. Read the current version before attempting another edit.', false, 502)
+    }
     return { content, version }
   }
   return { readDocument, saveVersion, editDocument, createDocument, findCreation }
