@@ -59,9 +59,8 @@ test('native table deletion preserves surrounding text, styles, paragraph IDs, s
     { st: 16, ed: 20, ts: { bl: 1, fs: 18, cl: { rgb: '#123456' } } },
   ]
   base.snapshot.body!.paragraphs![1].paragraphStyle = { spaceAbove: { v: 12 } }
-  base.snapshot.body!.sectionBreaks = [{ startIndex: base.snapshot.body!.dataStream.length - 1, sectionId: 'final-section' }]
   base.snapshot.body!.sectionBreaks = [{ startIndex: base.snapshot.body!.dataStream.length - 1, sectionId: 'body-section' }]
-  base.snapshot.headers = { heading: { body: { dataStream: 'Header\r\n' } } }
+  base.snapshot.headers = { heading: { headerId: 'heading', body: { dataStream: 'Header\r\n' } } }
   base.snapshot.resources = [{ name: 'DOC_DRAWING_PLUGIN', data: '{"data":{},"order":[]}' }]
   const content = applyDocumentEdits(base, [insert])
   const before = structuredClone(content)
@@ -109,6 +108,22 @@ test('deleting one table rebases a later table without changing its cells or pro
   ])
   expect(readTable(edited, secondId).rows[0][0].text).toBe('Still editable')
   expect(applyDocumentEdits(edited, [{ type: 'deleteTable', tableId: secondId }]).snapshot.body!.tables ?? []).toEqual([])
+})
+
+test('tables at either end can be deleted without consuming surrounding text or the terminal CRLF', () => {
+  for (const index of [0, 16, 36]) {
+    const content = applyDocumentEdits(original(), [{ ...insert, index, cells: [['Only cell']] }])
+    const tableId = content.snapshot.body!.tables![0].tableId
+    const table = readTable(content, tableId)
+    const remaining = content.snapshot.body!.dataStream.slice(0, table.start) + content.snapshot.body!.dataStream.slice(table.end)
+    const result = applyDocumentEdits(content, [
+      { type: 'deleteTable', tableId },
+      { type: 'insertText', index: remaining.length - 2, text: ' Still editable.' },
+    ])
+    expect(result.snapshot.body!.dataStream).toBe(remaining.slice(0, -2) + ' Still editable.\r\n')
+    expect(result.snapshot.body!.tables ?? []).toEqual([])
+    expect(result.snapshot.tableSource).toEqual({})
+  }
 })
 
 test('deleting tables rejects missing IDs, malformed boundaries, unsupported resources and duplicate deletions atomically', () => {
