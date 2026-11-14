@@ -14,3 +14,6 @@ export type SetTableCellEdit = {
 export type FormatFontEdit = {
   type: 'formatFont'; start: number; end: number; segmentId?: string; style: FontStyle;
 }
+
+/** Zero-based table window; omitted counts include the remaining rows/columns. */
+export type TableReadRange = { row?: number; column?: number; rows?: number; columns?: number }

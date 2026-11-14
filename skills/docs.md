@@ -11,6 +11,12 @@ contain complete snapshots or authorization identities.
 saved document. It does not count as reading its contents before editing.
 `readDocument` also returns stable table IDs and table properties; `readTable`
 returns a table's zero-based row/column cells, exact text and UTF-16 offsets.
+For large tables, use `row`, `column`, `rows`, and `columns` to read small windows.
+Starts are zero-based and counts are positive; omitted counts read the remainder.
+Cell coordinates and text offsets stay absolute. `totalRows` and `totalColumns`
+report full dimensions; `range` describes the returned window. Table properties
+include only the selected rows, columns, and cells. Narrow the window further if
+the result exceeds the host's 60,000-character limit.
 
 Read the current document before editing. The host supplies authorized document
 identity and the current version ID; never invent organization, room, author or
@@ -26,6 +32,7 @@ it. The original input is unchanged. A failed batch returns no partial result.
 | Function | Arguments after `content` | Result |
 | --- | --- | --- |
 | `readDocument` | `segmentId = ''` | `{ id, title, segmentId, body }`; body includes text, paragraph IDs and formatting runs |
+| `readTable` | `tableId, { row?, column?, rows?, columns? } = {}` | Selected cells and properties, absolute offsets, full dimensions and returned range |
 | `findText` | `text, segmentId = ''` | All literal, case-sensitive, non-overlapping `{ start, end, segmentId }` matches |
 | `insertText` | `{ index, text, segmentId? }` | Updated content |
 | `replaceText` | `{ start, end, expectedText, text, segmentId? }` | Updated content; rejects a mismatch with `expectedText` |

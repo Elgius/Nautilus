@@ -41,7 +41,10 @@ export function createOfficeApp(secret: string) {
     const input = await c.req.json().catch(() => { throw new HTTPException(400, { message: 'Provide valid JSON.' }) })
     if (!input || typeof input !== 'object') throw new HTTPException(400, { message: 'Provide a read operation.' })
     if (input.operation === 'readDocument') return c.json(readDocument(input.content, input.segmentId))
-    if (input.operation === 'readTable') return c.json(readTable(input.content, input.tableId))
+    if (input.operation === 'readTable') {
+      const { row, column, rows, columns } = input
+      return c.json(readTable(input.content, input.tableId, { row, column, rows, columns }))
+    }
     if (input.operation === 'getDocumentCapabilities') return c.json(documentCapabilities(input.content))
     if (input.operation === 'findText') return c.json(findText(input.content, input.text, input.segmentId))
     if (input.operation === 'readWorkbook') return c.json(readWorkbook(input.content))

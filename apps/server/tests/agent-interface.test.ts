@@ -178,3 +178,16 @@ test('SDK cancellation reaches an edit already in progress', async () => {
   expect(await cancelled).toBe(true)
   expect(h.edits).toHaveLength(0)
 })
+
+test('bounded table reads reach the backend and provide version evidence for cell edits', async () => {
+  const h = harness()
+  const window = { tableId: 'table-1', row: 90, column: 9, rows: 10, columns: 1 }
+  const cellEdit = { documentId: 'doc-1', expectedVersionId: 'v1', changeSummary: 'Update cell', edits: [{ type: 'setTableCell', tableId: 'table-1', row: 99, column: 9, expectedText: 'x', text: 'updated' }] }
+  const model = new MockLanguageModelV4({ doGenerate: [
+    call('readTable', { documentId: 'doc-1', ...window }, 'read'),
+    call('applyDocumentEdits', cellEdit, 'edit'), done,
+  ] })
+  await createAgentInterface(profile, model, createOfficeSkills(h.backend, new AbortController().signal)).generate({ prompt: 'Update the last cell.' })
+  expect(h.reads).toEqual([['doc-1', 'readTable', window]])
+  expect(h.edits).toEqual([['doc-1', 'v1', 'DOCUMENT', cellEdit.edits, 'Update cell']])
+})

@@ -1,7 +1,7 @@
 import type { IDocumentData, IParagraphStyle, ITextStyle } from '@univerjs/core'
 import { createEditingRuntime, preserveResources } from './runtime'
 import { batch, contentSnapshot, editText, integer, patch, requireEdit } from './common'
-import type { FormatFontEdit, InsertTableEdit, SetTableCellEdit } from '../../../../shared/word-editing'
+import type { FormatFontEdit, InsertTableEdit, SetTableCellEdit, TableReadRange } from '../../../../shared/word-editing'
 import { insertNativeTable, tableCells, validateCellText } from './tables'
 
 export type DocumentContent = { format: 'univer'; kind: 'DOCUMENT'; snapshot: IDocumentData }
@@ -137,9 +137,28 @@ export const deleteText = (content: unknown, edit: Omit<Extract<DocumentEdit, { 
 export const formatText = (content: unknown, edit: Omit<Extract<DocumentEdit, { type: 'formatText' }>, 'type'>) => applyDocumentEdits(content, [{ ...edit, type: 'formatText' }])
 export const formatParagraph = (content: unknown, edit: Omit<Extract<DocumentEdit, { type: 'formatParagraph' }>, 'type'>) => applyDocumentEdits(content, [{ ...edit, type: 'formatParagraph' }])
 
-export function readTable(content: unknown, tableId: string) {
+export function readTable(content: unknown, tableId: string, range: TableReadRange = {}) {
   editText(tableId, 'table ID')
-  return tableCells(contentSnapshot('DOCUMENT', content) as unknown as IDocumentData, tableId)
+  const table = tableCells(contentSnapshot('DOCUMENT', content) as unknown as IDocumentData, tableId)
+  const totalRows = table.rows.length
+  const totalColumns = Math.max(0, ...table.rows.map((row) => row.length))
+  const row = range.row ?? 0, column = range.column ?? 0
+  integer(row, 0, totalRows - 1, 'table row')
+  integer(column, 0, totalColumns - 1, 'table column')
+  const rows = range.rows ?? totalRows - row, columns = range.columns ?? totalColumns - column
+  integer(rows, 1, totalRows - row, 'table row count')
+  integer(columns, 1, totalColumns - column, 'table column count')
+  return {
+    ...table, totalRows, totalColumns, range: { row, column, rows, columns },
+    rows: table.rows.slice(row, row + rows).map((cells) => cells.slice(column, column + columns)),
+    properties: {
+      ...table.properties,
+      tableColumns: table.properties.tableColumns.slice(column, column + columns),
+      tableRows: table.properties.tableRows.slice(row, row + rows).map((entry) => ({
+        ...entry, tableCells: entry.tableCells.slice(column, column + columns),
+      })),
+    },
+  }
 }
 
 export function documentCapabilities(content: unknown) {

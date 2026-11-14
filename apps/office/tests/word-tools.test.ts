@@ -97,3 +97,35 @@ test('Office transport supports native table reads and DOCX round trips with fon
   const edited = applyDocumentEdits(reopened, [{ type: 'setTableCell', tableId: reopenedId, row: 1, column: 0, expectedText: 'Blue whale', text: 'Blue whale (adult)' }])
   expect(readDocument(edited).body.dataStream).toContain('Blue whale (adult)')
 })
+
+test('large table windows bound cells and properties and retain absolute edit coordinates over transport', async () => {
+  const content = applyDocumentEdits(original(), [{ ...insert, cells: Array.from({ length: 100 }, () => Array.from({ length: 10 }, () => 'x')) }])
+  const tableId = content.snapshot.body!.tables![0].tableId
+  const full = readTable(content, tableId)
+  expect(JSON.stringify(full).length).toBeGreaterThan(60_000)
+  const token = 'test-only-bounded-table-token-1234567890', app = createOfficeApp(token)
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+  const collected: string[][] = []
+  for (let row = 0; row < 100; row += 10) {
+    const response = await app.request('/read', { method: 'POST', headers, body: JSON.stringify({ content, operation: 'readTable', tableId, row, column: 0, rows: 10, columns: 10 }) })
+    expect(response.status).toBe(200)
+    const text = await response.text()
+    expect(text.length).toBeLessThan(59_000)
+    const page = JSON.parse(text) as ReturnType<typeof readTable>
+    expect(page).toMatchObject({ totalRows: 100, totalColumns: 10, range: { row, column: 0, rows: 10, columns: 10 } })
+    expect(page.rows).toEqual(full.rows.slice(row, row + 10))
+    expect(page.properties.tableRows).toEqual(full.properties.tableRows.slice(row, row + 10))
+    collected.push(...page.rows.map((cells) => cells.map((cell) => cell.text)))
+  }
+  expect(collected).toEqual(Array.from({ length: 100 }, () => Array.from({ length: 10 }, () => 'x')))
+  const last = readTable(content, tableId, { row: 99, column: 9 })
+  expect(last.range).toEqual({ row: 99, column: 9, rows: 1, columns: 1 })
+  expect(last.properties.tableColumns).toHaveLength(1)
+  expect(last.properties.tableRows[0].tableCells).toHaveLength(1)
+  const cell = last.rows[0][0]
+  const edited = applyDocumentEdits(content, [{ type: 'setTableCell', tableId, row: cell.row, column: cell.column, expectedText: cell.text, text: 'updated' }])
+  expect(readTable(edited, tableId, { row: 99, column: 9 }).rows[0][0].text).toBe('updated')
+  for (const range of [{ row: -1 }, { row: 100 }, { column: 10 }, { rows: 0 }, { rows: 101 }, { columns: 11 }, { row: 0.5 }, { column: 9, columns: 2 }]) {
+    expect(() => readTable(content, tableId, range)).toThrow()
+  }
+})
