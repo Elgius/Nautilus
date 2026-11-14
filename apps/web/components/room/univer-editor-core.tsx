@@ -102,5 +102,6 @@ export default function UniverEditorCore({ initialContent, onReady, onDirty, onE
   useEffect(() => {
     void permission.current?.(readOnly).catch(() => reportError('Could not update editor permissions. Reload this document.'));
   }, [readOnly]);
-  return <div ref={container} inert={readOnly} className="nautilus-office-editor" aria-label={initialContent.kind === 'DOCUMENT' ? 'Word document editor' : 'Spreadsheet editor'} />;
+  // Univer permissions block edits while keeping viewport scrolling available.
+  return <div ref={container} className="nautilus-office-editor" aria-label={initialContent.kind === 'DOCUMENT' ? 'Word document editor' : 'Spreadsheet editor'} />;
 }

@@ -1,13 +1,13 @@
 import type { IDocumentData, IParagraphStyle, ITextStyle } from '@univerjs/core'
 import { createEditingRuntime, preserveResources } from './runtime'
 import { batch, contentSnapshot, editText, integer, patch, requireEdit } from './common'
-import type { FormatFontEdit, InsertTableEdit, SetTableCellEdit, TableReadRange } from '../../../../shared/word-editing'
-import { insertNativeTable, tableCells, validateCellText } from './tables'
+import type { DeleteTableEdit, FormatFontEdit, InsertTableEdit, SetTableCellEdit, TableReadRange } from '../../../../shared/word-editing'
+import { deleteNativeTable, insertNativeTable, tableCells, validateCellText } from './tables'
 
 export type DocumentContent = { format: 'univer'; kind: 'DOCUMENT'; snapshot: IDocumentData }
 export type TextRange = { start: number; end: number; segmentId?: string }
 export type DocumentEdit =
-  | InsertTableEdit | SetTableCellEdit | FormatFontEdit
+  | InsertTableEdit | SetTableCellEdit | DeleteTableEdit | FormatFontEdit
   | { type: 'insertText'; index: number; text: string; segmentId?: string }
   | ({ type: 'replaceText'; text: string; expectedText: string } & TextRange)
   | ({ type: 'deleteText'; expectedText: string } & TextRange)
@@ -54,6 +54,9 @@ export function applyDocumentEdits(content: unknown, edits: DocumentEdit[]): Doc
       if (edit.type === 'insertTable') {
         runtime.assertStructuralResources(snapshot.resources)
         success = insertNativeTable(runtime.api, document.save(), edit)
+      } else if (edit.type === 'deleteTable') {
+        runtime.assertStructuralResources(snapshot.resources)
+        success = deleteNativeTable(runtime.api, document.save(), edit)
       } else if (edit.type === 'setTableCell') {
         const table = tableCells(document.save(), edit.tableId)
         requireEdit(table.properties.tableRows.every((row) => !row.gridBefore && !row.gridAfter && row.tableCells.every((cell) => (cell.rowSpan ?? 1) === 1 && (cell.columnSpan ?? 1) === 1)), 'Editing merged or irregular table cells is not supported yet.')
@@ -167,8 +170,8 @@ export function documentCapabilities(content: unknown) {
   let structuralEdits = true
   try { runtime.assertStructuralResources(snapshot.resources) } catch { structuralEdits = false } finally { runtime.dispose() }
   return {
-    operations: ['formatText', 'formatFont', 'formatParagraph', ...(structuralEdits ? ['insertText', 'replaceText', 'deleteText', 'insertTable', 'setTableCell'] : [])],
-    tables: { native: true, insertion: structuralEdits, cellEditing: structuralEdits, maxRows: 100, maxColumns: 20, maxCells: 1000, nestedInsertion: false },
+    operations: ['formatText', 'formatFont', 'formatParagraph', ...(structuralEdits ? ['insertText', 'replaceText', 'deleteText', 'insertTable', 'setTableCell', 'deleteTable'] : [])],
+    tables: { native: true, insertion: structuralEdits, cellEditing: structuralEdits, deletion: structuralEdits, maxRows: 100, maxColumns: 20, maxCells: 1000, nestedInsertion: false },
     fonts: { family: true, size: true, bold: true, italic: true, color: true, installedFamilies: null, note: 'Font availability depends on the browser and export host; unavailable families may be substituted.' },
     charts: { native: false },
     pending: ['table row/column changes', 'merged-cell editing', 'table styling', 'native charts', 'images and captions', 'page layout tools', 'font availability discovery'],

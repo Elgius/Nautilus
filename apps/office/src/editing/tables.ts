@@ -5,7 +5,7 @@ import {
   type IDocumentBody, type IDocumentData, type ITable,
 } from '@univerjs/core'
 import type { FUniver } from '@univerjs/core/facade'
-import type { InsertTableEdit } from '../../../../shared/word-editing'
+import { MIN_TABLE_COLUMN_WIDTH, type DeleteTableEdit, type InsertTableEdit } from '../../../../shared/word-editing'
 import { editText, integer, requireEdit } from './common'
 
 export function tableCells(snapshot: IDocumentData, tableId: string) {
@@ -33,6 +33,43 @@ export function validateCellText(text: unknown): asserts text is string {
   requireEdit(text.length <= 10_000 && !/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text), 'Invalid table cell text. Use plain text without document control characters.')
 }
 
+/** Delete the native stream and its table definitions in one SDK mutation. TextX
+ * removes metadata inside the range and rebases surrounding runs and paragraphs.
+ * Keep adjacent paragraph breaks: they belong to the surrounding document. */
+export function deleteNativeTable(api: FUniver, snapshot: IDocumentData, edit: DeleteTableEdit): boolean {
+  editText(edit.tableId, 'table ID')
+  requireEdit(edit.tableId.length > 0 && edit.tableId.length <= 200, 'Invalid table ID.')
+  const body = snapshot.body!
+  const table = body.tables?.find((entry) => entry.tableId === edit.tableId)
+  requireEdit(table && snapshot.tableSource?.[edit.tableId], 'Table not found. Read the document again.')
+  const { startIndex: start, endIndex: end } = table
+  integer(start, 0, body.dataStream.length - 3, 'table start')
+  integer(end, start + 2, body.dataStream.length - 2, 'table end')
+  requireEdit(body.dataStream[start] === Token.TABLE_START && body.dataStream[end - 1] === Token.TABLE_END, 'Invalid table boundaries.')
+  let depth = 0
+  for (let index = start; index < end; index++) {
+    if (body.dataStream[index] === Token.TABLE_START) depth++
+    if (body.dataStream[index] === Token.TABLE_END) depth--
+    requireEdit(depth > 0 || index === end - 1 && depth === 0, 'Invalid table boundaries.')
+  }
+  requireEdit(depth === 0, 'Invalid table boundaries.')
+  const tableSource = { ...snapshot.tableSource }
+  for (const entry of body.tables ?? []) {
+    if (entry.startIndex >= end || entry.endIndex <= start) continue
+    const contained = entry.startIndex >= start && entry.endIndex <= end
+    const ancestor = entry.startIndex < start && entry.endIndex > end
+    requireEdit(contained || ancestor, 'Invalid overlapping table boundaries.')
+    if (contained) delete tableSource[entry.tableId]
+  }
+  const textX = new TextX()
+  if (start) textX.push({ t: TextXActionType.RETAIN, len: start })
+  textX.push({ t: TextXActionType.DELETE, len: end - start })
+  const json = JSONX.getInstance()
+  const actions = JSONX.compose(json.editOp(textX.serialize(), ['body']),
+    json.replaceOp(['tableSource'], snapshot.tableSource, tableSource))
+  return Boolean(api.syncExecuteCommand('doc.mutation.rich-text-editing', { unitId: snapshot.id, actions, textRanges: null, noNeedSetTextRange: true, noHistory: true }))
+}
+
 /** Construct the same native table stream and metadata as Univer's table command,
  * without depending on its browser selection, canvas or DOM services. */
 export function insertNativeTable(api: FUniver, snapshot: IDocumentData, edit: InsertTableEdit): boolean {
@@ -55,8 +92,8 @@ export function insertNativeTable(api: FUniver, snapshot: IDocumentData, edit: I
   const width = pageWidth - (style.marginLeft ?? 72) - (style.marginRight ?? 72)
   requireEdit(Number.isFinite(width) && width > 0, 'Invalid page width for a table.')
   const widths = edit.columnWidths ?? Array.from({ length: columns }, () => width / columns)
-  requireEdit(Array.isArray(widths) && widths.length === columns && widths.every((value) => Number.isFinite(value) && value > 0)
-    && widths.reduce((sum, value) => sum + value, 0) <= width + 0.01, 'Column widths must be positive and fit the page content width.')
+  requireEdit(Array.isArray(widths) && widths.length === columns && widths.every((value) => Number.isFinite(value) && value >= MIN_TABLE_COLUMN_WIDTH)
+    && widths.reduce((sum, value) => sum + value, 0) <= width + 0.01, `Column widths are absolute Univer layout pixels, must each be at least ${MIN_TABLE_COLUMN_WIDTH}, and must fit the page content width (${width}). Omit columnWidths for equal widths; use fewer columns if they cannot fit.`)
   const tableId = crypto.randomUUID()
   const paragraphIds = new Set(body.paragraphs?.map((paragraph) => paragraph.paragraphId).filter((id): id is string => !!id))
   const sectionIds = new Set(body.sectionBreaks?.map((section) => section.sectionId).filter((id): id is string => !!id))

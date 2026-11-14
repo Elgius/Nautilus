@@ -1,3 +1,4 @@
+import { ApiUnavailable } from "./api-unavailable";
 import { redirect } from "next/navigation";
 import { getWorkspaceSession } from "@/lib/auth-server";
 import { WorkspaceLoginRedirect } from "./workspace-login-redirect";
@@ -10,7 +11,9 @@ export async function WorkspaceGate({
   children: React.ReactNode;
   returnTo?: string;
 }) {
-  const session = await getWorkspaceSession();
+  const result = await getWorkspaceSession();
+  if (result.status === "unavailable") return <ApiUnavailable />;
+  const session = result.data;
   if (!session) return <WorkspaceLoginRedirect returnTo={returnTo} />;
   if (!session.activeOrganization) redirect("/organizations");
   return (

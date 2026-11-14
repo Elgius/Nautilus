@@ -1,3 +1,4 @@
+import { ApiUnavailable } from "@/components/auth/api-unavailable";
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getWorkspaceSession } from "@/lib/auth-server";
@@ -12,10 +13,12 @@ async function LoginRoute({
 }: {
   searchParams: Promise<{ invitationId?: string }>;
 }) {
-  const [params, session] = await Promise.all([
+  const [params, result] = await Promise.all([
     searchParams,
     getWorkspaceSession(),
   ]);
+  if (result.status === "unavailable") return <ApiUnavailable />;
+  const session = result.data;
   if (session)
     redirect(
       params.invitationId

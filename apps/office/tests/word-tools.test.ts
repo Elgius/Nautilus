@@ -51,6 +51,138 @@ test('table validation rejects malformed, oversized, nested and stale edits atom
   expect(() => applyDocumentEdits(result, [{ type: 'deleteText', start: table.start, end: table.end, expectedText: result.snapshot.body!.dataStream.slice(table.start, table.end) }])).toThrow('boundaries')
 })
 
+test('native table deletion preserves surrounding text, styles, paragraph IDs, segments and resources after reopening', () => {
+  const base = original()
+  if (base.kind !== 'DOCUMENT') throw new Error('Expected document')
+  base.snapshot.body!.textRuns = [
+    { st: 0, ed: 6, ts: { it: 1, ff: 'Arial' } },
+    { st: 16, ed: 20, ts: { bl: 1, fs: 18, cl: { rgb: '#123456' } } },
+  ]
+  base.snapshot.body!.paragraphs![1].paragraphStyle = { spaceAbove: { v: 12 } }
+  base.snapshot.body!.sectionBreaks = [{ startIndex: base.snapshot.body!.dataStream.length - 1, sectionId: 'final-section' }]
+  base.snapshot.body!.sectionBreaks = [{ startIndex: base.snapshot.body!.dataStream.length - 1, sectionId: 'body-section' }]
+  base.snapshot.headers = { heading: { body: { dataStream: 'Header\r\n' } } }
+  base.snapshot.resources = [{ name: 'DOC_DRAWING_PLUGIN', data: '{"data":{},"order":[]}' }]
+  const content = applyDocumentEdits(base, [insert])
+  const before = structuredClone(content)
+  const table = readTable(content, content.snapshot.body!.tables![0].tableId)
+  const result = applyDocumentEdits(content, [{ type: 'deleteTable', tableId: table.tableId }])
+  expect(content).toEqual(before)
+  expect(result.snapshot.body!.dataStream).toBe(before.snapshot.body!.dataStream.slice(0, table.start) + before.snapshot.body!.dataStream.slice(table.end))
+  expect(result.snapshot.body!.dataStream).toBe('Marine mammals.\r\rKeep this paragraph.\r\n')
+  expect(result.snapshot.body!.textRuns).toContainEqual(base.snapshot.body!.textRuns![0])
+  expect(result.snapshot.body!.textRuns).toContainEqual({ st: 17, ed: 21, ts: base.snapshot.body!.textRuns![1].ts })
+  for (const paragraph of base.snapshot.body!.paragraphs!) {
+    expect(result.snapshot.body!.paragraphs).toContainEqual({ ...paragraph, startIndex: paragraph.startIndex + (paragraph.startIndex >= insert.index ? 1 : 0) })
+  }
+  expect(result.snapshot.body!.sectionBreaks).toEqual(base.snapshot.body!.sectionBreaks!.map((section) => ({ ...section, startIndex: section.startIndex + 1 })))
+  expect(result.snapshot.body!.tables ?? []).toEqual([])
+  expect(result.snapshot.tableSource).toEqual({})
+  expect(result.snapshot.headers).toEqual(before.snapshot.headers)
+  expect(result.snapshot.resources).toContainEqual(base.snapshot.resources[0])
+  expect(() => readTable(result, table.tableId)).toThrow('Table not found')
+  const runtime = createEditingRuntime()
+  try {
+    const reopened = runtime.api.createDocument(structuredClone(result.snapshot)).save()
+    expect(reopened.body).toEqual(result.snapshot.body)
+    expect(reopened.tableSource).toEqual({})
+  } finally { runtime.dispose() }
+})
+
+test('deleting one table rebases a later table without changing its cells or properties and supports sequential edits', () => {
+  const first = applyDocumentEdits(original(), [insert])
+  const firstId = first.snapshot.body!.tables![0].tableId
+  const second = applyDocumentEdits(first, [{ ...insert, index: first.snapshot.body!.dataStream.length - 2, cells: [['Retain me']] }])
+  const secondId = second.snapshot.body!.tables![1].tableId
+  const retained = readTable(second, secondId)
+  const removed = readTable(second, firstId)
+  const result = applyDocumentEdits(second, [{ type: 'deleteTable', tableId: firstId }])
+  const table = readTable(result, secondId)
+  expect(table.properties).toEqual(retained.properties)
+  expect(table.start).toBe(retained.start - (removed.end - removed.start))
+  expect(table.end).toBe(retained.end - (removed.end - removed.start))
+  expect(table.rows[0][0].text).toBe('Retain me')
+  expect(Object.keys(result.snapshot.tableSource!)).toEqual([secondId])
+  const edited = applyDocumentEdits(second, [
+    { type: 'deleteTable', tableId: firstId },
+    { type: 'setTableCell', tableId: secondId, row: 0, column: 0, expectedText: 'Retain me', text: 'Still editable' },
+  ])
+  expect(readTable(edited, secondId).rows[0][0].text).toBe('Still editable')
+  expect(applyDocumentEdits(edited, [{ type: 'deleteTable', tableId: secondId }]).snapshot.body!.tables ?? []).toEqual([])
+})
+
+test('deleting tables rejects missing IDs, malformed boundaries, unsupported resources and duplicate deletions atomically', () => {
+  const content = applyDocumentEdits(original(), [insert])
+  const tableId = content.snapshot.body!.tables![0].tableId
+  const before = structuredClone(content)
+  for (const id of ['', 'x'.repeat(201), 'missing-table']) {
+    expect(() => applyDocumentEdits(content, [{ type: 'insertText', index: 0, text: 'Draft ' }, { type: 'deleteTable', tableId: id }])).toThrow()
+  }
+  expect(() => applyDocumentEdits(content, [{ type: 'deleteTable', tableId }, { type: 'deleteTable', tableId }])).toThrow('Table not found')
+  expect(content).toEqual(before)
+  const malformed = structuredClone(content)
+  malformed.snapshot.body!.tables![0].endIndex++
+  expect(() => applyDocumentEdits(malformed, [{ type: 'deleteTable', tableId }])).toThrow('Invalid table boundaries')
+  const protectedContent = structuredClone(content)
+  protectedContent.snapshot.resources = [{ name: 'UNKNOWN', data: '{"offset":1}' }]
+  expect(documentCapabilities(protectedContent).tables.deletion).toBe(false)
+  expect(documentCapabilities(protectedContent).operations).not.toContain('deleteTable')
+  expect(() => applyDocumentEdits(protectedContent, [{ type: 'deleteTable', tableId }])).toThrow('Structural edits require')
+  expect(documentCapabilities(content).tables.deletion).toBe(true)
+  expect(documentCapabilities(content).operations).toContain('deleteTable')
+})
+
+test('deleting a table through Office transport survives DOCX export and import with surrounding formatting', async () => {
+  const token = 'test-only-delete-table-token-1234567890', app = createOfficeApp(token)
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+  const content = applyDocumentEdits(original(), [
+    { type: 'formatFont', start: 16, end: 20, style: { fontFamily: 'Arial', bold: true, fontSize: 18 } }, insert,
+  ])
+  const tableId = content.snapshot.body!.tables![0].tableId
+  const response = await app.request('/edit', { method: 'POST', headers, body: JSON.stringify({ content, edits: [{ type: 'deleteTable', tableId }] }) })
+  expect(response.status).toBe(200)
+  const deleted = (await response.json()).content
+  expect(deleted.snapshot.body.tables ?? []).toEqual([])
+  expect(deleted.snapshot.tableSource).not.toHaveProperty(tableId)
+  const exported = await app.request('/export', { method: 'POST', headers, body: JSON.stringify(deleted) })
+  expect(exported.status).toBe(200)
+  const form = new FormData()
+  form.set('file', new File([await exported.arrayBuffer()], 'removed-table.docx'))
+  const imported = await app.request('/import/DOCUMENT', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form })
+  expect(imported.status).toBe(200)
+  const reopened = (await imported.json()).content
+  expect(reopened.snapshot.body.tables ?? []).toEqual([])
+  expect(reopened.snapshot.body.dataStream).toContain('Marine mammals.')
+  expect(reopened.snapshot.body.dataStream).toContain('Keep this paragraph.')
+  expect(reopened.snapshot.body.textRuns.some((run: { ts?: { ff?: string; bl?: number; fs?: number } }) => run.ts?.ff === 'Arial' && run.ts.bl === 1 && run.ts.fs === 18)).toBe(true)
+})
+
+test('table widths reject collapsed columns and narrow pages atomically while preserving usable widths', () => {
+  const base = original(), before = structuredClone(base)
+  for (const columnWidths of [[1, 1], [0.5, 0.5], [31.99, 300], [300, 1], [NaN, 300], [Infinity, 300], [100], [400, 400]]) {
+    expect(() => applyDocumentEdits(base, [
+      { type: 'insertText', index: 0, text: 'Draft ' },
+      { ...insert, columnWidths },
+    ])).toThrow('Column widths are absolute Univer layout pixels')
+    expect(base).toEqual(before)
+  }
+  for (const columnWidths of [undefined, [32, 618], [200.5, 300.25]]) {
+    const result = applyDocumentEdits(base, [{ ...insert, columnWidths }])
+    const table = readTable(result, result.snapshot.body!.tables![0].tableId)
+    const expectedWidths = columnWidths ?? [325, 325]
+    expect(table.properties.tableColumns.map((column) => column.size.width.v)).toEqual(expectedWidths)
+    expect(table.properties.size.width.v).toBe(expectedWidths.reduce((sum, width) => sum + width, 0))
+    expect(table.rows.map((row) => row.map((cell) => cell.text))).toEqual(cells)
+  }
+  const narrow = original()
+  if (narrow.kind !== 'DOCUMENT') throw new Error('Expected document')
+  narrow.snapshot.documentStyle.pageSize = { width: 200, height: 1123 }
+  const narrowBefore = structuredClone(narrow)
+  // 56px of content width cannot hold two 32px columns, including default widths.
+  expect(() => applyDocumentEdits(narrow, [insert])).toThrow('use fewer columns')
+  expect(narrow).toEqual(narrowBefore)
+})
+
 test('font controls merge supported styles and capabilities report missing features honestly', () => {
   const result = applyDocumentEdits(original(), [
     { type: 'formatText', start: 0, end: 6, style: { it: 1 } },

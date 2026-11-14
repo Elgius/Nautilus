@@ -1,5 +1,7 @@
+import { ApiUnavailable } from "@/components/auth/api-unavailable";
+import { readServerApi } from "@/lib/server-api";
 import { Suspense } from "react";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { RoomWorkspace } from "@/components/room/room-workspace";
 import { headers } from "next/headers";
 import { requireSession } from "@/lib/auth-server";
@@ -10,14 +12,21 @@ import "./room.css";
 export const metadata = { title: "Room — Agents hub" };
 
 async function SavedRoom({ roomId }: { roomId: string }) {
-  const session = await requireSession(`/room-id=${encodeURIComponent(roomId)}`);
+  const sessionResult = await requireSession(`/room-id=${encodeURIComponent(roomId)}`);
+  if (sessionResult.status === "unavailable") return <ApiUnavailable />;
+  const session = sessionResult.data;
   if (!session.activeOrganization) return null;
-  const response = await fetch(`${process.env.API_ORIGIN || 'http://localhost:8787'}/api/organizations/${encodeURIComponent(session.activeOrganization.id)}/rooms/${encodeURIComponent(roomId)}`, {
-    headers: { cookie: (await headers()).get('cookie') || '' }, cache: 'no-store', signal: AbortSignal.timeout(15000),
-  });
-  if (response.status === 404) notFound();
-  if (!response.ok) throw new Error('Couldn’t load this room. Please try again.');
-  const data = await response.json() as RoomDetail;
+  const result = await readServerApi<RoomDetail>(
+    `/api/organizations/${encodeURIComponent(session.activeOrganization.id)}/rooms/${encodeURIComponent(roomId)}`,
+    (await headers()).get("cookie") || "",
+  );
+  if (result.status === "unavailable") return <ApiUnavailable />;
+  if (result.status === "http-error") {
+    if (result.code === 404) notFound();
+    if (result.code === 401) redirect(`/login?${new URLSearchParams({ next: `/room-id=${encodeURIComponent(roomId)}` })}`);
+    throw new Error("Couldn’t load this room. Please try again.");
+  }
+  const data = result.data;
   return <RoomWorkspace key={roomId} initialData={data} />;
 }
 

@@ -3,13 +3,21 @@ export type FontStyle = {
   fontFamily?: string; fontSize?: number; bold?: boolean; italic?: boolean;
   color?: string;
 }
+// Leaves at least 16 layout pixels for text after the cell’s 8px side margins.
+export const MIN_TABLE_COLUMN_WIDTH = 32
+
 export type InsertTableEdit = {
   type: 'insertTable'; index: number; cells: string[][];
-  headerRow?: boolean; columnWidths?: number[];
+  headerRow?: boolean;
+  /** Absolute widths in Univer layout pixels, at least 32 each; omit to divide the page content width equally. */
+  columnWidths?: number[];
 }
 export type SetTableCellEdit = {
   type: 'setTableCell'; tableId: string; row: number; column: number;
   expectedText: string; text: string;
+}
+export type DeleteTableEdit = {
+  type: 'deleteTable'; tableId: string;
 }
 export type FormatFontEdit = {
   type: 'formatFont'; start: number; end: number; segmentId?: string; style: FontStyle;

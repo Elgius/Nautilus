@@ -105,6 +105,15 @@ test('skill schemas reject unknown edits and malformed spreadsheet values', () =
   expect(spreadsheetEdits.safeParse([{ type: 'setFormulas', sheetId: 's1', row: 0, column: 0, rows: 1, columns: 1, formulas: [['not a formula']] }]).success).toBe(false)
 })
 
+test('agent table schema rejects proportional and collapsed widths', () => {
+  const table = { type: 'insertTable', index: 0, cells: [['Whale', 'Length']] }
+  for (const columnWidths of [[1, 1], [0.5, 0.5], [32, 31.99]]) {
+    expect(documentEdits.safeParse([{ ...table, columnWidths }]).success).toBe(false)
+  }
+  expect(documentEdits.safeParse([table]).success).toBe(true)
+  expect(documentEdits.safeParse([{ ...table, columnWidths: [32, 300.5] }]).success).toBe(true)
+})
+
 test('room skill document discovery uses only the trusted room and organization', async () => {
   const lookups: unknown[] = []
   const db = { document: { findMany: async (query: unknown) => { lookups.push(query); return [] } } } as unknown as Database
