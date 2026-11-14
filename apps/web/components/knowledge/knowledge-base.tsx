@@ -89,7 +89,7 @@ export function KnowledgeBase({ organizationId }: { organizationId: string }) {
   const [scope, setScope] = useState<KnowledgeScope>('PERSONAL');
   const admin = canManageOrganization(session.memberships.find((m) => m.organizationId === organizationId)?.role);
   return <section className="mx-auto w-full max-w-5xl p-4 sm:p-6" aria-label="Knowledge base">
-    <div className="page-heading"><div><h1>Knowledge</h1><p>Findings from explicitly tagged work. Personal stays yours; organization knowledge is shared with your team.</p></div></div>
+    <p>Findings from explicitly tagged work. Personal stays yours; organization knowledge is shared with your team.</p>
     <div className="mb-5 flex gap-2" role="group" aria-label="Knowledge bucket">
       <Button variant={scope === 'PERSONAL' ? 'default' : 'outline'} aria-pressed={scope === 'PERSONAL'} onClick={() => setScope('PERSONAL')}><LockKeyhole size={15} />Personal</Button>
       <Button variant={scope === 'ORGANIZATION' ? 'default' : 'outline'} aria-pressed={scope === 'ORGANIZATION'} onClick={() => setScope('ORGANIZATION')}><Users size={15} />Organization</Button>

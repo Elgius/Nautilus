@@ -52,7 +52,7 @@ const server=http.createServer(async(req,res)=>{
  await page.context().addCookies([{name:'test-session',value:'test',url:baseUrl}]);
  try{
   await page.goto(`${baseUrl}/?view=Knowledge`);
-  await page.getByRole('heading',{name:'Good work starts with good context.'}).waitFor();
+  await page.getByRole('heading',{name:'Knowledge',level:1}).waitFor();
   assert.equal(counts['/api/organizations/org-a/agents']||0,0);
   await page.evaluate(()=>window.savedShell=document.querySelector('.workspace-shell'));
   const shell=async()=>assert.ok(await page.evaluate(()=>window.savedShell===document.querySelector('.workspace-shell')),'workspace shell was replaced');
@@ -69,20 +69,20 @@ const server=http.createServer(async(req,res)=>{
   await page.getByLabel('Search documents').fill('');
   await page.getByRole('heading',{name:'org-a Document 0',exact:true}).waitFor();
   const documentCalls=counts['/api/organizations/org-a/documents'];
-  await nav('Knowledge','Good work starts with good context.');
+  await nav('Knowledge','Knowledge');
   await nav('Documents','Your room documents');
   await page.getByRole('heading',{name:'org-a Document 0',exact:true}).waitFor();
   assert.equal(counts['/api/organizations/org-a/documents'],documentCalls,'cached docs unexpectedly refetched');
-  await nav('Kanban','Your team’s work.');
-  await nav('Calendar','Your team’s calendar.');
-  await page.goBack();await page.getByRole('heading',{name:'Your team’s work.'}).waitFor();await shell();
-  await page.goForward();await page.getByRole('heading',{name:'Your team’s calendar.'}).waitFor();await shell();
+  await nav('Kanban','Kanban');
+  await nav('Calendar','Calendar');
+  await page.goBack();await page.getByRole('heading',{name:'Kanban'}).waitFor();await shell();
+  await page.goForward();await page.getByRole('heading',{name:'Calendar'}).waitFor();await shell();
   assert.equal(counts['/api/me'],1,'session refetched during tab navigation');
   assert.equal(navigations,1,'sidebar triggered document navigation');
   assert.equal(counts['/api/organizations/org-a/rooms'],1);
   // Create while the original summary request is still pending: its late response must not erase the mutation.
-  await nav('Knowledge','Good work starts with good context.');
-  await page.getByRole('button',{name:'Create a room with a brief',exact:true}).click();
+  await nav('Knowledge','Knowledge');
+  await page.getByRole('button',{name:'Create room',exact:true}).click();
   await page.getByLabel('Room name').fill('New launch room');
   await page.getByRole('button',{name:'Create room',exact:true}).last().click();
   await page.getByText('New launch room',{exact:true}).first().waitFor();
@@ -93,7 +93,7 @@ const server=http.createServer(async(req,res)=>{
   await nav('Documents','Your room documents');
   failDocuments=true;await page.getByLabel('Search documents').fill('failure');
   await page.getByRole('button',{name:'Retry documents'}).waitFor();await shell();
-  await nav('Knowledge','Good work starts with good context.');
+  await nav('Knowledge','Knowledge');
   await nav('Documents','Your room documents');
   await page.getByLabel('Search documents').fill('failure');
   await page.getByRole('button',{name:'Retry documents'}).waitFor();

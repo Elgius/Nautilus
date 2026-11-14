@@ -17,7 +17,6 @@ import {
 
 import "@/app/documents.css";
 import { ThemeSettings } from "@/components/theme-settings";
-import { BrandMark } from "@/components/brand-mark";
 import { useWorkspaceSession } from "@/components/auth/workspace-session";
 import { InviteMembers } from "@/components/auth/invite-members";
 import { authClient, checkAuthResult, errorMessage } from "@/lib/auth-client";
@@ -343,7 +342,6 @@ export function Workspace({ children }: { children?: ReactNode }) {
               <strong>{view}</strong>
             </div>
             <div className="topbar-actions">
-              <span className="demo-label">Sample content</span>
               <Button variant="ghost" size="sm"
                 className="notification-button"
                 aria-label="View notifications"
@@ -368,37 +366,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
             {waitingForData ? (!dataError && <ViewLoading />) : <>
             {view !== "Documents" && view !== "Kanban" && view !== "Calendar" && (
               <div className="page-heading">
-                <div>
-                  <div className="eyebrow">
-                    <span /> YOUR TEAM, IN SYNC
-                  </div>
-                  <h1>
-                    {view === "Overview"
-                      ? "A little teamwork. A lot of possibility."
-                      : view === "Rooms"
-                        ? "Where good work comes together."
-                        : view === "Agents"
-                          ? "Meet your unfair advantage."
-                          : view === "Knowledge"
-                            ? "Shared context. Smarter teamwork."
-                            : view === "Activity"
-                              ? "Keep a pulse on your workspace."
-                              : "Make this space your own."}
-                  </h1>
-                  <p>
-                    {view === "Overview"
-                      ? "Your people and agents, moving work forward. Here’s what’s happening."
-                      : view === "Rooms"
-                        ? "Bring people, agents, and context together around a shared goal."
-                        : view === "Agents"
-                          ? "Specialized collaborators, ready to join your team."
-                          : view === "Knowledge"
-                            ? "Give your agents the context they need to do their best work."
-                            : view === "Activity"
-                              ? "The latest updates from your people and agents."
-                              : "Manage the basics for your team’s home in Agents hub."}
-                  </p>
-                </div>
+                <h1>{view}{view === "Rooms" && <span className="ml-2 text-muted-foreground">{rooms.length}</span>}</h1>
                 <Button
                   className="primary-action"
                   onClick={() => {
@@ -426,7 +394,6 @@ export function Workspace({ children }: { children?: ReactNode }) {
                           label: "Active rooms",
                           value: rooms.length,
                           icon: MessageSquare,
-                          detail: "Ideas in motion",
                           color: "green",
                         },
                         {
@@ -450,7 +417,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
                           label: "Team members",
                           value: 5,
                           icon: Users,
-                          detail: "People behind the progress",
+                          detail: "Sample count",
                           color: "blue",
                         },
                       ].map(({ label, value, icon: Icon, detail, color }) => (
@@ -462,29 +429,21 @@ export function Workspace({ children }: { children?: ReactNode }) {
                             </span>
                           </div>
                           <strong>{value.toString().padStart(2, "0")}</strong>
-                          <small>{detail}</small>
+                          {detail && <small>{detail}</small>}
                         </div>
                       ))}
                     </section>
                   </>
                 )}
                 <section className="rooms-section">
-                  <div className="section-heading">
-                    <div>
-                      <h2>
-                        Your rooms <span>{rooms.length}</span>
-                      </h2>
-                      <p>Shared spaces. Collective progress.</p>
-                    </div>
-                    {view === "Overview" && (
-                      <Button variant="ghost" size="sm"
-                        className="text-link"
-                        onClick={() => navigate("Rooms")}
-                      >
+                  {view === "Overview" && (
+                    <div className="section-heading">
+                      <h2>Your rooms <span>{rooms.length}</span></h2>
+                      <Button variant="ghost" size="sm" className="text-link" onClick={() => navigate("Rooms")}>
                         View all rooms <ArrowRight size={14} />
                       </Button>
-                    )}
-                  </div>
+                    </div>
+                  )}
                   <div className="room-toolbar">
                     <div className="room-filters" aria-label="Filter rooms">
                       {["All rooms", "Starred", "Needs review"].map((item) => (
@@ -696,10 +655,6 @@ export function Workspace({ children }: { children?: ReactNode }) {
                       </Button>
                     ))}
                   </div>
-                  <div className="team-panel-footer">
-                    <span className="status-dot" /> A little more bandwidth. A
-                    lot more potential.
-                  </div>
                 </section>
               </div>
             )}
@@ -822,7 +777,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
                 <div className="section-heading">
                   <h2>Workspace timeline</h2>
                   <Badge variant="outline">
-                    Sample activity + this session
+                    This session
                   </Badge>
                 </div>
                 <ActivityFeed
@@ -858,7 +813,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
                     <ShieldCheck size={20} />
                     <div>
                       <strong>Team workspace</strong>
-                      <small>Frontend preview · sample data</small>
+                      <small>Sample plan</small>
                     </div>
                   </div>
                   <Button type="submit" disabled={!canManage || savingSettings}>
@@ -871,15 +826,6 @@ export function Workspace({ children }: { children?: ReactNode }) {
             </>}
             </Suspense>
             </ViewBoundary>
-            <footer className="page-footer">
-              <span>
-                <BrandMark className="nautilus-mark small" /> Room to think.
-                Power to do.
-              </span>
-              <span>
-                <span className="status-dot" /> Frontend preview
-              </span>
-            </footer>
           </main>
         </SidebarInset>
         <Dialog
@@ -895,22 +841,20 @@ export function Workspace({ children }: { children?: ReactNode }) {
             <DialogHeader>
               <DialogTitle>
                 {modal === "room"
-                  ? "Make room for something great."
+                  ? "Create room"
                   : modal === "invite"
                     ? "Bring your team together."
                     : modal === "notifications"
                       ? "You’re all caught up."
                       : "Welcome to Agents hub."}
               </DialogTitle>
-              <DialogDescription>
-                {modal === "room"
-                  ? "Give your team and agents a shared goal and a place to work."
-                  : modal === "invite"
+              {modal !== "room" && <DialogDescription>
+                {modal === "invite"
                     ? "Invite a teammate to this organisation. They’ll verify their email before joining."
                     : modal === "notifications"
-                      ? "Recent workspace updates appear below. These are sample notifications."
+                      ? "Workspace updates from this session."
                       : "Your shared workspace for people and AI agents."}
-              </DialogDescription>
+              </DialogDescription>}
             </DialogHeader>
             {modal === "room" && agentData.error && <div role="alert"><p>{agentData.error.message}</p><Button variant="outline" onClick={() => void agentData.mutate()}>Retry agents</Button></div>}
             {modal === "room" && (
