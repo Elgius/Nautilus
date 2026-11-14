@@ -77,7 +77,7 @@ function KnowledgeBucket({ organizationId, userId, scope, canManage }: { organiz
       </div>
       {source.lastError && <p role="alert" className="mt-3 text-sm text-destructive">{source.lastError}</p>}
       {source.entry && <p className="mt-4 whitespace-pre-wrap break-words text-sm leading-relaxed">{source.entry.body}</p>}
-      {source.available && <Link className="mt-3 inline-block text-sm underline underline-offset-4" href={`/${source.roomId}${source.messageId ? `#message-${source.messageId}` : ''}`}>Open source room</Link>}
+      {source.available && <Link className="mt-3 inline-block text-sm underline underline-offset-4" href={`/room-id=${encodeURIComponent(source.roomId)}${source.messageId ? `#message-${source.messageId}` : ''}`}>Open source room</Link>}
       {source.available && source.entry && <SourceHistory organizationId={organizationId} scope={scope} source={source} />}
     </article>)}</div>
     {data?.at(-1)?.nextCursor && <Button variant="outline" disabled={isValidating} onClick={() => void setSize(size + 1)}>Load more sources</Button>}
