@@ -5,6 +5,7 @@ import { CommandType, type createUniver } from '@univerjs/presets';
 import { belongsToOfficeUnit } from '@/lib/office-mutations';
 import type { OfficeContent } from '@/lib/office-content';
 import { updateUniverDocument } from '@/lib/univer-document-update';
+import type { OfficeSelection } from '@/lib/document-selection';
 import './univer-editor.css';
 
 export type StreamCursor = { offset: number; label: string; color: string };
@@ -22,11 +23,12 @@ export type OfficeEditorProps = {
   onError: (message: string) => void;
   onSuspend: (snapshot: OfficeContent, source: OfficeContent) => void;
   readOnly?: boolean;
+  onSelection?: (selection: OfficeSelection) => void;
 };
 
-type EditorFactory = (container: HTMLDivElement) => ReturnType<typeof createUniver> & { streamCursor?: (cursor: StreamCursor | null) => void };
+type EditorFactory = (container: HTMLDivElement) => ReturnType<typeof createUniver> & { streamCursor?: (cursor: StreamCursor | null) => void; observeSelection?: (notify: (selection: OfficeSelection) => void) => { dispose: () => void } };
 
-export default function UniverEditorCore({ initialContent, onReady, onDirty, onError, onSuspend, readOnly = false, createEditor }: OfficeEditorProps & { createEditor: EditorFactory }) {
+export default function UniverEditorCore({ initialContent, onReady, onDirty, onError, onSuspend, onSelection, readOnly = false, createEditor }: OfficeEditorProps & { createEditor: EditorFactory }) {
   const container = useRef<HTMLDivElement>(null);
   const permission = useRef<((value: boolean) => Promise<void>) | null>(null);
   const currentReadOnly = useEffectEvent(() => readOnly);
@@ -34,20 +36,25 @@ export default function UniverEditorCore({ initialContent, onReady, onDirty, onE
   const dirty = useEffectEvent(onDirty);
   const reportError = useEffectEvent(onError);
   const suspend = useEffectEvent(onSuspend);
+  const selected = useEffectEvent((selection: OfficeSelection) => onSelection?.(selection));
   useEffect(() => {
     if (!container.current) return;
     const mount = document.createElement('div');
     mount.style.height = '100%';
     container.current.append(mount);
     const isDoc = initialContent.kind === 'DOCUMENT';
-    const { univer, univerAPI, streamCursor } = createEditor(mount);
+    const { univer, univerAPI, streamCursor, observeSelection } = createEditor(mount);
     let subscription: { dispose: () => void } | undefined;
+    let selectionSubscription: { dispose: () => void } | undefined;
     let applyingRemote = false;
     let previewing = false;
     let savedContent = initialContent;
     try {
       if (initialContent.kind === 'DOCUMENT') univerAPI.createDocument(structuredClone(initialContent.snapshot));
       else univerAPI.createWorkbook(structuredClone(initialContent.snapshot));
+      selectionSubscription = observeSelection?.((selection) => {
+        if (!applyingRemote && !previewing && !currentReadOnly()) selected(selection);
+      });
       permission.current = async (value) => {
         if (value && container.current?.contains(document.activeElement)) (document.activeElement as HTMLElement)?.blur();
         if (isDoc) await univerAPI.getActiveDocument()?.getPermission().setEditable(!value);
@@ -92,6 +99,7 @@ export default function UniverEditorCore({ initialContent, onReady, onDirty, onE
       const workbook = !isDoc ? univerAPI.getActiveWorkbook() : null;
       if (document) suspend(previewing ? structuredClone(savedContent) : { format: 'univer', kind: 'DOCUMENT', snapshot: structuredClone(document.save()) }, initialContent);
       if (workbook) suspend({ format: 'univer', kind: 'SPREADSHEET', snapshot: structuredClone(workbook.save()) }, initialContent);
+      selectionSubscription?.dispose();
       streamCursor?.(null);
       subscription?.dispose(); ready(null); mount.remove();
       permission.current = null;

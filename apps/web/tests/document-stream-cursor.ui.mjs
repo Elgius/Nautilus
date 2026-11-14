@@ -22,7 +22,7 @@ mock.module('@univerjs/presets', () => ({ LocaleType: { EN_US: 'en-US' }, create
   univer: { __getInjector: () => ({ get: () => ({ getRenderUnitById: () => render }) }) },
 }) }));
 mock.module('@univerjs/preset-docs-core', () => ({
-  Documents, DocSkeletonManagerService: {}, IRenderManagerService: {}, UniverDocsCorePreset: () => ({}),
+  Documents, DocSelectionManagerService: {}, DocSkeletonManagerService: {}, IRenderManagerService: {}, UniverDocsCorePreset: () => ({}),
   getTextRangeFromCharIndex: () => ({ getAbsolutePosition: () => position, dispose() {} }),
 }));
 mock.module('../components/room/univer-editor-core', () => ({ default: () => null }));
