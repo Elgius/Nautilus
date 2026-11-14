@@ -85,6 +85,30 @@ test('native table calls reach the versioned backend and capability discovery do
   expect(JSON.stringify(model.doGenerateCalls[2].prompt)).toContain('Read this document')
 })
 
+test('agents can delete a native table only with current document read evidence', async () => {
+  const h = harness()
+  const deletion = { documentId: 'doc-1', expectedVersionId: 'v1', changeSummary: 'Remove requested table', edits: [{ type: 'deleteTable', tableId: 'table-1' }] }
+  const model = new MockLanguageModelV4({ doGenerate: [
+    call('getDocumentCapabilities', { documentId: 'doc-1' }, 'capabilities'),
+    call('applyDocumentEdits', deletion, 'before-read'),
+    call('readDocument', { documentId: 'doc-1' }, 'read'),
+    call('applyDocumentEdits', { ...deletion, expectedVersionId: 'stale' }, 'stale-version'),
+    call('applyDocumentEdits', deletion, 'delete-table'), done,
+  ] })
+  await createAgentInterface(profile, model, createOfficeSkills(h.backend, new AbortController().signal)).generate({ prompt: 'Remove the table you just made.' })
+  expect(h.edits).toEqual([['doc-1', 'v1', 'DOCUMENT', deletion.edits, deletion.changeSummary]])
+  expect(JSON.stringify(model.doGenerateCalls[2].prompt)).toContain('Read this document')
+  expect(model.doGenerateCalls[0].prompt[0].content).toContain('To remove a whole table use deleteTable')
+})
+
+test('agent deleteTable schema accepts a stable ID and rejects malformed or expanded deletion scope', () => {
+  expect(documentEdits.safeParse([{ type: 'deleteTable', tableId: 'table-1' }]).success).toBe(true)
+  for (const edit of [
+    { type: 'deleteTable' }, { type: 'deleteTable', tableId: '' }, { type: 'deleteTable', tableId: 'x'.repeat(201) },
+    { type: 'deleteTable', tableId: 'table-1', start: 0, end: 100 },
+  ]) expect(documentEdits.safeParse([edit]).success).toBe(false)
+})
+
 test('an unchanged rejected edit is blocked after rereading but a corrected edit may execute', async () => {
   const h = harness()
   let attempts = 0
