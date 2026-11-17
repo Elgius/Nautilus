@@ -1,12 +1,13 @@
 "use client";
 
 import { ChoiceMenu } from "@/components/ui/choice-menu";
-import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { ArrowUp, Brain, FileText, LockKeyhole, Plus, X } from "lucide-react";
+import { RoomChatEditor, type RoomChatEditorHandle } from "./room-chat-editor";
 import { RoomAgentAvatar } from "./room-agent-avatar";
 import { Button } from "@/components/ui/button";
 import { Attachment, AttachmentAction, AttachmentContent, AttachmentDescription, AttachmentMedia, AttachmentTitle } from "@/components/ui/attachment";
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
+import { InputGroup, InputGroupAddon, InputGroupButton } from "@/components/ui/input-group";
 import { agentMention, selectAgentMention } from "@/lib/agent-mention";
 import { defaultRoomSuggestions } from "./use-room-suggestions";
 import { withDocumentSelection, type DocumentSelection } from '@/lib/document-selection';
@@ -38,7 +39,8 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
   const [dismissed, setDismissed] = useState(false);
   const [reasoning, setReasoning] = useState("Medium");
   const [mode, setMode] = useState<AgentRunMode>('write');
-  const textarea = useRef<HTMLTextAreaElement>(null);
+  const editor = useRef<RoomChatEditorHandle>(null);
+  useEffect(() => { editor.current?.focus(); }, [selected]);
   const fileInput = useRef<HTMLInputElement>(null);
   // Original Files stay in memory, separate from room documents and message payloads.
   const [attachments, setAttachments] = useState<{ id: string; file: File }[]>([]);
@@ -51,7 +53,7 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
   function select(agent: RoomAgentOption) {
     const result = selectAgentMention(draft, agent.name);
     setDraft(result.roomDraft); setInstruction(result.instruction); setSelected(agent); setDismissed(false);
-    textarea.current?.focus();
+    editor.current?.focus();
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -76,8 +78,8 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
       setDismissed(false); loadAgents();
     } else if (draft.trim() && sendMessage(text)) { setDraft(""); if (sentSelection) onClearSelection?.(sentSelection); }
   }
-  function keyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.nativeEvent.isComposing) return;
+  function keyDown(event: KeyboardEvent, inList: boolean) {
+    if (event.isComposing) return;
     if (pickerOpen && ["ArrowDown", "ArrowUp", "Escape", "Enter", "Tab"].includes(event.key)) {
       if (event.key === 'Escape') { event.preventDefault(); setDismissed(true); return; }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -86,27 +88,31 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
       if (matches.length && !agentsLoading && !event.shiftKey) { event.preventDefault(); select(matches[activeIndex]); return; }
       if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); return; }
     }
-    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
+    if (event.key === 'Enter' && !event.shiftKey && !inList) {
+      event.preventDefault();
+      (event.target as HTMLElement).closest('form')?.requestSubmit();
+    }
   }
+
   return <form onSubmit={submit} className="room-prompt-form">
     <div role="group" aria-label="Suggested prompts" className="room-chat-suggestions scroll-fade-x">
       {suggestions.map((suggestion) => <Button key={suggestion} type="button" variant="outline" size="sm" className="shrink-0" onClick={() => {
         // UI preview only: suggestions edit the current draft without sending or typing events.
         if (selected) setInstruction(suggestion); else setDraft(suggestion);
-        setDismissed(false); textarea.current?.focus();
+        setDismissed(false); editor.current?.focus();
       }}>{suggestion}</Button>)}
     </div>
     <input ref={fileInput} type="file" multiple hidden aria-label="Choose local attachments" onChange={(event) => {
       const files = Array.from(event.currentTarget.files ?? []).map((file) => ({ id: crypto.randomUUID(), file }));
       setAttachments((previous) => [...previous, ...files]);
       event.currentTarget.value = "";
-      textarea.current?.focus();
+      editor.current?.focus();
     }} />
     {pickerOpen && <div id={listId} role="listbox" aria-label="Choose an agent" className="room-agent-options">
-      {agentsLoading ? <p role="status">Loading room agents…</p> : matches.length ? matches.map((agent, index) =>
+      {agentsLoading ? <p role="status">Loading your agents…</p> : matches.length ? matches.map((agent, index) =>
         <button key={agent.id} id={`${listId}-${index}`} type="button" role="option" aria-selected={index === activeIndex} onMouseDown={(event) => event.preventDefault()} onClick={() => select(agent)}>
           <RoomAgentAvatar agent={agent} /><span className="room-agent-option-label"><strong>{agent.name}</strong><small>{agent.role}</small></span><LockKeyhole size={13} />
-        </button>) : <p role="status">{agents.length ? 'No matching agents. Edit the name after @.' : 'No agents are assigned to this room.'}</p>}
+        </button>) : <p role="status">{agents.length ? 'No matching agents. Edit the name after @.' : 'You haven’t created any agents in this organization.'}</p>}
       <p className="room-local-note">Instructions and replies are visible only to you.</p>
     </div>}
     <InputGroup className="room-composer">
@@ -127,18 +133,23 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
       </InputGroupAddon>}
       {selected && <InputGroupAddon align="block-start" className="room-private-target"><RoomAgentAvatar agent={selected} /><strong>@{selected.name}</strong><span><LockKeyhole size={12} /> Only you</span><Button type="button" size="icon-sm" variant="ghost" aria-label="Return to room chat" onClick={() => {
         // Never move private instruction text into the public room draft.
-        setSelected(null); onClearSelection?.(); textarea.current?.focus();
+        setSelected(null); onClearSelection?.(); editor.current?.focus();
       }}><X size={14} /></Button></InputGroupAddon>}
-      <InputGroupTextarea ref={textarea} aria-label={selected ? `Private instruction to ${selected.name}` : "Message to room"} placeholder={selected ? `Instruct ${selected.name} privately…` : 'Message the room, or type @ for your agent…'}
-        aria-describedby={attachments.length ? attachmentNoteId : undefined}
-        role="combobox" aria-autocomplete="list" aria-expanded={pickerOpen} aria-controls={pickerOpen ? listId : undefined} aria-activedescendant={pickerOpen && matches.length ? `${listId}-${activeIndex}` : undefined}
-        value={selected ? instruction : draft} onChange={(event) => {
-          if (selected) { setInstruction(event.target.value); return; }
-          const next = event.target.value;
+      <RoomChatEditor key={selected?.id ?? 'room'} ref={editor}
+        attributes={{
+          'aria-label': selected ? `Private instruction to ${selected.name}` : 'Message to room',
+          'aria-placeholder': selected ? `Instruct ${selected.name} privately…` : 'Message the room, or type @ for your agent…',
+          ...(attachments.length ? { 'aria-describedby': attachmentNoteId } : {}),
+          role: 'combobox', 'aria-autocomplete': 'list', 'aria-expanded': String(pickerOpen),
+          ...(pickerOpen ? { 'aria-controls': listId } : {}),
+          ...(pickerOpen && matches.length ? { 'aria-activedescendant': `${listId}-${activeIndex}` } : {}),
+        }}
+        value={selected ? instruction : draft} onChange={(next) => {
+          if (selected) { setInstruction(next); return; }
           setDraft(next); setActive(0); setDismissed(false);
           if (agentMention(next)) { if (!mention) loadAgents(); }
           else sendTyping();
-        }} rows={3} maxLength={20000} onKeyDown={keyDown} />
+        }} onKeyDown={keyDown} />
       <InputGroupAddon align="block-end" className="room-composer-footer flex-wrap">
         {selected && <div role="group" aria-label="Agent request mode" className="flex shrink-0">
           <Button type="button" size="xs" variant={mode === 'read' ? 'secondary' : 'ghost'} aria-pressed={mode === 'read'} disabled={preparing} onClick={() => setMode('read')}>Ask</Button>
@@ -150,7 +161,7 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
       </InputGroupAddon>
     </InputGroup>
     {submitError && <p role="alert" className="room-local-note">{submitError}</p>}
-    <p className="room-local-note">Enter to send · Shift + Enter for a new line · Reasoning is a UI preview</p>
+    <p className="room-local-note">Enter to send or continue a list · Enter on an empty item to end the list · Shift + Enter for a new line · Start lists with - / * / 1. / 1) and a space · Reasoning is a UI preview</p>
     {attachments.length > 0 && <p id={attachmentNoteId} role="status" className="room-local-note">Files stay on this device. Remove attachments to send a text message.</p>}
     <p className="room-local-note">{selected ? mode === 'read' ? 'Ask reads saved documents and answers privately. It cannot make changes.' : 'Work can update shared documents. Instructions and replies are private.' : 'Room messages are shared with members. Use @ for private agent instructions.'}</p>
   </form>;

@@ -2,13 +2,14 @@ import { isStepCount, ToolLoopAgent, type LanguageModel, type ToolSet } from 'ai
 import type { AgentSkill } from './skills'
 import { assertSafeAgentProfile } from '../agent-policy'
 import { agentCallLogging } from '../agent-call-logging'
+import type { AgentOperationIssue } from '../../../../shared/agent-errors'
 export { createOfficeSkills, type AgentSkill, type SkillBackend } from './skills'
 export { createRoomSkillBackend } from './room-skills'
 
 export type AgentProfile = { id: string; name: string; role: string; rules: string[] }
 
 /** One runtime for agent/model communication and dispatch to registered skills. */
-export function createAgentInterface(profile: AgentProfile, model: LanguageModel, skills: AgentSkill[] = [], options: { toolCallConcurrency?: number; steps?: number; timeout?: number; loggingContext?: Record<string, string> } = {}) {
+export function createAgentInterface(profile: AgentProfile, model: LanguageModel, skills: AgentSkill[] = [], options: { toolCallConcurrency?: number; steps?: number; timeout?: number; externalDeadline?: boolean; loggingContext?: Record<string, string>; onIssue?: (issue: AgentOperationIssue) => void } = {}) {
   assertSafeAgentProfile(profile)
   const tools: ToolSet = {}
   for (const skill of skills) for (const [name, definition] of Object.entries(skill.tools)) {
@@ -27,7 +28,8 @@ export function createAgentInterface(profile: AgentProfile, model: LanguageModel
       ...skills.map((skill) => `Skill ${skill.id}:\n${skill.instructions}`),
     ].join('\n'),
     toolCallConcurrency: options.toolCallConcurrency ?? 1,
-    stopWhen: isStepCount(options.steps ?? 8), maxOutputTokens: 4096, timeout: options.timeout ?? 60_000, maxRetries: 1,
-    ...agentCallLogging({ ...options.loggingContext, kind: options.loggingContext?.kind ?? 'agent', agentId: profile.id, agentName: profile.name }),
+    stopWhen: isStepCount(options.steps ?? 8), maxOutputTokens: 4096,
+    ...(options.externalDeadline ? {} : { timeout: options.timeout ?? 60_000 }), maxRetries: 1,
+    ...agentCallLogging({ ...options.loggingContext, kind: options.loggingContext?.kind ?? 'agent', agentId: profile.id, agentName: profile.name }, options.onIssue),
   })
 }

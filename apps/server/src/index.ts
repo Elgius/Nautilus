@@ -1,3 +1,4 @@
+import { personalAgentScope } from './personal-agents'
 import { agentActivity } from './agent-activity'
 import { runScheduler } from './scheduler'
 export { KnowledgeWorker } from './knowledge/worker'
@@ -145,7 +146,7 @@ app.route(avatarPreviewPath, avatarGeneration)
 
 app.get(agentPath, authenticated, organizationMember, async (c) => {
   const agents = await c.get('db').agent.findMany({
-    where: { organizationId: c.get('organizationId') },
+    where: personalAgentScope(c.get('organizationId'), c.get('session').user.id),
     select: agentSelect,
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   })
@@ -158,13 +159,13 @@ app.post(agentPath, authenticated, organizationMember, async (c) => {
   })
   const data = agentProfileData(parseAgentProfile(input))
   const agent = await c.get('db').agent.create({
-    data: { ...data, organizationId: c.get('organizationId') }, select: agentSelect,
+    data: { ...data, ...personalAgentScope(c.get('organizationId'), c.get('session').user.id) }, select: agentSelect,
   })
   return c.json({ agent }, 201)
 })
 
 app.patch(`${agentPath}/:agentId`, authenticated, organizationMember, async (c) => {
-  const where = { id: c.req.param('agentId'), organizationId: c.get('organizationId') }
+  const where = { id: c.req.param('agentId'), ...personalAgentScope(c.get('organizationId'), c.get('session').user.id) }
   const input: unknown = await c.req.json().catch(() => {
     throw new HTTPException(400, { message: 'Enter a valid agent profile.' })
   })

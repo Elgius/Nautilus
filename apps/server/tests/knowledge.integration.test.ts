@@ -50,7 +50,7 @@ test.skipIf(!connection)('knowledge database: tenant isolation, citations, six-h
     await expect(knowledgeService(db, { organizationId: otherOrg, userId: owner }).base('PERSONAL')).rejects.toThrow('Organisation not found')
     await expect(peer.tag({ scope: 'ORGANIZATION', roomId: room, documentId })).rejects.toThrow('approve sharing')
     // A custom interval configured before the first cron must not delay a new tag.
-    const assigned = await client.agent.create({ data: { organizationId: org, name: 'Atlas', nameKey: 'atlas', role: 'Research' } })
+    const assigned = await client.agent.create({ data: { organizationId: org, createdByUserId: owner, name: 'Atlas', nameKey: 'atlas', role: 'Research' } })
     await client.roomAgent.create({ data: { organizationId: org, roomId: room, agentId: assigned.id, addedByUserId: owner } })
     const initialSchedule = await own.setAgentInterval('PERSONAL', assigned.id, 24)
     expect((await own.base('PERSONAL')).lastCheckedAt).toBeNull()
@@ -142,7 +142,7 @@ test.skipIf(!connection)('knowledge database: tenant isolation, citations, six-h
     expect((await client.knowledgeRun.findUniqueOrThrow({ where: { id: edited.id } })).status).toBe('cancelled')
     await expect(own.history('ORGANIZATION', shared.id)).rejects.toThrow('unavailable')
 
-    const idle = await client.agent.create({ data: { organizationId: org, name: 'Fin', nameKey: 'fin', role: 'Research' } })
+    const idle = await client.agent.create({ data: { organizationId: org, createdByUserId: owner, name: 'Fin', nameKey: 'fin', role: 'Research' } })
     expect((await own.list('PERSONAL')).agents.map(a => a.id).sort()).toEqual([assigned.id, idle.id].sort())
     await expect(peer.controlAgent('ORGANIZATION', assigned.id, 'pause')).rejects.toThrow('admin')
     expect(await own.controlAgent('PERSONAL', idle.id, 'refresh')).toEqual({ queued: 0 })

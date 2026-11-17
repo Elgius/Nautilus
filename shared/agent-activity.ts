@@ -1,3 +1,4 @@
+import type { AgentErrorCode, AgentOperationIssue } from './agent-errors';
 import type { AgentWorkActivity } from './room-chat';
 
 export type ActivityStatus = 'queued' | 'running' | 'complete' | 'failed' | 'cancelled';
@@ -13,6 +14,7 @@ export type ActivityPage = {
 };
 export type ActivityDetail = {
   instruction: string; reply: string; error: string | null;
+  errorCode?: AgentErrorCode | null; issues?: AgentOperationIssue[];
   documents: { documentId: string; versionId: string; versionNumber: number; title: string; available: boolean }[];
   tasks: { taskId: string; revision: number; title: string; available: boolean }[];
 };

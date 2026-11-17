@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests",
+    "test:agent-errors": "bun tests/agent-errors.ui.tsx",
     "test:activity": "bun tests/agent-activity.ui.tsx",
     "test:knowledge": "bun tests/knowledge.ui.tsx",
     "test:document-selection": "bun tests/document-selection.browser.mjs",
@@ -29,6 +30,10 @@
   "dependencies": {
     "@base-ui/react": "^1.9.0",
     "@shadcn/react": "^0.3.1",
+    "@tiptap/core": "^3.34.0",
+    "@tiptap/markdown": "^3.34.0",
+    "@tiptap/pm": "^3.34.0",
+    "@tiptap/starter-kit": "^3.34.0",
     "@univerjs/preset-docs-core": "1.2.0",
     "@univerjs/preset-sheets-conditional-formatting": "1.2.0",
     "@univerjs/preset-sheets-core": "1.2.0",

@@ -1,3 +1,4 @@
+import { AgentRunError } from '../src/skill-operation-error'
 import { expect, test } from 'bun:test'
 import { PrivateRoomAgents, type PrivateAgentMessage } from '../src/private-room-agents'
 import type { ChatIdentity } from '../src/room-chat-service'
@@ -7,7 +8,7 @@ import { scheduleRoomAlarm } from '../src/room-alarm'
 const alice: ChatIdentity = { organizationId: 'org', roomId: 'room', userId: 'alice', sessionId: 'alice-session' }
 const bob = { ...alice, userId: 'bob', sessionId: 'bob-session' }
 const profile = { id: 'scout', name: 'Scout', role: 'Research', rules: ['Cite sources'] }
-function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<void>; reply?: string; preview?: string; archive?: (identity: ChatIdentity, job: PrivateAgentJob) => Promise<void> } = {}) {
+function harness(options: { denyAgent?: boolean; fail?: boolean | Error; commitBeforeFailure?: boolean; gate?: Promise<void>; reply?: string; preview?: string; archive?: (identity: ChatIdentity, job: PrivateAgentJob) => Promise<void> } = {}) {
   const values = new Map<string, unknown>()
   let transactions: Promise<unknown> = Promise.resolve()
   const alarms: number[] = []
@@ -55,7 +56,8 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
       if (calls.length === 1) await options.gate
       signal.throwIfAborted()
       if (options.preview) await run.preview?.('write', options.preview)
-      if (options.fail) throw new Error('PROVIDER_SECRET_AND_PROMPT')
+      if (options.commitBeforeFailure && calls.length === 1) await run.committed({ documentId: 'doc', versionId: 'v2', versionNumber: 2 })
+      if (options.fail) throw options.fail instanceof Error ? options.fail : new Error('PROVIDER_SECRET_AND_PROMPT')
       yield options.reply ?? 'Private response'
     },
     send: async (identity, event) => { if (allowed) events.push({ userId: identity.userId, scheduledDeliveryId: identity.scheduledDeliveryId, event: structuredClone(event) }) },
@@ -117,7 +119,7 @@ test('agent conversation context contains only this user’s completed turns wit
 
 test('unassigned agents and invalid instructions never reach the model or private storage', async () => {
   const h = harness({ denyAgent: true })
-  await expect(h.invoke()).rejects.toThrow('Invalid agent selection')
+  await expect(h.invoke()).rejects.toMatchObject({ code: 'AGENT_ACCESS_DENIED' })
   expect(h.calls).toHaveLength(0); expect(h.values.size).toBe(0)
   await expect(h.service.invoke(alice, { requestId: 'invalid', agentId: 'scout', instruction: 'secret' })).rejects.toThrow('Invalid message ID')
   await expect(h.invoke(alice, ' '.repeat(10))).rejects.toThrow('Enter a message')
@@ -128,7 +130,8 @@ test('model failures are private, sanitized, persisted and safely retryable with
   await h.invoke(); await Promise.all(h.tasks)
   const [job] = await h.service.history(alice)
   expect(job.status).toBe('failed')
-  expect(job.error).toBe('The agent could not complete this response. Please retry.')
+  expect(job.errorCode).toBe('INTERNAL_ERROR')
+  expect(job.error).toBe('The request could not be completed. Try again.')
   expect(JSON.stringify(h.events)).not.toContain('PROVIDER_SECRET')
   expect(await h.service.history(bob)).toEqual([])
 })
@@ -176,7 +179,7 @@ test('queued cancellation is owner-scoped and does not start the cancelled model
   await h.service.cancel(alice, second)
   expect((await h.service.history(bob))[0].status).toBe('queued')
   await h.service.cancel(bob, second)
-  expect((await h.service.history(bob))[0]).toMatchObject({ status: 'failed', error: 'Cancelled before starting.' })
+  expect((await h.service.history(bob))[0]).toMatchObject({ status: 'failed', errorCode: 'RUN_CANCELLED' })
   gate.resolve(); await settle(h.tasks)
   expect(h.calls).toHaveLength(1)
 })
@@ -190,7 +193,7 @@ test('browser cancellation preserves a queued scheduled job’s delivery identit
   expect((await h.service.history(alice))[0].status).toBe('queued')
   await h.service.cancel(alice, id)
   expect(h.events.findLast(({ event }) => event.type === 'agent.update' && event.job.id === id)).toMatchObject({ userId: 'alice', scheduledDeliveryId: id,
-    event: { type: 'agent.update', job: { id, status: 'failed', error: 'Cancelled before starting.' } } })
+    event: { type: 'agent.update', job: { id, status: 'failed', errorCode: 'RUN_CANCELLED' } } })
   expect((await h.restart().history(alice))[0].status).toBe('failed')
   gate.resolve(); await settle(h.tasks)
   expect(h.calls).toHaveLength(1)
@@ -426,7 +429,7 @@ test('archive history imports only the requested owner and preserves scheduled p
   await h.service.invoke({ ...alice, sessionId: '', scheduledDeliveryId: id }, { requestId: id, agentId: profile.id, instruction: 'Scheduled' }, true)
   await h.service.cancel(alice, id)
   gate.resolve(); await settle(h.tasks)
-  expect(archived.findLast((entry) => entry.job.id === id)).toMatchObject({ userId: 'alice', job: { source: 'scheduled', status: 'failed', error: 'Cancelled before starting.' } })
+  expect(archived.findLast((entry) => entry.job.id === id)).toMatchObject({ userId: 'alice', job: { source: 'scheduled', status: 'failed', errorCode: 'RUN_CANCELLED' } })
   archived.length = 0
   expect(await h.service.archiveHistory(alice)).toBe(true)
   expect(archived).toHaveLength(1)
@@ -491,4 +494,23 @@ test('concurrent history imports schedule and finish entries beyond the archive 
   h.restart().wake(); await settle(h.tasks)
   expect(archived.size).toBe(100)
   expect([...h.values.keys()].filter((key) => key.startsWith('activity-archive:'))).toHaveLength(0)
+})
+
+
+test('typed timeouts preserve committed changes and expose a fixed public message', async () => {
+  const h = harness({ fail: new AgentRunError('RUN_TIMEOUT'), commitBeforeFailure: true })
+  await h.invoke(); await Promise.all(h.tasks)
+  const job = (await h.service.history(alice))[0]
+  expect(job.errorCode).toBe('RUN_TIMEOUT')
+  expect(job.error).toBe('The agent ran out of time. 1 edit batch was saved. Continue to finish the remaining sections.')
+  expect(job.commits).toEqual([{ documentId: 'doc', versionId: 'v2', versionNumber: 2 }])
+})
+
+test('retry includes the original instruction and saved receipts from a failed run', async () => {
+  const h = harness({ fail: new AgentRunError('RUN_TIMEOUT'), commitBeforeFailure: true })
+  await h.invoke(alice, 'Create a worksheet'); await Promise.all(h.tasks)
+  await h.invoke(alice, 'Continue'); await Promise.all(h.tasks)
+  expect(h.calls[1][0]).toEqual({ role: 'user', content: 'Create a worksheet' })
+  expect(h.calls[1][1].content).toContain('v2')
+  expect(h.calls[1].at(-1)).toEqual({ role: 'user', content: 'Continue' })
 })

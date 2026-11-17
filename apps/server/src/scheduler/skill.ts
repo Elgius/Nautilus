@@ -5,6 +5,7 @@ import type { Database } from '../db'
 import type { ChatIdentity } from '../room-chat-service'
 import type { AgentSkill } from '../agent_interface/skills'
 import { eventInput, schedulerService, scheduleTime } from './service'
+import { SkillOperationError } from '../skill-operation-error'
 
 export function createSchedulerSkill(identity: ChatIdentity, agentId: string, withDatabase: <T>(action: (db: Database) => Promise<T>) => Promise<T>, signal: AbortSignal): AgentSkill {
   const run = async <T>(action: (service: ReturnType<typeof schedulerService>) => Promise<T>, toolSignal?: AbortSignal) => {
@@ -12,12 +13,15 @@ export function createSchedulerSkill(identity: ChatIdentity, agentId: string, wi
     active.throwIfAborted()
     try {
       return await withDatabase(async (db) => {
-        if (!await db.roomAgent.findFirst({ where: { organizationId: identity.organizationId, roomId: identity.roomId, agentId } })) throw new HTTPException(403, { message: 'Agent assignment expired.' })
+        if (!await db.roomAgent.findFirst({ where: { organizationId: identity.organizationId, roomId: identity.roomId, agentId, agent: { createdByUserId: identity.userId } } })) throw new SkillOperationError('AGENT_ACCESS_DENIED', 'authorization', 'Agent access expired.', false, 403)
         active.throwIfAborted()
         return action(schedulerService(db, identity))
       })
     } catch (error) {
-      throw new Error(error instanceof HTTPException ? error.message : 'The scheduler could not complete this operation.')
+      if (error instanceof SkillOperationError) throw error
+      throw new SkillOperationError(error instanceof HTTPException ? error.status === 403 ? 'ACCESS_DENIED' : 'INVALID_EDIT' : 'OPERATION_FAILED',
+        error instanceof HTTPException && error.status === 403 ? 'authorization' : 'validation',
+        error instanceof HTTPException ? error.message : 'The scheduler could not complete this operation.')
     }
   }
   return {

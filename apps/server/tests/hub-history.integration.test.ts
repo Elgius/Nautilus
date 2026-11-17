@@ -28,7 +28,7 @@ test.skipIf(!process.env.TEST_HUB_HISTORY_DATABASE_URL)('hub turns survive reope
     await db.user.createMany({ data: users.map((id) => ({ id, name: 'Hub test', email: id + '@example.invalid' })) })
     await db.organization.createMany({ data: orgs.map((id) => ({ id, name: 'Hub test', slug: id })) })
     await db.member.createMany({ data: orgs.flatMap((organizationId) => users.map((userId) => ({ id: crypto.randomUUID(), organizationId, userId }))) })
-    await db.agent.create({ data: { id: agentId, organizationId: orgs[0], name: 'Hub test', nameKey: 'hub test', role: 'Test' } })
+    await db.agent.create({ data: { id: agentId, organizationId: orgs[0], createdByUserId: users[0], name: 'Hub test', nameKey: 'hub test', role: 'Test' } })
     const turn = { id: crypto.randomUUID(), conversationId: crypto.randomUUID(), agentId, userId: users[0], createdAt: Date.now(), prompt: 'Question', reply: 'Answer' }
     const write = { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-User': users[0] }, body: JSON.stringify(turn) }
     for (let i = 0; i < 2; i++) expect((await client(users[0], orgs[0]).request('/history', write)).status).toBe(200)

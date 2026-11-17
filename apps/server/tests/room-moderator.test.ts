@@ -242,3 +242,23 @@ test('durable replay returns the original commit without a second mutation or du
   expect(h.writes).toHaveLength(0)
   expect(h.commits).toEqual([{ documentId: 'existing', versionId: 'first', versionNumber: 1 }])
 })
+
+test('a coherent multi-operation batch receives one review and creates one committed version', async () => {
+  let reviews = 0
+  const h = harness(undefined, async (candidate) => { reviews++; expect(candidate.edits).toHaveLength(3) })
+  await execute(h.skills, 'readDocument', { documentId: 'doc' })
+  await execute(h.skills, 'applyDocumentEdits', { ...edit, edits: [
+    { type: 'insertText', index: 0, text: 'Checkpoint Tutorial\r\n' },
+    { type: 'insertText', index: 21, text: 'Section 1\r\n' },
+    { type: 'insertText', index: 32, text: 'Question 1\r\nQuestion 2\r\nQuestion 3\r\n' },
+  ] })
+  expect(reviews).toBe(1)
+  expect(h.writes).toHaveLength(1)
+  expect(h.commits).toHaveLength(1)
+})
+
+test('specialist listing excludes the moderator itself', async () => {
+  const h = harness()
+  const choices = await execute(h.skills, 'listSpecialists', {}) as { id: string }[]
+  expect(choices.some(({ id }) => id === moderator.id)).toBe(false)
+})

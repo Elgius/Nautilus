@@ -76,6 +76,13 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
       });
     };
     const mergeAgentJobs = (incoming: PrivateAgentJob[]) => {
+      // History can include personal agents absent from the initial room roster.
+      // Load their current appearance even when the picker has never been opened.
+      if (incoming.length && !agentsRequested.current) {
+        agentsRequested.current = true;
+        setAgentsLoading(true);
+        send({ type: 'agent.list', requestId: 'agent.list' });
+      }
       for (const job of incoming) agentOutbox.current.delete(job.id);
       setAgentJobs((previous) => {
         const jobs = new Map(previous.map((job) => [job.id, job]));

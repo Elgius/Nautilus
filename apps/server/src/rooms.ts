@@ -1,3 +1,4 @@
+import { personalAgentScope } from './personal-agents'
 import { plannerRoutes } from './planner/routes'
 import { schedulerRoutes } from './scheduler/routes'
 import { Hono } from 'hono'
@@ -32,9 +33,9 @@ const roomInclude = (userId: string) => ({
 async function body(request: { json: () => Promise<unknown> }) {
   return object(await request.json().catch(() => { throw new HTTPException(400, { message: 'Provide valid JSON.' }) }))
 }
-async function checkAgents(db: Database, organizationId: string, agentIds: string[]) {
-  if (await db.agent.count({ where: { organizationId, id: { in: agentIds } } }) !== agentIds.length) {
-    throw new HTTPException(400, { message: 'Choose agents from this organisation.' })
+async function checkAgents(db: Database, organizationId: string, userId: string, agentIds: string[]) {
+  if (await db.agent.count({ where: { ...personalAgentScope(organizationId, userId), id: { in: agentIds } } }) !== agentIds.length) {
+    throw new HTTPException(400, { message: 'Choose agents you created in this organisation.' })
   }
 }
 
@@ -62,14 +63,14 @@ rooms.get('/', async (c) => {
 
 rooms.get('/planner', async (c) => {
   const rooms = await c.get('db').room.findMany({ where: { organizationId: c.get('organizationId'), members: { some: { member: { userId: c.get('session').user.id } } } },
-    select: { id: true, name: true, agents: { select: { agent: { select: { id: true, name: true } } } } }, orderBy: { name: 'asc' } })
+    select: { id: true, name: true, agents: { where: { agent: { createdByUserId: c.get('session').user.id } }, select: { agent: { select: { id: true, name: true } } } } }, orderBy: { name: 'asc' } })
   return c.json({ rooms })
 })
 
 rooms.post('/', async (c) => {
   const { agentIds, ...data } = parseRoom(await body(c.req))
   const organizationId = c.get('organizationId'), userId = c.get('session').user.id, db = c.get('db')
-  await checkAgents(db, organizationId, agentIds)
+  await checkAgents(db, organizationId, c.get('session').user.id, agentIds)
   const member = await db.member.findUniqueOrThrow({ where: { organizationId_userId: { organizationId, userId } } })
   const room = await db.room.create({ data: { ...data, organizationId, createdByUserId: userId,
     members: { create: { organizationMemberId: member.id, role: 'OWNER' } },
@@ -146,10 +147,10 @@ rooms.get('/:roomId/work', async (c) => {
 rooms.patch('/:roomId', async (c) => {
   const { agentIds, ...data } = parseRoom(await body(c.req))
   const organizationId = c.get('organizationId'), roomId = c.req.param('roomId'), db = c.get('db')
-  await checkAgents(db, organizationId, agentIds)
+  await checkAgents(db, organizationId, c.get('session').user.id, agentIds)
   const room = await db.$transaction(async (tx) => {
     await guardRoomWrite(tx, { organizationId, roomId })
-    await tx.roomAgent.deleteMany({ where: { organizationId, roomId } })
+    await tx.roomAgent.deleteMany({ where: { organizationId, roomId, agent: { createdByUserId: c.get('session').user.id } } })
     return tx.room.update({ where: { id: roomId, organizationId }, data: { ...data, lastActivityAt: new Date(),
       agents: { create: agentIds.map((agentId, position) => ({ agentId, addedByUserId: c.get('session').user.id, position })) },
     }, include: roomInclude(c.get('session').user.id), omit: privateRoomFields })

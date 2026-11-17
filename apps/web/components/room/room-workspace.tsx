@@ -12,6 +12,8 @@ import { Message, MessageContent, MessageHeader } from "@/components/ui/message"
 import { MessageScrollerProvider, MessageScroller, MessageScrollerViewport, MessageScrollerContent, MessageScrollerItem, MessageScrollerButton } from "@/components/ui/message-scroller";
 import { RoomConnectionStatus } from "./room-connection-status";
 import { RoomChatComposer } from "./room-chat-composer";
+import { RoomMessageText } from "./room-message-text";
+import { useRoomMessageTime } from "./use-room-message-time";
 import { PrivateAgentConversation } from "./private-agent-conversation";
 import { useWorkspaceSession } from "@/components/auth/workspace-session";
 import { initials } from "@/lib/auth-types";
@@ -19,7 +21,6 @@ import { errorMessage } from "@/lib/auth-client";
 import { roomRequest, type RoomDetail } from "@/lib/room-client";
 import { useRoomChat } from "./use-room-chat";
 import { useRoomSuggestions } from "./use-room-suggestions";
-import { KnowledgeSourceTag } from "@/components/knowledge/source-tag";
 import { RoomDocuments } from "./room-documents";
 import { useRoomLayout } from "./use-room-layout";
 import { clampChatWidth } from "@/lib/room-layout";
@@ -27,6 +28,7 @@ import type { DocumentSelection } from '@/lib/document-selection';
 import { initialRoomFileState, roomFileReducer } from "@/lib/room-file-state";
 
 export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
+  const messageTime = useRoomMessageTime();
   const { session } = useWorkspaceSession();
   const organizationId = session.activeOrganization!.id;
   const { room } = initialData;
@@ -100,13 +102,13 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
           {!messages.length && !pending.length && <div className="room-conversation-intro"><div className="room-intro-icon"><MessageSquare size={20} /></div><h3>A space to think together</h3><p>Share an idea or work through a document with the people in this room.</p></div>}
           {messages.map((message) => {
             const own = message.authorUserId === session.user.id, author = message.authorUser?.name || 'Unknown author';
+            const timestamp = messageTime(message.createdAt);
             return <MessageScrollerItem key={message.id} messageId={message.id} scrollAnchor={Boolean(message.authorUserId)}>
-              <Message align={own ? 'end' : 'start'} className={`room-message ${own ? 'is-own' : ''}`} aria-label={`${author}, ${new Date(message.createdAt).toLocaleString()}`}>
+              <Message align={own ? 'end' : 'start'} className={`room-message ${own ? 'is-own' : ''}`} aria-label={`${author}, ${timestamp.label}`}>
               <div id={`message-${message.id}`} className="room-message-avatar">{initials(author)}</div>
-              <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>{own ? 'You' : author}</strong><time dateTime={message.createdAt}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></MessageHeader>
-                <Bubble variant={own ? 'muted' : 'ghost'} align={own ? 'end' : 'start'}><BubbleContent className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</BubbleContent></Bubble>
+              <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>{own ? 'You' : author}</strong><time dateTime={message.createdAt}>{timestamp.time}</time></MessageHeader>
+                <Bubble variant={own ? 'muted' : 'ghost'} align={own ? 'end' : 'start'}><BubbleContent><RoomMessageText text={message.text} /></BubbleContent></Bubble>
                 {own && message.id === latestOutgoingId && <span className="room-message-meta">{Object.entries(reads).filter(([id, readAt]) => id !== session.user.id && readAt >= message.createdAt).length ? 'Seen' : 'Sent'}</span>}
-                {joined && <KnowledgeSourceTag organizationId={organizationId} roomId={room.id} messageId={message.id} />}
                 {message.documents.map((attachment) => <Button variant="ghost" size="sm" key={attachment.documentId} className="room-document-reference" onClick={() => { dispatchFiles({ type: 'select', id: attachment.documentId }); setMobilePanel('document'); }}><FileText size={15} />{attachment.document.title}</Button>)}
               </MessageContent>
             </Message></MessageScrollerItem>;
@@ -114,11 +116,11 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
           {pending.map((message) => <MessageScrollerItem key={message.id} messageId={message.id}>
             <Message align="end" className="room-message is-own" data-delivery={message.status} aria-busy={message.status === 'pending'}>
               <div className="room-message-avatar">{initials(session.user.name)}</div>
-              <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>You</strong></MessageHeader><Bubble variant="muted" align="end"><BubbleContent className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.text}</BubbleContent></Bubble>
+              <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>You</strong></MessageHeader><Bubble variant="muted" align="end"><BubbleContent><RoomMessageText text={message.text} /></BubbleContent></Bubble>
               <p className="room-message-meta" role="status">{message.status === 'pending' ? 'Sending…' : 'Message failed'}{message.status === 'failed' && <Button variant="ghost" size="sm" disabled={!canSend} onClick={() => sendMessage(message.text, message.id)}>Retry</Button>}</p>
             </MessageContent></Message>
           </MessageScrollerItem>)}
-          <PrivateAgentConversation agents={room.agents.map(({ agent }) => agent)} jobs={agentJobs} canSend={canSend} busy={agentBusy} retry={invokeAgent} cancel={cancelAgent} />
+          <PrivateAgentConversation agents={[...agents, ...room.agents.map(({ agent }) => agent)]} jobs={agentJobs} canSend={canSend} busy={agentBusy} retry={invokeAgent} cancel={cancelAgent} />
         </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton />
