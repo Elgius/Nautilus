@@ -180,6 +180,7 @@ enum AgentStatus {
 }
 
 model Agent {
+  knowledgeSchedules KnowledgeAgentSchedule[]
   hubConversations HubConversation[]
   agentProgress AgentProgress[]
   scheduledDeliveries SchedulerDelivery[]
@@ -597,12 +598,26 @@ enum KnowledgeScope {
   ORGANIZATION
 }
 
+model KnowledgeAgentSchedule {
+  baseId        String
+  agentId       String
+  refreshHours  Int
+  nextRefreshAt DateTime @db.Timestamptz(3)
+  base          KnowledgeBase @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  agent         Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  @@id([baseId, agentId])
+  @@index([nextRefreshAt])
+  @@map("knowledgeAgentSchedule")
+}
+
 model KnowledgeBase {
+  agentSchedules KnowledgeAgentSchedule[]
   id String @id @default(uuid())
   organizationId String
   scope KnowledgeScope
   ownerUserId String?
   enabled Boolean @default(true)
+  pausedAgentIds String[] @default([])
   nextRefreshAt DateTime @default(now()) @db.Timestamptz(3)
   lastCheckedAt DateTime? @db.Timestamptz(3)
   createdAt DateTime @default(now())

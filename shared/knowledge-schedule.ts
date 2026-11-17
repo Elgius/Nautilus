@@ -1,0 +1,2 @@
+export const DEFAULT_KNOWLEDGE_HOURS = 6
+export const MAX_KNOWLEDGE_HOURS = 24

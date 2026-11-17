@@ -1,12 +1,12 @@
 "use client";
 
+import { ChoiceMenu } from "@/components/ui/choice-menu";
 import { useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { ArrowUp, Brain, FileText, LockKeyhole, Plus, X } from "lucide-react";
 import { RoomAgentAvatar } from "./room-agent-avatar";
 import { Button } from "@/components/ui/button";
 import { Attachment, AttachmentAction, AttachmentContent, AttachmentDescription, AttachmentMedia, AttachmentTitle } from "@/components/ui/attachment";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { agentMention, selectAgentMention } from "@/lib/agent-mention";
 import { defaultRoomSuggestions } from "./use-room-suggestions";
 import { withDocumentSelection, type DocumentSelection } from '@/lib/document-selection';
@@ -145,12 +145,7 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
           <Button type="button" size="xs" variant={mode === 'write' ? 'secondary' : 'ghost'} aria-pressed={mode === 'write'} disabled={preparing} onClick={() => setMode('write')}>Work</Button>
         </div>}
         <InputGroupButton variant="outline" size="icon-sm" className="rounded-full" aria-label="Attach files" title="Attach files · local preview only" onClick={() => fileInput.current?.click()}><Plus size={17} /></InputGroupButton>
-        <Select value={reasoning} onValueChange={(value) => { if (value) setReasoning(value); }}>
-          <SelectTrigger aria-label="Reasoning effort" title="Reasoning effort · UI preview only" className="room-reasoning-trigger"><Brain size={14} /><SelectValue /></SelectTrigger>
-          <SelectContent aria-label="Reasoning effort">
-            {reasoningLevels.map((level) => <SelectItem key={level} value={level}>{level}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <ChoiceMenu label="Reasoning effort" title="Reasoning effort · UI preview only" className="room-reasoning-trigger" icon={<Brain size={14} />} value={reasoning} onValueChange={setReasoning} options={reasoningLevels.map((value) => ({ value, label: value }))} />
         <InputGroupButton variant="default" size="icon-sm" className="ml-auto rounded-full" type="submit" disabled={preparing || !canSend || attachments.length > 0 || (selected ? agentBusy || !instruction.trim() : !draft.trim() || Boolean(mention))} aria-label={selected ? 'Send private instruction' : 'Send message'}><ArrowUp size={17} /></InputGroupButton>
       </InputGroupAddon>
     </InputGroup>

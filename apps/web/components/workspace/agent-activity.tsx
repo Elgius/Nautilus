@@ -1,5 +1,6 @@
 "use client";
 
+import { ChoiceMenu } from "@/components/ui/choice-menu";
 import { useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
@@ -102,9 +103,9 @@ export function AgentActivity({ organizationId, userId }: { organizationId: stri
   return <section className="full-panel agent-activity" aria-label="Personal agent activity">
     <div className="section-heading"><div><h2>Workspace timeline</h2><p>Your agent requests, results, and saved changes.</p></div><Badge variant="outline">Only your requests</Badge></div>
     <div className="agent-activity-filters">
-      <label>Agent<select aria-label="Filter by agent" value={agentId} onChange={(event) => setAgentId(event.target.value)}><option value="">All agents</option>{first?.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
-      <label>Room<select aria-label="Filter by room" value={roomId} onChange={(event) => setRoomId(event.target.value)}><option value="">All rooms</option>{first?.rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></label>
-      <label>Status<select aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+      <label>Agent<ChoiceMenu label="Filter by agent" value={agentId} onValueChange={setAgentId} options={[{ value: "", label: "All agents" }, ...(first?.agents.map(({ id, name }) => ({ value: id, label: name })) ?? [])]} /></label>
+      <label>Room<ChoiceMenu label="Filter by room" value={roomId} onValueChange={setRoomId} options={[{ value: "", label: "All rooms" }, ...(first?.rooms.map(({ id, name }) => ({ value: id, label: name })) ?? [])]} /></label>
+      <label>Status<ChoiceMenu label="Filter by status" value={status} onValueChange={setStatus} options={[{ value: "", label: "All statuses" }, ...Object.entries(statusLabels).map(([value, label]) => ({ value, label }))]} /></label>
       <label>From<input aria-label="Activity from date" type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
       <label>To<input aria-label="Activity to date" type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
       <Button variant="outline" size="sm" disabled={isValidating || syncingHistory} onClick={() => void mutate()}><RefreshCw size={14} />Refresh</Button>

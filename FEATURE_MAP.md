@@ -6,6 +6,7 @@ Nautilus organizes people, agents, documents, and tasks into rooms within an org
 
 | Feature | What users can do | Implementation |
 | --- | --- | --- |
+| Workspace dropdowns | Open action menus or choose a single value with the mouse or keyboard. Choice menus mark the current selection. | [Dropdown menu](apps/web/components/ui/dropdown-menu.tsx) · [Choice menu](apps/web/components/ui/choice-menu.tsx) |
 | Accounts and organizations | Sign in, verify email, reset a password, switch organizations, and invite members. | [Account screens](apps/web/components/auth) · [Authentication](apps/server/src/auth.ts) |
 | Workspace overview | View workspace totals and browse rooms from the overview; open Activity or Agents for their dedicated views. | [Workspace](apps/web/components/workspace/workspace.tsx) |
 | Rooms | Find, create, and star rooms, set a room goal, and assign agents. Organization membership grants room access. | [Workspace](apps/web/components/workspace/workspace.tsx) · [Room API](apps/server/src/rooms.ts) |
@@ -15,7 +16,7 @@ Nautilus organizes people, agents, documents, and tasks into rooms within an org
 | Agent Hub conversations | Start private chats with an agent and reopen completed exchanges on any device when signed in to the same account and organization. Browse chats by agent portrait, name, and latest reply, then open a conversation to load its transcript. Refreshing keeps the selected chat and draft. Switching accounts requires reloading the workspace, and retrying the same in-flight message avoids a second model call. Opening the hub imports previously saved browser chats. | [Agent Hub](apps/web/components/agents/agent-hub.tsx) · [Chat API](apps/server/src/agent-chat.ts) · [Postgres history](apps/server/src/hub-history.ts) |
 | Document library | Search saved documents by title or room name and open the owning room. | [Library view](apps/web/components/workspace/room-document-library.tsx) · [Library API](apps/server/src/document-library.ts) |
 | Kanban and Calendar | View the same room tasks by status or date. Tasks support assignments, due dates, and revision-checked edits. | [Planner UI](apps/web/components/workspace/planner.tsx) · [Task API](apps/server/src/planner/routes.ts) |
-| Knowledge | Tag saved documents or individual chat messages for personal or organization knowledge. Refresh findings and inspect their source history. | [Knowledge view](apps/web/components/knowledge/knowledge-base.tsx) · [Knowledge API and worker](apps/server/src/knowledge) |
+| Knowledge | Tag saved documents or individual chat messages for personal or organization knowledge. Browse tagged sources and their check status, open evidence and revision history, and open a workspace agent’s portrait to refresh tagged sources in its assigned rooms or pause, resume, or set its check interval for the selected bucket (1–24 whole hours, default 6). | [Knowledge view](apps/web/components/knowledge/knowledge-base.tsx) · [Knowledge API and worker](apps/server/src/knowledge) |
 
 ## Inside a room
 

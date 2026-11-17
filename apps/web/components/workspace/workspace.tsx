@@ -1,5 +1,6 @@
 "use client";
 
+import { ChoiceMenu } from "@/components/ui/choice-menu";
 import { useState, Suspense, type ReactNode, type FormEvent } from "react";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -43,7 +44,6 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -355,7 +355,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
               </span>
             </div>
           </header>
-          <main className={view === "Agents" ? "main-content agent-hub-main" : "main-content"}>
+          <main data-view={view} className={view === "Agents" ? "main-content agent-hub-main" : "main-content"}>
             {children}
             <ViewBoundary key={view}>
             <Suspense fallback={<ViewLoading />}>
@@ -363,7 +363,10 @@ export function Workspace({ children }: { children?: ReactNode }) {
             {waitingForData ? (!dataError && <ViewLoading />) : <>
             {view !== "Agents" && view !== "Documents" && view !== "Kanban" && view !== "Calendar" && (
               <div className="page-heading">
-                <h1>{view}{view === "Rooms" && <span className="ml-2 text-muted-foreground">{rooms.length}</span>}</h1>
+                {view === "Knowledge" ? <div>
+                  <h1>Knowledge</h1>
+                  <p>Findings from explicitly tagged documents and room messages.</p>
+                </div> : <h1>{view}{view === "Rooms" && <span className="ml-2 text-muted-foreground">{rooms.length}</span>}</h1>}
                 <Button
                   className="primary-action"
                   onClick={() => {
@@ -693,15 +696,8 @@ export function Workspace({ children }: { children?: ReactNode }) {
                   maxLength={600}
                 />
                 <label htmlFor="room-category">Team</label>
-                <Select name="category" defaultValue="General" disabled={creatingRoom}
-                  items={["General", "Marketing", "Research", "Engineering", "Operations"].map((value) => ({ value, label: value }))}>
-                  <SelectTrigger id="room-category" className="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {["General", "Marketing", "Research", "Engineering", "Operations"].map((category) => (
-                      <SelectItem key={category} value={category}>{category}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <ChoiceMenu name="category" defaultValue="General" disabled={creatingRoom}
+                  id="room-category" label="Team" className="w-full" options={["General", "Marketing", "Research", "Engineering", "Operations"].map((value) => ({ value, label: value }))} />
                 <label>Add agents</label>
                 {agentData.isLoading && <p role="status">Loading agents…</p>}
                 <div className="agent-choices">

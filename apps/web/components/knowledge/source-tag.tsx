@@ -1,5 +1,6 @@
 "use client";
 
+import { ChoiceMenu } from "@/components/ui/choice-menu";
 import { useState } from 'react';
 import { BookOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -27,9 +28,7 @@ export function KnowledgeSourceTag({ organizationId, roomId, documentId, message
         {documentId ? 'Allow the Knowledge agent to read this saved document and its future saved versions.' : 'Allow the Knowledge agent to read this message only. Other messages and linked documents are excluded.'}
       </DialogDescription></DialogHeader>
         <label className="grid gap-2 text-sm font-medium">Knowledge bucket
-          <select className="rounded-md border bg-background p-2" value={scope} onChange={(event) => setScope(event.target.value as KnowledgeScope)} disabled={busy}>
-            <option value="PERSONAL">Personal — only you</option><option value="ORGANIZATION">Organization — everyone in this organization</option>
-          </select>
+          <ChoiceMenu className="rounded-md border bg-background p-2" value={scope} onValueChange={setScope} disabled={busy} label="Knowledge bucket" options={[{ value: "PERSONAL", label: "Personal — only you" }, { value: "ORGANIZATION", label: "Organization — everyone in this organization" }]} />
         </label>
         <p className="text-sm text-muted-foreground">{scope === 'PERSONAL' ? 'Findings stay private to you in this organization.' : 'You are approving this source for organization-wide knowledge. You must be a room owner or an organization admin with room access.'} The agent checks every 6 hours and after saved source changes. Manage tags in Knowledge.</p>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

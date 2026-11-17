@@ -1,3 +1,4 @@
+import { MAX_KNOWLEDGE_HOURS } from '../../../../shared/knowledge-schedule'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { HTTPException } from 'hono/http-exception'
@@ -30,6 +31,16 @@ knowledgeRoutes.get('/sources/:sourceId/history', async (c) => {
   const before = c.req.query('before')
   if (before && (!/^[1-9]\d*$/.test(before) || (!Number.isSafeInteger(Number(before)) || Number(before) > 2_147_483_647))) throw new HTTPException(400, { message: 'Invalid history cursor.' })
   return c.json(await service(c).history(scope(c.req.query('scope')), c.req.param('sourceId'), before ? Number(before) : undefined))
+})
+knowledgeRoutes.patch('/agents/:agentId', async c => {
+  const input = z.strictObject({ scope: scopeInput, refreshHours: z.number().int().min(1).max(MAX_KNOWLEDGE_HOURS) }).safeParse(await json(c))
+  if (!input.success) throw new HTTPException(400, { message: `Choose a Knowledge scope and a whole number of hours from 1 to ${MAX_KNOWLEDGE_HOURS}.` })
+  return c.json(await service(c).setAgentInterval(input.data.scope, c.req.param('agentId'), input.data.refreshHours))
+})
+knowledgeRoutes.post('/agents/:agentId', async (c) => {
+  const body = z.strictObject({ scope: scopeInput, command: z.enum(['pause', 'resume', 'refresh']) }).safeParse(await json(c))
+  if (!body.success) throw new HTTPException(400, { message: 'Choose a bucket and agent action.' })
+  return c.json(await service(c).controlAgent(body.data.scope, c.req.param('agentId'), body.data.command))
 })
 knowledgeRoutes.patch('/', async (c) => {
   const parsed = z.strictObject({ scope: scopeInput, enabled: z.boolean() }).safeParse(await json(c))

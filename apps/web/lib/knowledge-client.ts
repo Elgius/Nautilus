@@ -1,3 +1,4 @@
+import type { AgentAppearance } from '../../../shared/agent-appearance';
 export type KnowledgeScope = 'PERSONAL' | 'ORGANIZATION';
 export type KnowledgeCitation = { id: string; documentVersionId: string | null; messageHash: string | null; locator: string; quote: string };
 export type KnowledgeRevision = { id: string; revision: number; title: string; body: string; createdAt: string; citations: KnowledgeCitation[] };
@@ -7,9 +8,10 @@ export type KnowledgeSource = {
   run: { id: string; status: string; nextChunk: number; error: string | null; finishedAt: string | null } | null;
   entry: { id: string; title: string; body: string; revision: number; updatedAt: string } | null;
 };
+export type KnowledgeAgent = AgentAppearance & { id: string; name: string; refreshHours: number; nextRefreshAt: string };
 export type KnowledgePage = {
-  base: { id: string; enabled: boolean; nextRefreshAt: string; lastCheckedAt: string | null };
-  agent: { name: string; refreshHours: number }; sources: KnowledgeSource[]; nextCursor: string | null;
+  base: { id: string; enabled: boolean; pausedAgentIds: string[]; nextRefreshAt: string; lastCheckedAt: string | null };
+  agents: KnowledgeAgent[]; agent: { name: string; refreshHours: number }; sources: KnowledgeSource[]; nextCursor: string | null;
 };
 export function knowledgeUrl(organizationId: string, path = '') {
   return `/api/organizations/${encodeURIComponent(organizationId)}/knowledge${path}`;

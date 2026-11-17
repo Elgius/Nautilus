@@ -22,7 +22,7 @@ const server=http.createServer(async(req,res)=>{
  if(url.pathname.endsWith('/activity/room-1/run-1'))return send({instruction:'Prepare the launch plan',reply:'Plan saved successfully.',error:null,documents:[{documentId:'doc-1',versionId:'v1',versionNumber:1,title:'Launch plan',available:true}],tasks:[]});
  if(url.pathname.endsWith('/activity'))return send({runs:url.searchParams.get('status')==='failed'?[]:[{id:'run-1',roomId:'room-1',roomName:'Launch room',agentId:'scout',agentName:'Scout',title:'Prepare the launch plan',status:'complete',source:'manual',createdAt:'2026-11-17T00:00:00Z',updatedAt:'2026-11-17T00:01:00Z',startedAt:null,finishedAt:null,activities:[],documentCount:1,taskCount:0}],active:[],nextCursor:null,rooms:[{id:'room-1',name:'Launch room'}],agents:[{id:'scout',name:'Scout'}]});
  if(url.pathname.endsWith('/rooms')){
-  if(req.method==='POST'){let body='';for await(const c of req)body+=c;const data=JSON.parse(body);const saved=room('created',data.name);created.push(saved);return send({room:saved});}
+  if(req.method==='POST'){let body='';for await(const c of req)body+=c;const data=JSON.parse(body);const saved={...room('created',data.name),category:data.category};created.push(saved);return send({room:saved});}
   if(blockRooms) await roomsReady;return send({rooms:[room(),...created]});
  }
  if(url.pathname.endsWith('/agents'))return send({agents:[]});
@@ -65,7 +65,8 @@ const server=http.createServer(async(req,res)=>{
   await page.getByRole('button',{name:/Prepare the launch plan/}).click();
   await page.getByText('Plan saved successfully.',{exact:true}).waitFor();
   assert.equal(await page.getByRole('link',{name:'Launch plan',exact:true}).getAttribute('href'),'/room-id=room-1?document=doc-1');
-  await page.getByLabel('Filter by status').selectOption('failed');
+  await page.getByRole('button', { name: 'Filter by status' }).click();
+  await page.getByRole('menuitemradio', { name: 'Failed' }).click();
   await page.getByRole('heading',{name:'No matching requests'}).waitFor();
   await page.getByRole('button',{name:'Clear filters'}).click();
   await page.getByRole('button',{name:/Prepare the launch plan/}).waitFor();
@@ -100,8 +101,12 @@ const server=http.createServer(async(req,res)=>{
   await nav('Knowledge','Knowledge');
   await page.getByRole('button',{name:'Create room',exact:true}).click();
   await page.getByLabel('Room name').fill('New launch room');
+  await page.getByRole('button', { name: 'Team', exact: true }).click();
+  assert.equal(await page.getByRole('menuitemradio', { name: 'General' }).getAttribute('aria-checked'), 'true');
+  await page.getByRole('menuitemradio', { name: 'Research' }).click();
   await page.getByRole('button',{name:'Create room',exact:true}).last().click();
   await page.getByText('New launch room',{exact:true}).first().waitFor();
+  assert.equal(created[0].category, 'Research');
   blockRooms=false;releaseRooms();
   await page.getByText('Launch room',{exact:true}).first().waitFor();
   await nav('Activity','Workspace timeline');await page.getByRole('button',{name:/Prepare the launch plan/}).waitFor();assert.equal(await page.getByText('You created',{exact:true}).count(),0);

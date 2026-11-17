@@ -602,7 +602,7 @@ into an explicitly selected joined room.
 Apply `20261112120000_knowledge_base` before running the updated API. The Worker
 adds a separate `KNOWLEDGE_WORKER` SQLite Durable Object (`knowledge-v1` migration).
 The existing minute cron dispatches due work; each enabled bucket is checked every
-**six hours**, with additional checks requested by tagging, manual refresh, saved
+**six hours** by default. Each workspace agent can have its own interval in each bucket, with additional checks requested by tagging, manual refresh, saved
 document head/title changes, and edits to explicitly tagged messages. Cron never
 calls the model. A durable alarm processes one source chunk at a time, checkpointing
 findings and resuming after interruptions. Provider requests use the existing

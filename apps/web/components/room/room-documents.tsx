@@ -1,12 +1,12 @@
 "use client";
 
+import { ChoiceMenu } from "@/components/ui/choice-menu";
 import { useCallback, useEffect, useEffectEvent, useRef, useState, type FormEvent, type Dispatch } from 'react';
 import { KnowledgeSourceTag } from '@/components/knowledge/source-tag';
 import { createPortal } from 'react-dom';
 import { Download, Plus, Save, Upload, FileText, Sheet, FileImage, File, FolderOpen, X, History, ChevronDown, MousePointer2, LockKeyhole, Trash2 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from '@/components/ui/input';
 import { Dropzone } from '@/components/ui/dropzone';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -175,11 +175,8 @@ export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsCo
         <DialogDescription>Start a new document or spreadsheet in this room.</DialogDescription></DialogHeader>
         <form onSubmit={create} className="flex flex-wrap gap-2" aria-busy={creating}>
           <Input name="title" aria-label="New document title" placeholder="Document title" maxLength={150} required className="min-w-32 flex-1" disabled={creating} />
-          <Select name="kind" defaultValue="DOCUMENT" disabled={creating}
-            items={[{ value: 'DOCUMENT', label: 'Document' }, { value: 'SPREADSHEET', label: 'Spreadsheet' }]}>
-            <SelectTrigger aria-label="Document type"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="DOCUMENT">Document</SelectItem><SelectItem value="SPREADSHEET">Spreadsheet</SelectItem></SelectContent>
-          </Select>
+          <ChoiceMenu name="kind" defaultValue="DOCUMENT" disabled={creating}
+            label="Document type" options={[{ value: 'DOCUMENT', label: 'Document' }, { value: 'SPREADSHEET', label: 'Spreadsheet' }]} />
           <Button type="submit" size="sm" variant="outline" disabled={creating || work.readOnly}><Plus size={14} />{creating ? 'Creating…' : 'Create'}</Button>
         </form>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

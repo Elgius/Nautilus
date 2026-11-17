@@ -1,0 +1,1 @@
+ALTER TABLE "knowledgeBase" ADD COLUMN "pausedAgentIds" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
