@@ -44,3 +44,16 @@ test('accepts every creation avatar combination and preserves its identity on ed
     }
   }
 })
+
+test('Open Bot Avatar geometry survives profile saves, recoloring, and reload validation', () => {
+  const avatarDesign = { color: '#ff6a1a', definition: {
+    version: 1, id: 'box', name: 'Box', body: { path: 'M20 20H80V80H20Z' },
+    eyes: { x: 50, y: 46, spacing: 15, scale: 1 },
+  } }
+  const created = parseAgentProfile({ ...profile, avatarDesign })
+  const saved = JSON.parse(JSON.stringify(agentProfileData(created)))
+  expect(parseAgentProfile(saved).avatarDesign).toEqual(created.avatarDesign)
+  const recolored = parseAgentProfile({ ...saved, avatarDesign: { ...saved.avatarDesign, color: '#00cd82' } })
+  expect(recolored.avatarDesign).toEqual({ ...created.avatarDesign!, color: '#00cd82' })
+  expect(() => parseAgentProfile({ ...profile, avatarDesign: { ...avatarDesign, definition: { ...avatarDesign.definition, eyes: { x: 90, y: 90, spacing: 15, scale: 1 } } } })).toThrow('Choose a valid custom avatar.')
+})

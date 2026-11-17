@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 import { avatarShapes, type Agent, type AvatarIcon, type AvatarShape } from "@/lib/agent-data";
 import type { AvatarDesign } from "@/lib/avatar-generation";
+import { BotAvatar } from './bot-avatar';
+import type { LegacyAvatarDesign } from '../../../../shared/avatar-design';
 import { parseAvatarDesign } from '../../../../shared/avatar-design';
 import type { AgentAppearance } from '../../../../shared/agent-appearance';
 
@@ -39,7 +41,12 @@ export function isAvatarShape(icon: AvatarIcon): icon is AvatarShape {
   return (avatarShapes as readonly string[]).includes(icon);
 }
 
-export function AgentShape({ shape, design, animated = false }: { shape: AvatarShape; design?: AvatarDesign; animated?: boolean }) {
+export function AgentShape({ shape, design, animated = false, mood = "idle" }: { shape: AvatarShape; design?: AvatarDesign; animated?: boolean; mood?: "idle" | "thinking" | "happy" }) {
+  if (design && 'definition' in design) return <BotAvatar design={design} animated={animated} mood={mood} />;
+  return <LegacyAgentShape shape={shape} design={design} animated={animated} />;
+}
+
+function LegacyAgentShape({ shape, design, animated = false }: { shape: AvatarShape; design?: LegacyAvatarDesign; animated?: boolean }) {
   const motion = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {

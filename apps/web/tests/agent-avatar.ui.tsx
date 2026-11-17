@@ -16,7 +16,11 @@ const { RoomChatComposer } = await import('../components/room/room-chat-composer
 const { createAgentFromDescription, persistAgent, toAgent } = await import('../lib/agent-client');
 import type { Agent } from '../lib/agent-data';
 
-const avatarDesign = { bodyPath: 'M 10 10 L 90 10 L 50 90 Z', color: '#ffb500', eyes: [{ cx: 38, cy: 40, rx: 5, ry: 7 }, { cx: 64, cy: 40, rx: 5, ry: 7 }] };
+const { parseAvatarDesign } = await import('../../../shared/avatar-design');
+const avatarDesign = parseAvatarDesign({ color: '#ffb500', definition: { version: 1, id: 'mug', name: 'Mug',
+  body: { path: 'M22 20H62C67 20 70 23 70 28V72C70 80 64 86 56 86H28C20 86 14 80 14 72V28C14 23 17 20 22 20ZM68 36C80 34 87 42 87 53C87 64 80 72 68 70ZM69 45L69 61C75.5 62 79 58.5 79 53C79 47.5 76 44 69 45Z' },
+  eyes: { x: 42, y: 49, spacing: 16, scale: 1.15 } } });
+
 const originalFetch = globalThis.fetch;
 const bodies: Record<string, unknown>[] = [];
 let stored: Record<string, unknown> | undefined;
@@ -155,7 +159,7 @@ async function submit(selector = 'form') {
   await act(async () => { document.querySelector(selector)!.dispatchEvent(new dom.Event('submit', { bubbles: true, cancelable: true }) as unknown as Event); });
 }
 function expectCustomAvatar() {
-  assert.equal(document.querySelector('.agent-shape path')?.getAttribute('d'), avatarDesign.bodyPath);
+  assert.ok(document.querySelector('.bot-avatar'), 'Uses the Open Bot Avatar renderer');
   assert.match(document.querySelector('.agent-shape')!.getAttribute('style')!, /#ffb500/);
 }
 try {

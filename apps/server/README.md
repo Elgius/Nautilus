@@ -238,11 +238,14 @@ uses AI SDK `generateText` with `Output.object` to generate validated JSON
 `{ purpose, rules }`. The purpose is saved as `agent.role` (up to 70 characters),
 and ordered rules are saved as `agent.rules` (up to 6,000 characters combined).
 The selected name and avatar remain user-controlled; tenant and status are server-owned.
-Both creation and profile updates accept an optional `avatarDesign` containing
-`bodyPath`, a hex `color`, and two `eyes` with `cx`, `cy`, `rx`, and `ry`. The shared
-validator rejects markup, external references, unsupported path commands, and
-out-of-bounds geometry. The validated design is stored in `agent.avatarDesign`
-(JSONB) and included in agent lists, room details, and WebSocket agent options.
+Both creation and profile updates accept an optional `avatarDesign` containing a
+hex `color` and an Open Bot Avatar v1 `definition` (`version`, `id`, `name`,
+`body.path`, and `eyes` with `x`, `y`, `spacing`, `scale`). New previews use the
+`open-bot-avatar` validator on both API boundaries and the shared renderer for
+inferred volume, gaze, blinking, and motion. The generation prompt follows the
+upstream face-first design guidance; color stays outside the geometry definition.
+The validated design is stored in the existing `agent.avatarDesign` JSON field.
+Older saved `bodyPath`/ellipse designs remain supported by the legacy renderer.
 Send `avatarDesign: null` to return to a preset. A custom design and an uploaded
 `avatarUrl` cannot be selected together. Generating a preview alone does not save it.
 

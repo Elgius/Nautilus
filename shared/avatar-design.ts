@@ -1,5 +1,24 @@
+import { validateAvatar, type AvatarDefinition } from 'open-bot-avatar';
+
 export type AvatarEye = { cx: number; cy: number; rx: number; ry: number };
-export type AvatarDesign = { bodyPath: string; color: string; eyes: [AvatarEye, AvatarEye] };
+export type LegacyAvatarDesign = { bodyPath: string; color: string; eyes: [AvatarEye, AvatarEye] };
+// Use closed object types so this remains assignable to JSON storage as well as
+// the upstream interfaces (which TypeScript treats as open to augmentation).
+export type BotAvatarDesign = {
+  definition: Omit<AvatarDefinition, 'eyes'> & { eyes: { [K in keyof AvatarDefinition['eyes']]: AvatarDefinition['eyes'][K] } };
+  color: string;
+};
+export type AvatarDesign = LegacyAvatarDesign | BotAvatarDesign;
+
+// New designs keep the upstream geometry contract separate from the runtime color.
+export function parseBotAvatarDesign(value: unknown): BotAvatarDesign {
+  const input = record(value);
+  if (Object.keys(input).some((key) => key !== 'definition' && key !== 'color')) throw new Error('Invalid avatar design fields.');
+  if (typeof input.color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(input.color)) throw new Error('Invalid avatar color.');
+  const result = validateAvatar(input.definition);
+  if (!result.ok) throw new Error('Invalid avatar geometry.');
+  return { definition: result.value, color: input.color };
+}
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid avatar design.");
@@ -42,6 +61,7 @@ function parseBodyPath(value: unknown): string {
 // Used at both API boundaries. Return only fields the React SVG renderer understands.
 export function parseAvatarDesign(value: unknown): AvatarDesign {
   const input = record(value);
+  if ('definition' in input) return parseBotAvatarDesign(input);
   const bodyPath = parseBodyPath(input.bodyPath);
   if (typeof input.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(input.color)) throw new Error("Invalid avatar color.");
   if (!Array.isArray(input.eyes) || input.eyes.length !== 2) throw new Error("Provide two avatar eyes.");

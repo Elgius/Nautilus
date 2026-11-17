@@ -22,6 +22,7 @@
     "test:room-work": "bun tests/room-work.ui.tsx",
     "test:document-stream": "bun tests/document-stream.ui.mjs",
     "test:agent-avatar": "bun tests/agent-avatar.ui.tsx",
+    "test:bot-avatar": "bun tests/bot-avatar.browser.mjs",
     "test:instant-navigation": "node tests/instant-navigation.ui.mjs",
     "test:workspace-navigation": "API_ORIGIN=http://127.0.0.1:8791 bun run build && node tests/workspace-navigation.ui.mjs"
   },

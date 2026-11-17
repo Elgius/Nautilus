@@ -64,7 +64,7 @@ export function AvatarGenerator({ organizationId, shape, initialDesign, onBack, 
     <form onSubmit={generate} className="avatar-generator" aria-busy={generating}>
       <figure>
         <div className="create-agent-preview">
-          <AgentShape key={design ? JSON.stringify(design) : shape} shape={shape} design={design ?? undefined} animated />
+          <AgentShape key={design ? JSON.stringify(design) : shape} shape={shape} design={design ?? undefined} animated mood={generating ? "thinking" : "idle"} />
         </div>
         <figcaption>{design ? "Generated avatar preview" : "Create a custom avatar"}</figcaption>
       </figure>
@@ -72,7 +72,7 @@ export function AvatarGenerator({ organizationId, shape, initialDesign, onBack, 
       <Textarea
         id="avatar-description" value={description} rows={4} required maxLength={2000}
         autoFocus disabled={generating}
-        placeholder="A friendly purple cat with pointy ears and big rounded eyes…"
+        placeholder="A purple cat, a coffee mug, or a little rocket…"
         aria-describedby={`avatar-preview-note${error ? " avatar-preview-error" : ""}`}
         onChange={(event) => { setDescription(event.target.value); if (!retryAt) setError(""); }}
       />

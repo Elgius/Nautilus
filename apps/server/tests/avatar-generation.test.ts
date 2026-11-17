@@ -3,15 +3,20 @@ import { Hono } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { MockLanguageModelV4 } from 'ai/test'
 import { APICallError } from 'ai'
-import { parseAvatarDesign, type AvatarDesign } from '../../../shared/avatar-design'
+import { parseAvatarDesign, type LegacyAvatarDesign, type BotAvatarDesign } from '../../../shared/avatar-design'
 import { generateAvatarPreview } from '../src/avatar-generation'
 import { createAvatarGenerationRouter } from '../src/avatar-generation-route'
 import type { AppEnv } from '../src/index'
 
-const avatar: AvatarDesign = {
+const legacyAvatar: LegacyAvatarDesign = {
   bodyPath: 'M 22 9 L 78 9 Q 91 9 91 22 L 91 78 Q 91 91 78 91 L 22 91 Q 9 91 9 78 L 9 22 Q 9 9 22 9 Z',
   color: '#9c5bfa',
   eyes: [{ cx: 38, cy: 56, rx: 5, ry: 7 }, { cx: 64, cy: 56, rx: 5, ry: 7 }],
+}
+
+const avatar: BotAvatarDesign = {
+  color: '#9c5bfa',
+  definition: { version: 1, id: 'box', name: 'Box', body: { path: 'M20 20L80 20L80 80L20 80Z' }, eyes: { x: 50, y: 46, spacing: 15, scale: 1 } },
 }
 
 function harness(output: unknown = avatar, failure?: Error) {
@@ -50,6 +55,12 @@ test('generates structured preview geometry without looking up or saving an agen
   expect(model.doGenerateCalls[0].responseFormat?.type).toBe('json')
   const prompt = JSON.stringify(model.doGenerateCalls[0].prompt)
   expect(prompt).toContain('A friendly purple cat.')
+  expect(prompt).toContain('Face first')
+  expect(prompt).toContain('Nautilus output envelope')
+  expect(prompt).toContain('≤ 40')
+  expect(model.doGenerateCalls[0].responseFormat).toMatchObject({
+    schema: { properties: { definition: { properties: { eyes: { properties: { spacing: { maximum: 40 } } } } } } },
+  })
   expect(prompt).not.toContain('override')
 })
 
@@ -65,17 +76,17 @@ test('rejects malformed descriptions and excessive bodies before calling the mod
 
 test('rejects unsafe and malformed generated SVG details with a safe retryable error', async () => {
   for (const invalid of [
-    { ...avatar, bodyPath: '<svg onload="alert(1)">' },
-    { ...avatar, bodyPath: 'M 10 10 L 101 10 L 10 80 Z' },
-    { ...avatar, bodyPath: 'M 10 10 C 20 20 Z' },
-    { ...avatar, bodyPath: 'M 10 10 A 20 20 0 0 0 80 80 Z' },
-    { ...avatar, bodyPath: 'M 10 10 L 80 10 L 80 80' },
-    { ...avatar, bodyPath: 'M 10 10 Z' },
+    legacyAvatar,
+    { ...avatar, definition: { ...avatar.definition, body: { path: '<svg onload="alert(1)">' } } },
+    { ...avatar, definition: { ...avatar.definition, body: { path: 'M10 10 L101 10 L10 80 Z' } } },
+    { ...avatar, definition: { ...avatar.definition, body: { path: 'M10 10 C20 20 Z' } } },
+    { ...avatar, definition: { ...avatar.definition, body: { path: 'M10 10 Z' } } },
+    { ...avatar, definition: { ...avatar.definition, eyes: { x: 5, y: 5, spacing: 15, scale: 1 } } },
+    { ...avatar, definition: { ...avatar.definition, eyes: { x: 50, y: 46, spacing: 1, scale: 1 } } },
+    { ...avatar, definition: { ...avatar.definition, version: 2 } },
+    { ...avatar, definition: { ...avatar.definition, onload: 'evil' } },
     { ...avatar, color: 'url(https://secret.example)' },
-    { ...avatar, eyes: [{ ...avatar.eyes[0], rx: 50 }, avatar.eyes[1]] },
-    { ...avatar, eyes: [{ ...avatar.eyes[0], cx: 0 }, avatar.eyes[1]] },
-    { ...avatar, eyes: [avatar.eyes[0], avatar.eyes[0]] },
-    { ...avatar, eyes: [] },
+    { ...avatar, onload: 'evil' },
   ]) {
     const { request } = harness(invalid)
     const response = await request({ description: 'A cat.' })
@@ -85,9 +96,16 @@ test('rejects unsafe and malformed generated SVG details with a safe retryable e
 })
 
 test('normalizes valid geometry and strips fields the renderer does not support', () => {
-  expect(parseAvatarDesign({ ...avatar, bodyPath: avatar.bodyPath.replaceAll(' ', ','), onload: 'alert(1)', eyes: avatar.eyes.map(eye => ({ ...eye, style: 'malicious' })) })).toEqual(avatar)
-  expect(() => parseAvatarDesign({ ...avatar, bodyPath: 'M 1e999 10 L 80 10 L 80 80 Z' })).toThrow()
-  expect(() => parseAvatarDesign({ ...avatar, bodyPath: 'M 10 10 L 80 10 L 80 80 Z'.repeat(200) })).toThrow()
+  expect(parseAvatarDesign({ ...legacyAvatar, bodyPath: legacyAvatar.bodyPath.replaceAll(' ', ','), onload: 'alert(1)', eyes: legacyAvatar.eyes.map(eye => ({ ...eye, style: 'malicious' })) })).toEqual(legacyAvatar)
+  expect(() => parseAvatarDesign({ ...legacyAvatar, bodyPath: 'M 1e999 10 L 80 10 L 80 80 Z' })).toThrow()
+  expect(() => parseAvatarDesign({ ...legacyAvatar, bodyPath: 'M 10 10 L 80 10 L 80 80 Z'.repeat(200) })).toThrow()
+})
+
+test('accepts the maximum eye spacing and rejects values above the renderer limit', async () => {
+  const wide = { ...avatar, definition: { ...avatar.definition, body: { path: 'M8 8L92 8L92 92L8 92Z' }, eyes: { ...avatar.definition.eyes, spacing: 40 } } }
+  expect((await harness(wide).request({ description: 'A wide box.' })).status).toBe(200)
+  const invalid = { ...wide, definition: { ...wide.definition, eyes: { ...wide.definition.eyes, spacing: 41 } } }
+  expect((await harness(invalid).request({ description: 'A wide box.' })).status).toBe(502)
 })
 
 test('provider failures do not expose upstream details', async () => {
