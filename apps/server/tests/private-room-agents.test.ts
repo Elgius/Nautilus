@@ -2,13 +2,13 @@ import { AgentRunError } from '../src/skill-operation-error'
 import { expect, test } from 'bun:test'
 import { PrivateRoomAgents, type PrivateAgentMessage, type AgentRunContext } from '../src/private-room-agents'
 import type { ChatIdentity } from '../src/room-chat-service'
-import type { HubSource, AgentRunMode, PrivateAgentJob, PrivateAgentEvent } from '../../../shared/room-chat'
+import type { HubSource, HubOptions, AgentRunMode, PrivateAgentJob, PrivateAgentEvent } from '../../../shared/room-chat'
 import { scheduleRoomAlarm } from '../src/room-alarm'
 
 const alice: ChatIdentity = { organizationId: 'org', roomId: 'room', userId: 'alice', sessionId: 'alice-session' }
 const bob = { ...alice, userId: 'bob', sessionId: 'bob-session' }
 const profile = { id: 'scout', name: 'Scout', role: 'Research', rules: ['Cite sources'] }
-function harness(options: { archive?: (identity: ChatIdentity, job: PrivateAgentJob) => Promise<void>; denyAgent?: boolean; fail?: boolean | Error; commitBeforeFailure?: boolean; gate?: Promise<void>; reply?: string; preview?: string; onRun?: (run: AgentRunContext, signal: AbortSignal) => Promise<void>; onEvent?: (event: PrivateAgentEvent) => void; filterHistory?: ConstructorParameters<typeof PrivateRoomAgents>[0]['filterHistory'] } = {}) {
+function harness(options: { questionCount?: number; question?: boolean; archive?: (identity: ChatIdentity, job: PrivateAgentJob) => Promise<void>; denyAgent?: boolean; fail?: boolean | Error; commitBeforeFailure?: boolean; gate?: Promise<void>; reply?: string; preview?: string; onRun?: (run: AgentRunContext, signal: AbortSignal) => Promise<void>; onEvent?: (event: PrivateAgentEvent) => void; filterHistory?: ConstructorParameters<typeof PrivateRoomAgents>[0]['filterHistory'] } = {}) {
   const values = new Map<string, unknown>()
   let transactions: Promise<unknown> = Promise.resolve()
   const alarms: number[] = []
@@ -55,6 +55,10 @@ function harness(options: { archive?: (identity: ChatIdentity, job: PrivateAgent
     stream: async function* (_profile, messages, signal, _identity, run) {
       calls.push(messages)
       await options.onRun?.(run, signal)
+      if (options.question && calls.length <= (options.questionCount ?? 1)) {
+        await run.askUser!({ question: 'Which document should I use?', options: ['test', 'tutorial write up'] })
+        return
+      }
       if (calls.length === 1) await options.gate
       signal.throwIfAborted()
       if (options.preview) await run.preview?.('write', options.preview)
@@ -664,4 +668,72 @@ test('retry includes the original instruction and saved receipts from a failed r
   expect(h.calls[1][0]).toEqual({ role: 'user', content: 'Create a worksheet' })
   expect(h.calls[1][1].content).toContain('v2')
   expect(h.calls[1].at(-1)).toEqual({ role: 'user', content: 'Continue' })
+})
+
+test('agent input is private, durable, releases the run, and continues exactly once in the original mode', async () => {
+  const h = harness({ question: true }), id = crypto.randomUUID()
+  await h.invoke(alice, 'Summarize the document', id, 'read')
+  await Promise.all(h.tasks)
+  const job = (await h.service.history(alice))[0]
+  expect(job.status).toBe('complete')
+  expect(job.reply).toBe('')
+  expect(job.question?.question).toBe('Which document should I use?')
+  expect((await h.service.activity()).activities).toEqual([])
+  expect(await h.service.history(bob)).toEqual([])
+  const restored = new PrivateRoomAgents(h.deps)
+  expect((await restored.history(alice))[0].question).toEqual(job.question)
+  const input = { jobId: id, questionId: job.question!.id, answer: 'test' }
+  await expect(restored.answer(bob, input)).rejects.toThrow('no longer available')
+  await expect(restored.answer(alice, { ...input, questionId: crypto.randomUUID() })).rejects.toThrow('no longer available')
+  await restored.answer(alice, input)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await Promise.all(h.tasks)
+  await restored.answer(alice, input)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await Promise.all(h.tasks)
+  const history = await restored.history(alice)
+  expect(history).toHaveLength(2)
+  expect(history[0].question?.answer).toBe('test')
+  expect(history[1]).toMatchObject({ id: job.question!.id, mode: 'read', continuationOf: id, status: 'complete' })
+  expect(h.calls).toHaveLength(2)
+  expect(h.calls[1].at(-1)?.content).toContain('Original request to continue:\nSummarize the document')
+  expect(h.calls[1].at(-1)?.content).toContain('My answer: test')
+  await expect(restored.answer(alice, { ...input, answer: 'different answer' })).rejects.toThrow()
+  expect(h.events.every((item) => item.userId === 'alice')).toBe(true)
+})
+
+
+test('successive clarifications preserve the root request explicitly in the latest user message', async () => {
+  const h = harness({ question: true, questionCount: 2 })
+  const original = 'Only acknowledge my answer; do not resume older spreadsheet requests.'
+  await h.invoke(alice, original, crypto.randomUUID(), 'read'); await Promise.all(h.tasks)
+  let job = (await h.service.history(alice)).at(-1)!
+  for (const answer of ['first answer', 'second answer']) {
+    await h.service.answer(alice, { jobId: job.id, questionId: job.question!.id, answer })
+    await new Promise((resolve) => setTimeout(resolve, 0)); await Promise.all(h.tasks)
+    job = (await h.service.history(alice)).at(-1)!
+    expect(job.originalInstruction).toBe(original)
+    expect(h.calls.at(-1)!.at(-1)!.content).toContain(`Original request to continue:\n${original}`)
+    expect(h.calls.at(-1)!.at(-1)!.content).toContain(`My answer: ${answer}`)
+  }
+  expect(h.calls).toHaveLength(3)
+  expect(job.status).toBe('complete')
+})
+
+
+test('question continuations retain Hub options and reject withdrawn knowledge', async () => {
+  let withdrawn = false
+  const h = harness({ question: true, filterHistory: async (_identity, jobs) => jobs.map((job) => ({ ...job, knowledgeUnavailable: withdrawn })) })
+  const options: HubOptions = { conversationId: crypto.randomUUID(), knowledge: ['PERSONAL'], reasoning: 'high' }
+  await h.service.invoke(alice, { requestId: crypto.randomUUID(), agentId: profile.id, instruction: 'Discuss my selected source', mode: 'read', ...options })
+  await new Promise((resolve) => setTimeout(resolve, 0)); await Promise.all(h.tasks)
+  const questionJob = (await h.service.history(alice))[0]
+  const input = { jobId: questionJob.id, questionId: questionJob.question!.id, answer: 'test' }
+  withdrawn = true
+  expect((await h.service.history(alice))[0].question).toBeUndefined()
+  await expect(h.service.answer(alice, input)).rejects.toThrow('no longer available')
+  withdrawn = false
+  await h.service.answer(alice, input)
+  await new Promise((resolve) => setTimeout(resolve, 0)); await Promise.all(h.tasks)
+  expect((await h.service.history(alice)).at(-1)?.options).toEqual(options)
 })

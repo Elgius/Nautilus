@@ -183,3 +183,20 @@ test('a provider request exceeding the application deadline reports RUN_TIMEOUT'
   const consume = async () => { for await (const _ of streamPrivateRoomAgent({} as Bindings, profile, [{ role: 'user', content: 'Write.' }], new AbortController().signal, () => model, [], { timeout: 20 })) { /* consume */ } }
   await expect(consume()).rejects.toMatchObject({ code: 'RUN_TIMEOUT' })
 })
+
+test('askUser persists its question and ends the model loop without an empty-response or step-limit failure', async () => {
+  const { createAgentQuestionSkill } = await import('../src/agent-question')
+  const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 1, text: 1, reasoning: undefined } }
+  const model = new MockLanguageModelV4({ doStream: { stream: simulateReadableStream({ initialDelayInMs: null, chunkDelayInMs: null, chunks: [
+    { type: 'tool-call', toolCallId: 'question', toolName: 'askUser', input: JSON.stringify({ question: 'Which document?', options: ['test', 'tutorial write up'] }) },
+    { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+  ] }) } })
+  const questions: unknown[] = []
+  const signal = new AbortController().signal
+  const skill = createAgentQuestionSkill({ id: 'run', token: '', activity: async () => {}, committed: async () => {}, checkpoint: async () => {}, askUser: async (question) => { questions.push(question) } }, signal)
+  const reply: string[] = []
+  for await (const delta of streamPrivateRoomAgent({} as Bindings, profile, [{ role: 'user', content: 'Use the document' }], signal, () => model, [skill])) reply.push(delta)
+  expect(questions).toEqual([{ question: 'Which document?', options: ['test', 'tutorial write up'] }])
+  expect(reply).toEqual([])
+  expect(model.doStreamCalls).toHaveLength(1)
+})

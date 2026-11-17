@@ -38,12 +38,21 @@ export type HubToolCall = { id: string; name: string; status: 'running' | 'compl
 export type HubConfirmation = { id: string; label: string; status: 'pending' | 'approved' | 'declined' };
 export type HubOptions = { conversationId?: string; knowledge: ('PERSONAL' | 'ORGANIZATION')[]; reasoning: 'low' | 'medium' | 'high' };
 export type AgentRunMode = 'read' | 'write';
+export type AgentQuestion = {
+  id: string;
+  question: string;
+  options?: string[];
+  answer?: string;
+};
 export type PrivateAgentJob = {
   id: string;
   agentId: string;
   agentName: string;
   instruction: string;
   reply: string;
+  question?: AgentQuestion;
+  continuationOf?: string;
+  originalInstruction?: string;
   status: 'queued' | 'running' | 'complete' | 'failed';
   error?: string;
   errorCode?: AgentErrorCode;

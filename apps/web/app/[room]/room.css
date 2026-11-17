@@ -1275,3 +1275,11 @@
 .room-chat-editable[data-empty="true"]::before {
   content: attr(aria-placeholder); float: left; height: 0; pointer-events: none; color: var(--muted-foreground);
 }
+
+.room-agent-input-box { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--muted); }
+.room-agent-input-box-label { display: flex; align-items: center; gap: 7px; color: var(--muted-foreground); font-size: 12px; }
+.room-agent-input-box > label { font-size: 14px; font-weight: 500; white-space: pre-wrap; overflow-wrap: anywhere; }
+.room-agent-input-box-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.room-agent-input-box-options button { height: auto; white-space: normal; overflow-wrap: anywhere; max-width: 100%; text-align: left; }
+.room-agent-input-box-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.room-agent-input-box-footer > span { color: var(--muted-foreground); font-size: 11px; }

@@ -9,8 +9,10 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true, getComputedStyle: do
 const { act, createElement } = await import('react');
 const { createRoot } = await import('react-dom/client');
 const { PrivateAgentConversation } = await import('../components/room/private-agent-conversation');
+const { InputBox } = await import('../components/room/input-box');
 const container = document.createElement('div'); document.body.append(container);
 const root = createRoot(container);
+const answers: { jobId: string; answer: string }[] = [];
 const job = (id: string, status: PrivateAgentJob['status']): PrivateAgentJob => ({ id, agentId: 'agent', agentName: 'Writer', instruction: id, reply: '', status, createdAt: '2026-11-11T00:00:00Z', updatedAt: '2026-11-11T00:00:00Z', revision: 1 });
 async function render(jobs: PrivateAgentJob[]) {
   await act(async () => root.render(createElement(PrivateAgentConversation, { jobs, canSend: true, busy: false, retry: () => true })));
@@ -22,25 +24,43 @@ async function toggle() {
 try {
   await render([job('old', 'complete')]);
   assert.equal(container.querySelector('button')?.getAttribute('aria-expanded'), 'false');
-  assert.deepEqual(turns(), ['You: old']);
+  assert.deepEqual(turns(), ['You:old']);
   await render([job('old', 'complete'), job('latest', 'queued')]);
-  assert.deepEqual(turns(), ['You: latest']);
+  assert.deepEqual(turns(), ['You:latest']);
   for (const status of ['running', 'complete', 'failed'] as const) {
     await render([job('old', 'queued'), { ...job('latest', status), reply: 'Latest agent reply' }]);
-    assert.deepEqual(turns(), ['You: latest'], 'The latest message remains visible throughout its lifecycle');
+    assert.deepEqual(turns(), ['You:latest'], 'The latest message remains visible throughout its lifecycle');
     assert.equal(container.querySelector('.room-private-reply')?.textContent, 'Latest agent reply');
   }
   await toggle();
-  assert.deepEqual(turns(), ['You: old', 'You: latest']);
+  assert.deepEqual(turns(), ['You:old', 'You:latest']);
   assert.equal(container.querySelector('button')?.getAttribute('aria-expanded'), 'true');
   await render([job('old', 'complete'), job('latest', 'queued')]);
   assert.equal(turns().length, 2, 'Updates keep an expanded accordion open');
   await toggle();
-  assert.deepEqual(turns(), ['You: latest']);
+  assert.deepEqual(turns(), ['You:latest']);
   await render([job('old', 'complete'), job('latest', 'complete')]);
-  assert.deepEqual(turns(), ['You: latest']);
+  assert.deepEqual(turns(), ['You:latest']);
   await toggle();
   assert.equal(turns().length, 2, 'Completed messages remain in history');
+  const questionJob = { ...job('question', 'complete'), question: { id: 'question-id', question: 'Which document should I use?', options: ['test', 'tutorial write up'] } };
+  await render([questionJob]);
+  assert.equal(container.querySelector('textarea'), null, 'Conversation history never renders a second answer composer');
+  assert.match(container.textContent!, /Which document should I use/);
+  await act(async () => root.render(createElement(InputBox, { question: questionJob.question, onAnswer: (answer) => { answers.push({ jobId: questionJob.id, answer }); } })));
+  const submit = container.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  assert.equal(submit.disabled, true, 'Empty answers cannot be sent');
+  const suggestion = [...container.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === 'test')!;
+  await act(async () => suggestion.click());
+  assert.equal(container.querySelector<HTMLTextAreaElement>('textarea')!.value, 'test');
+  await act(async () => container.querySelector('form')!.dispatchEvent(new dom.Event('submit', { bubbles: true, cancelable: true }) as unknown as Event));
+  assert.deepEqual(answers, [{ jobId: 'question', answer: 'test' }]);
+  await render([questionJob, job('newer', 'complete')]);
+  assert.equal(container.querySelector('textarea'), null);
+  assert.match(container.textContent!, /Which document should I use/, 'Pending questions remain visible as read-only history');
+  await render([{ ...questionJob, question: { ...questionJob.question, answer: 'test' } }]);
+  assert.equal(container.querySelector('textarea'), null, 'Answered questions display the saved answer');
+  assert.match(container.textContent!, /Your answer/);
   console.log('Agent accordion checks passed: closed default, latest message preview, replies, lifecycle transitions, and full history.');
 } finally {
   await act(async () => root.unmount());

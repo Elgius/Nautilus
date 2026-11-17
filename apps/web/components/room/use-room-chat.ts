@@ -13,6 +13,8 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
   const [agents, setAgents] = useState<RoomAgentOption[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [agentJobs, setAgentJobs] = useState<PrivateAgentJob[]>([]);
+  const [answeringQuestions, setAnsweringQuestions] = useState<string[]>([]);
+  const questionOutbox = useRef(new Map<string, { jobId: string; questionId: string; answer: string; mode: AgentRunMode }>());
   const agentsRequested = useRef(false);
   const preparingAgent = useRef(false);
   const agentOutbox = useRef(new Map<string, { agentId: string; instruction: string; mode: AgentRunMode; knowledge?: HubOptions['knowledge']; reasoning?: HubOptions['reasoning'] }>());
@@ -76,6 +78,8 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
       });
     };
     const mergeAgentJobs = (incoming: PrivateAgentJob[]) => {
+      for (const job of incoming) if (job.question?.answer) questionOutbox.current.delete(job.id);
+      setAnsweringQuestions([...questionOutbox.current.keys()]);
       // History can include personal agents absent from the initial room roster.
       // Load their current appearance even when the picker has never been opened.
       if (incoming.length && !agentsRequested.current) {
@@ -128,6 +132,13 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
               }
             }
             for (const [clientMessageId, text] of outbox.current) send({ type: "send", requestId: clientMessageId, clientMessageId, text });
+            for (const answer of questionOutbox.current.values()) {
+              const deliver = () => { if (!disposed && socket?.readyState === WebSocket.OPEN && questionOutbox.current.has(answer.jobId)) send({ type: 'agent.answer', requestId: answer.questionId, ...answer }); };
+              if (answer.mode === 'write') void flushRoomDocuments(organizationId, roomId).then(deliver).catch((error) => {
+                questionOutbox.current.delete(answer.jobId); setAnsweringQuestions([...questionOutbox.current.keys()]); setNotice(errorMessage(error));
+              });
+              else deliver();
+            }
           } else if (event.type === "history") {
             merge(event.messages); setNextCursor(event.nextCursor); setLoadingOlder(false);
           } else if (event.type === "message" || event.type === "ack") {
@@ -160,6 +171,8 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
           } else if (event.type === "read") {
             setReads((previous) => ({ ...previous, [event.userId]: event.readAt }));
           } else if (event.type === "error") {
+            for (const [jobId, answer] of questionOutbox.current) if (answer.questionId === event.requestId) questionOutbox.current.delete(jobId);
+            setAnsweringQuestions([...questionOutbox.current.keys()]);
             setNotice(event.error); setLoadingOlder(false);
             if (event.requestId === "agent.list") setAgentsLoading(false);
             if (event.requestId && agentOutbox.current.has(event.requestId)) {
@@ -265,5 +278,17 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
   function cancelAgent(jobId: string) {
     if (connection.current?.readyState === WebSocket.OPEN) connection.current.send(JSON.stringify({ type: 'agent.cancel', jobId }));
   }
-  return { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, cancelAgent, confirmAgent, canSend: enabled && !blocked, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage };
+  async function answerQuestion(job: PrivateAgentJob, answer: string) {
+    if (!enabled || blocked || !job.question || job.question.answer || questionOutbox.current.has(job.id) || answeringQuestions.includes(job.id)) return;
+    setAnsweringQuestions((previous) => [...previous, job.id]);
+    try {
+      if ((job.mode ?? 'write') === 'write') await flushRoomDocuments(organizationId, roomId);
+      questionOutbox.current.set(job.id, { jobId: job.id, questionId: job.question.id, answer, mode: job.mode ?? 'write' });
+      setAnsweringQuestions([...questionOutbox.current.keys()]);
+      if (ready.current && connection.current?.readyState === WebSocket.OPEN) connection.current.send(JSON.stringify({ type: 'agent.answer', requestId: job.question.id, ...questionOutbox.current.get(job.id) }));
+    } catch (error) {
+      questionOutbox.current.delete(job.id); setAnsweringQuestions([...questionOutbox.current.keys()]); setNotice(errorMessage(error));
+    }
+  }
+  return { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, cancelAgent, confirmAgent, answerQuestion, answeringQuestions, canSend: enabled && !blocked, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage };
 }

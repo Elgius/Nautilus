@@ -226,6 +226,8 @@ export class RoomChat extends DurableObject<Bindings> {
         this.send(socket, { type: 'agent.history', jobs })
       } else if (input.type === 'agent.invoke') {
         await this.agentService.invoke(state.identity, input, false, receivedAt)
+      } else if (input.type === 'agent.answer') {
+        await this.agentService.answer(state.identity, input)
       } else if (input.type === 'agent.observed') {
         await this.agentService.observed(state.identity, input)
       } else if (input.type === 'agent.confirm') {

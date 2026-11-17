@@ -1,5 +1,6 @@
 import { createHubEvidence } from './agent-hub/evidence'
 import { completeHubSkills, withHubReadSources } from './agent-hub/runtime'
+import { createAgentQuestionSkill } from './agent-question'
 import { createProgressSkill } from './progress/skill'
 import { createPlannerReadSkill } from './agent_interface/planner-read-skill'
 import { reviewDocumentCreation, type CreationReview } from './edit-review'
@@ -242,6 +243,7 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
       return backend.read(id, operation, args, activeSignal)
     } }, signal, 'read')
     skills.push(createPlannerReadSkill(identity, profile, run, withDatabase, signal))
+    if (run.askUser) skills.push(createAgentQuestionSkill(run, signal))
     return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, completeHubSkills(skills, hubRun, identity, withDatabase, signal), {
       reasoning: run.options?.reasoning, tool: run.tool, steps: 16, timeout: 175_000, toolCallConcurrency: 3, stage: run.stage,
       loggingContext: { ...loggingContext, kind: 'read-only' }, onIssue: run.issue,
@@ -269,6 +271,7 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
     },
   }
   const skills = createModeratorSkills(profile, run, signal, dependencies)
+  if (run.askUser) skills.push(createAgentQuestionSkill(run, signal))
   skills.push(createProgressSkill(identity, { agentId: profile.id, workToken: run.token, runId: run.id }, withDatabase, signal))
   skills.push(createPlannerSkill(identity, profile, run, withDatabase, signal, { ...dependencies, review: async (edit, active) => reviewPlannerEdit(createAgentModel(env), messages, { ...edit, reads: [...edit.reads, ...await knowledgeEvidence.reads()] }, active, loggingContext) }))
   if (!identity.scheduledDeliveryId) skills.push(createSchedulerSkill(identity, profile.id, withDatabase, signal))

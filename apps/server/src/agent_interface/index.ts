@@ -1,4 +1,4 @@
-import { isStepCount, ToolLoopAgent, type LanguageModel, type ToolSet } from 'ai'
+import { hasToolCall, isStepCount, ToolLoopAgent, type LanguageModel, type ToolSet } from 'ai'
 import type { AgentSkill } from './skills'
 import { assertSafeAgentProfile } from '../agent-policy'
 import { agentCallLogging } from '../agent-call-logging'
@@ -29,7 +29,7 @@ export function createAgentInterface(profile: AgentProfile, model: LanguageModel
     ].join('\n'),
     ...(options.reasoning ? { providerOptions: { openai: { reasoningEffort: options.reasoning } } } : {}),
     toolCallConcurrency: options.toolCallConcurrency ?? 1,
-    stopWhen: isStepCount(options.steps ?? 8), maxOutputTokens: 4096,
+    stopWhen: [isStepCount(options.steps ?? 8), hasToolCall('askUser')], maxOutputTokens: 4096,
     ...(options.externalDeadline ? {} : { timeout: options.timeout ?? 60_000 }), maxRetries: 1,
     ...agentCallLogging({ ...options.loggingContext, kind: options.loggingContext?.kind ?? 'agent', agentId: profile.id, agentName: profile.name }, options.onIssue),
   })

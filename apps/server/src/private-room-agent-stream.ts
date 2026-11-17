@@ -20,6 +20,7 @@ export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAge
   try { result = await agent.stream({ messages, abortSignal: activeSignal }) }
   catch (error) { throw new AgentRunError(activeSignal.aborted ? interruptionCode() : 'MODEL_REQUEST_FAILED', { cause: error }) }
   let finished = false
+  let askedUser = false
   let firstDelta = true
   type Input = { text: string; sent: number; delivered?: string; delivery?: Promise<void>; failure?: { error: unknown } }
   const inputs = new Map<string, Input>()
@@ -51,6 +52,7 @@ export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAge
       if (part.type === 'tool-call') await options.tool?.({ id: part.toolCallId, name: part.toolName, status: 'running' })
       if (part.type === 'tool-result') await options.tool?.({ id: part.toolCallId, name: part.toolName, status: 'complete', summary: 'Operation completed.' })
       if (part.type === 'tool-error') await options.tool?.({ id: part.toolCallId, name: part.toolName, status: 'failed', summary: 'Operation failed. Review the agent response before retrying.' })
+      if (part.type === 'tool-result' && part.toolName === 'askUser') askedUser = true
       if (firstDelta && (part.type === 'text-delta' || part.type === 'tool-input-delta' || part.type === 'reasoning-delta')) {
         firstDelta = false; options.stage?.('model.first-delta')
       }
@@ -84,7 +86,7 @@ export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAge
       if (part.type === 'text-delta') yield part.text
       if (part.type === 'finish') {
         if (part.finishReason === 'length') throw new AgentRunError('MODEL_OUTPUT_LIMIT')
-        if (part.finishReason === 'tool-calls') throw new AgentRunError('STEP_LIMIT_REACHED')
+        if (part.finishReason === 'tool-calls' && !askedUser) throw new AgentRunError('STEP_LIMIT_REACHED')
         finished = true
       }
     }

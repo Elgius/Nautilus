@@ -32,7 +32,7 @@ export function PrivateAgentConversation({ jobs, agents = [], canSend, busy, ret
   const historyId = useId();
   if (!jobs.length) return null;
   const latest = jobs[jobs.length - 1];
-  const visibleJobs = full || expanded ? jobs : [latest];
+  const visibleJobs = full || expanded ? jobs : jobs.filter((job) => job.id === latest.id || (job.question && !job.question.answer));
   return <section className="room-private-conversation" aria-label="Your private agent conversation" data-expanded={expanded}>
     <button type="button" className="room-private-conversation-toggle" aria-expanded={expanded} aria-controls={historyId} onClick={() => setExpanded((value) => !value)}><LockKeyhole size={14} aria-hidden="true" /><span>Your agent · Only you</span><ChevronDown className="room-private-conversation-chevron" size={16} aria-hidden="true" /></button>
     <div id={historyId} className="room-private-conversation-content" hidden={!visibleJobs.length}>
@@ -40,7 +40,8 @@ export function PrivateAgentConversation({ jobs, agents = [], canSend, busy, ret
       <div className="room-private-turn-heading"><RoomAgentAvatar agent={agents.find((agent) => agent.id === job.agentId) ?? { name: job.agentName }} /><strong>{job.agentName}</strong><span>Private</span></div>
       <div className="room-private-instruction"><strong>You:</strong><RoomMessageText text={job.instruction} /></div>
       {job.reply && <AgentReply text={job.reply} job={job} />}
-      <p className="room-private-status" role="status">{job.status === 'queued' ? job.mode === 'read' ? 'Waiting for an Ask slot…' : 'Queued for the room moderator…' : job.status === 'running' ? job.mode === 'read' ? 'Reading and answering…' : 'Moderator is working…' : job.status === 'failed' ? job.errorCode ? agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0) : job.error ?? 'The agent could not reply.' : job.issues?.length ? 'Response complete with operation warnings' : 'Response complete'}</p>
+      {job.question && <div className="room-private-question"><RoomMessageText text={job.question.question} />{job.question.answer && <p className="whitespace-pre-wrap"><strong>Your answer:</strong> {job.question.answer}</p>}</div>}
+      <p className="room-private-status" role="status">{job.status === 'queued' ? job.mode === 'read' ? 'Waiting for an Ask slot…' : 'Queued for the room moderator…' : job.status === 'running' ? job.mode === 'read' ? 'Reading and answering…' : 'Moderator is working…' : job.status === 'failed' ? job.errorCode ? agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0) : job.error ?? 'The agent could not reply.' : job.question && !job.question.answer ? 'Waiting for your answer' : job.issues?.length ? 'Response complete with operation warnings' : 'Response complete'}</p>
       {!!job.commits?.length && !(job.status === 'failed' && job.errorCode) && <p className="room-private-status">{job.commits.length} edit {job.commits.length === 1 ? 'batch' : 'batches'} saved.</p>}
       {(job.status === 'complete' || job.status === 'failed') && <AgentOperationWarnings issues={job.issues} />}
       <RunDetails job={job} roomId={roomId} confirm={confirm} />
