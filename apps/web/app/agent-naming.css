@@ -362,6 +362,7 @@
   }
 }
 .create-agent-dialog {
+  font-size: 1rem;
   color-scheme: light;
   background: var(--card);
   color: var(--card-foreground);
@@ -458,7 +459,7 @@
   outline-offset: 3px;
 }
 .create-agent-name { margin-top: 32px; }
-.create-agent-name label { display: block; color: var(--muted-foreground); font-size: 16px; margin: 0 0 12px 8px; }
+.create-agent-name label { display: block; color: var(--muted-foreground); margin: 0 0 12px 8px; }
 .create-agent-name input {
   height: 52px;
   padding: 0 16px;
@@ -466,7 +467,6 @@
   border-radius: 13px;
   background: transparent;
   color: var(--card-foreground);
-  font-size: 19px;
   box-shadow: none;
 }
 .create-agent-name input:focus-visible { border-color: var(--ring); box-shadow: 0 0 0 1px var(--ring); outline: none; }
@@ -474,7 +474,6 @@
 .create-agent-work label {
   display: block;
   margin-bottom: 18px;
-  font-size: 24px;
   font-weight: 500;
   line-height: 1.35;
   letter-spacing: -0.5px;
@@ -486,7 +485,6 @@
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 13px;
-  font-size: 16px;
   line-height: 1.6;
 }
 .create-agent-actions {
@@ -504,12 +502,12 @@
   background: var(--foreground);
   color: var(--background);
   border-radius: 13px;
-  font-size: 21px;
   font-weight: 400;
 }
 .create-agent-submit:hover { background: color-mix(in srgb, var(--foreground) 85%, var(--card)); }
 .create-agent-submit:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
 .create-agent-error { color: var(--destructive); font-size: 13px; margin-top: 12px; }
+.create-agent-dialog :is(label, input, textarea, button, figcaption, p) { font-size: inherit; }
 @media (max-width: 480px) {
   .create-agent-dialog { padding: 40px 20px 28px; }
   .create-agent-preview .agent-shape { width: 100px; height: 100px; }
