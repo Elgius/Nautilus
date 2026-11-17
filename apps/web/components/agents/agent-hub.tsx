@@ -184,8 +184,8 @@ function HubWorkspace({ userId, organizationId, agents, rooms, onCreate, onEdit,
         {visible.slice(3).map((item) => choice(item, true))}
         {!visible.length && <p>{agents.length ? "No matching agents." : "No agents yet."}</p>}
       </div>
-      <section className="hub-recent" aria-labelledby="hub-history-title">
-        <div className="hub-recent-heading"><h2 id="hub-history-title">Conversation history</h2>
+      <section className="hub-recent" aria-label="Conversation history">
+        <div className="hub-recent-heading">
           <Button variant="ghost" size="sm" disabled={!agent || !historyReady} onClick={() => {
             const id = crypto.randomUUID();
             setChoices((previous) => ({ ...previous, [agent.id]: id }));
