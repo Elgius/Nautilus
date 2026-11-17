@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import useSWR from "swr";
 import useSWRInfinite from "swr/infinite";
@@ -16,17 +16,6 @@ const statusLabels: Record<ActivityStatus, string> = { queued: "Queued", running
 const roomHref = (roomId: string) => `/room-id=${encodeURIComponent(roomId)}`;
 const runKey = (run: ActivityRun) => `${run.roomId}:${run.id}`;
 const dateLabel = (date: string) => new Date(date).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-
-async function syncHistory([base]: [string, string]) {
-  let after: string | null = null;
-  do {
-    const response: Response = await fetch(`${base}/sync${after ? `?${new URLSearchParams({ after })}` : ""}`, { method: "POST", credentials: "include", cache: "no-store" });
-    if (!response.ok) throw new Error("Recent room history could not be imported.");
-    const page = await response.json() as { nextCursor: string | null };
-    after = page.nextCursor;
-  } while (after);
-  return true;
-}
 
 function RunDetails({ base, run, userId }: { base: string; run: ActivityRun; userId: string }) {
   const { data, error, mutate } = useSWR<ActivityDetail>(
@@ -69,7 +58,10 @@ export function AgentActivity({ organizationId, userId }: { organizationId: stri
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const invalidDates = !!from && !!to && from > to;
-  const sync = useSWR([`${base}`, userId], syncHistory, { revalidateOnFocus: false, dedupingInterval: 60_000, shouldRetryOnError: false });
+  const [historyCursor, setHistoryCursor] = useState<string | null | undefined>(undefined);
+  const [syncingHistory, setSyncingHistory] = useState(false);
+  const [historyError, setHistoryError] = useState(false);
+  const historyInFlight = useRef(false);
   const { data, error, mutate, size, setSize, isValidating } = useSWRInfinite<ActivityPage>(
     (_index, previous: ActivityPage | null) => {
       if (invalidDates || (previous && !previous.nextCursor)) return null;
@@ -80,16 +72,31 @@ export function AgentActivity({ organizationId, userId }: { organizationId: stri
       if (from) params.set("from", new Date(`${from}T00:00:00`).toISOString());
       if (to) { const end = new Date(`${to}T00:00:00`); end.setDate(end.getDate() + 1); params.set("to", new Date(end.getTime() - 1).toISOString()); }
       if (previous?.nextCursor) params.set("cursor", previous.nextCursor);
-      // A completed import changes the key so retained history appears immediately.
-      params.set("imported", String(!!sync.data));
       return [`${base}?${params}`, userId] as const;
     },
-    ([url]: readonly [string, string]) => {
-      const parsed = new URL(url, window.location.origin); parsed.searchParams.delete("imported");
-      return workspaceFetch<ActivityPage>(parsed.pathname + parsed.search);
-    },
+    ([url]: readonly [string, string]) => workspaceFetch<ActivityPage>(url),
     { refreshInterval: 10_000, revalidateOnFocus: true },
   );
+  async function loadHistory() {
+    if (historyInFlight.current || historyCursor === null) return;
+    historyInFlight.current = true;
+    setSyncingHistory(true);
+    setHistoryError(false);
+    try {
+      const query = historyCursor ? `?${new URLSearchParams({ after: historyCursor })}` : "";
+      const response = await fetch(`${base}/sync${query}`, { method: "POST", credentials: "include", cache: "no-store" });
+      if (!response.ok) throw new Error("Room history could not be imported.");
+      const page = await response.json() as { nextCursor: string | null };
+      setHistoryCursor(page.nextCursor);
+      // Refresh all loaded pages without advancing the history cursor again.
+      await mutate().catch(() => undefined);
+    } catch {
+      setHistoryError(true);
+    } finally {
+      historyInFlight.current = false;
+      setSyncingHistory(false);
+    }
+  }
   const runs = [...new Map((data?.flatMap((page) => page.runs) ?? []).map((run) => [runKey(run), run])).values()];
   const first = data?.[0], hasFilters = !!(roomId || agentId || status || from || to);
   return <section className="full-panel agent-activity" aria-label="Personal agent activity">
@@ -100,17 +107,22 @@ export function AgentActivity({ organizationId, userId }: { organizationId: stri
       <label>Status<select aria-label="Filter by status" value={status} onChange={(event) => setStatus(event.target.value)}><option value="">All statuses</option>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label>From<input aria-label="Activity from date" type="date" value={from} onChange={(event) => setFrom(event.target.value)} /></label>
       <label>To<input aria-label="Activity to date" type="date" value={to} onChange={(event) => setTo(event.target.value)} /></label>
-      <Button variant="outline" size="sm" disabled={isValidating || sync.isValidating} onClick={() => { void sync.mutate(); void mutate(); }}><RefreshCw size={14} />Refresh</Button>
+      <Button variant="outline" size="sm" disabled={isValidating || syncingHistory} onClick={() => void mutate()}><RefreshCw size={14} />Refresh</Button>
       {hasFilters && <Button variant="ghost" size="sm" onClick={() => { setRoomId(""); setAgentId(""); setStatus(""); setFrom(""); setTo(""); }}>Clear filters</Button>}
     </div>
     {invalidDates && <p role="alert">Choose an end date on or after the start date.</p>}
-    {sync.isValidating && <p role="status" className="agent-activity-notice">Checking recent room history…</p>}
-    {sync.error && <div role="alert" className="agent-activity-notice"><p>Recent room history couldn’t be imported. New recorded requests are still shown below.</p><Button variant="outline" size="sm" onClick={() => void sync.mutate()}>Retry history import</Button></div>}
+    <div className="agent-activity-notice">
+      <p>Load past requests from your rooms, five rooms at a time.</p>
+      {historyCursor !== null && <Button variant="outline" size="sm" disabled={syncingHistory} onClick={() => void loadHistory()}>{syncingHistory ? "Loading room history…" : historyError ? "Retry history import" : historyCursor ? "Load more room history" : "Load room history"}</Button>}
+      {syncingHistory && <p role="status">Checking room history…</p>}
+      {historyError && <p role="alert">Room history couldn’t be imported. Try again to continue from the same batch.</p>}
+      {historyCursor === null && <p role="status">Room history is up to date.</p>}
+    </div>
     {error && <div role="alert" className="agent-activity-notice"><p>Couldn’t load your activity.</p><Button variant="outline" onClick={() => void mutate()}>Retry activity</Button></div>}
     {!data && !error && !invalidDates && <ViewLoading />}
     {!!first?.active.length && !invalidDates && <aside className="agent-activity-live" aria-label="Working now"><h3><span />Working now</h3><ul>{first.active.map((run) => <li key={runKey(run)}><strong>{run.agentName}</strong><span>{run.status === "queued" ? "Queued" : run.activities.length ? run.activities.map((a) => `${a.agentName}: ${a.phase}${a.target ? ` · ${a.target}` : ""}`).join("; ") : "Running"}</span><Link href={roomHref(run.roomId)}>{run.roomName}</Link></li>)}</ul></aside>}
     {!invalidDates && <div className="agent-activity-list">{runs.map((run) => <RunCard key={runKey(run)} run={run} base={base} userId={userId} />)}</div>}
-    {data && !runs.length && !error && !invalidDates && !sync.isValidating && <div className="agent-activity-empty"><Activity size={28} /><h3>{hasFilters ? "No matching requests" : "Your agent work starts here"}</h3><p>{hasFilters ? "Try a different agent, room, status, or date range." : "Ask an agent to work in a room. Your requests and their results will appear here."}</p>{!hasFilters && <Link href="/?view=Rooms">Go to rooms</Link>}</div>}
+    {data && !runs.length && !error && !invalidDates && !syncingHistory && <div className="agent-activity-empty"><Activity size={28} /><h3>{hasFilters ? "No matching requests" : "Your agent work starts here"}</h3><p>{hasFilters ? "Try a different agent, room, status, or date range." : "Ask an agent to work in a room. Your requests and their results will appear here."}</p>{!hasFilters && <Link href="/?view=Rooms">Go to rooms</Link>}</div>}
     {!!data?.at(-1)?.nextCursor && !invalidDates && <Button variant="outline" disabled={isValidating} onClick={() => void setSize(size + 1)}>{isValidating ? "Loading…" : "Load more activity"}</Button>}
   </section>;
 }
