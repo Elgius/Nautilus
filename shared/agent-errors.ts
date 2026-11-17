@@ -20,6 +20,7 @@ export const agentErrorMessages = {
   REVIEW_CONTEXT_TOO_LARGE: 'The change is too large to review. Use a smaller batch.',
   REVIEW_REJECTED: 'The review could not verify this change against your request. This change was not saved.',
   REVIEW_UNAVAILABLE: 'The review service could not verify this change. Try again.',
+  ARTIFACT_REVIEW_REQUIRED: 'The final formatting and quality review is incomplete.',
   EDIT_ALREADY_REJECTED: 'This unchanged edit was already rejected.',
   DELEGATION_SELF_TARGET: 'An agent cannot delegate work to itself.',
   DELEGATION_LIMIT_REACHED: 'The specialist assignment limit was reached.',

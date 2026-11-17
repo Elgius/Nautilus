@@ -147,11 +147,15 @@ open editor has received the update.
 ## Agent creation
 
 `createDocument` accepts a stable UUID `requestId`, `title`, optional `category`
-(default `Notes`), `changeSummary`, and `paragraphs: [{ text, style? }]`.
-Each paragraph is a single line; `style` supports `bold`, `italic`, `fontSize`,
-and a six-digit hex `color`. The server constructs the Univer snapshot, performs
-independent moderator review, and persists the document and version 1 under the
-active room lease. Read the new document before further edits.
+(default `Notes`), `changeSummary`, and `paragraphs: [{ text, role?, style? }]`.
+Supply each paragraph separately. Use `title`, `heading`, `subheading`, or `body`
+for its role. The opening text is styled as a title when it matches the document
+name and no title role is supplied. The server applies native heading styles,
+body typography, and spacing by default. Explicit `bold`, `italic`, `fontSize`,
+and six-digit hex `color` override the text defaults. Use `layout: "plain"`
+when the user asks for unformatted content. The moderator independently reviews
+the creation before saving version 1 under the room lease. Read the saved
+document before further edits and review its styles before finishing.
 
 Reuse the same request ID and identical input after an uncertain result. Durable
 receipts are scoped to the authenticated user and room, survive job cleanup, and

@@ -29,12 +29,15 @@ function harness(prepare?: (agent: PrivateAgentProfile, skills: AgentSkill[]) =>
     create: async (input) => { writes.push(input); return { documentId: 'created', versionId: 'first', versionNumber: 1, requestId: input.requestId, saved: true, replayed: false } },
     edit: async (...args) => {
       if (args[1] !== version) throw new HTTPException(409, { message: 'A newer document version exists.' })
-      writes.push(args); version = 'v2'; return { versionId: 'v2', versionNumber: 2 }
+      writes.push(args)
+      const versionNumber = writes.length + 1
+      version = `v${versionNumber}`
+      return { versionId: version, versionNumber }
     },
   }
   const run: AgentRunContext = { id: 'run', token: 'lease', activity: async () => {},
     committed: async (commit) => { commits.push(commit) }, checkpoint: async (id, value) => { checkpoints.set(id, structuredClone(value) as Proposal) } }
-  const skills = createModeratorSkills(moderator, run, signal, {
+  const { skills, hasPendingArtifactReviews } = createModeratorSkills(moderator, run, signal, {
     review, reviewCreation: creationReview, backend: () => source, profiles: async () => [moderator, specialist, other],
     specialist: async (agent, _instruction, _signal, tools) => {
       if (prepare) return prepare(agent, tools)
@@ -45,9 +48,29 @@ function harness(prepare?: (agent: PrivateAgentProfile, skills: AgentSkill[]) =>
       return 'Prepared a proposal.'
     },
   })
-  return { skills, writes, commits, checkpoints, changeVersion: () => { version = 'v-other' } }
+  return { skills, hasPendingArtifactReviews, writes, commits, checkpoints, changeVersion: () => { version = 'v-other' } }
 }
 const assignment = { assignments: [{ agentId: specialist.id, documentIds: ['doc'], instruction: 'Improve the greeting' }] }
+
+test('completion requires a read and final review of the latest saved version', async () => {
+  const h = harness()
+  expect(h.hasPendingArtifactReviews()).toBe(false)
+  await execute(h.skills, 'readDocument', { documentId: 'doc' })
+  await execute(h.skills, 'applyDocumentEdits', edit)
+  expect(h.hasPendingArtifactReviews()).toBe(true)
+  const review = { documentId: 'doc', versionId: 'v2', checks: ['Checked the revised greeting and its formatting.'], limitations: ['No rendered page available.'] }
+  await expect(execute(h.skills, 'recordArtifactReview', review)).rejects.toMatchObject({ code: 'ARTIFACT_REVIEW_REQUIRED' })
+  await execute(h.skills, 'readDocument', { documentId: 'doc' })
+  await execute(h.skills, 'recordArtifactReview', review)
+  expect(h.hasPendingArtifactReviews()).toBe(false)
+
+  await execute(h.skills, 'applyDocumentEdits', { ...edit, expectedVersionId: 'v2' })
+  expect(h.hasPendingArtifactReviews()).toBe(true)
+  await execute(h.skills, 'readDocument', { documentId: 'doc' })
+  await expect(execute(h.skills, 'recordArtifactReview', review)).rejects.toMatchObject({ code: 'ARTIFACT_REVIEW_REQUIRED' })
+  await execute(h.skills, 'recordArtifactReview', { ...review, versionId: 'v3' })
+  expect(h.hasPendingArtifactReviews()).toBe(false)
+})
 
 test('specialists prepare proposals without writes; moderator acceptance saves once with attribution', async () => {
   const h = harness()
@@ -57,6 +80,7 @@ test('specialists prepare proposals without writes; moderator acceptance saves o
   await execute(h.skills, 'acceptProposal', { proposalId })
   expect(h.writes).toHaveLength(1)
   expect(h.commits).toEqual([{ documentId: 'doc', versionId: 'v2', versionNumber: 2 }])
+  expect(h.hasPendingArtifactReviews()).toBe(true)
   expect(h.checkpoints.get(proposalId)?.status).toBe('applied')
   await expect(execute(h.skills, 'acceptProposal', { proposalId })).rejects.toThrow('applied')
   expect(h.writes).toHaveLength(1)
@@ -228,10 +252,19 @@ test('specialists cannot create unless assigned; authorized creations remain pro
 })
 
 test('spreadsheet tool submits structured formulas and values through creation review', async () => {
-  const h = harness()
+  const h = harness(undefined, undefined, undefined, async () => ({
+    currentVersionId: 'first', kind: 'SPREADSHEET', result: { cells: [[{ v: 5 }, { f: '=A1*2' }]] },
+  }))
   const input = { requestId: creation.requestId, title: 'Budget', category: 'Notes', changeSummary: 'Create budget', sheets: [{ name: 'Budget', cells: [{ row: 0, column: 0, value: 5 }, { row: 0, column: 1, formula: '=A1*2' }] }] }
   await execute(h.skills, 'createSpreadsheet', input)
   expect(h.writes).toEqual([{ kind: 'SPREADSHEET', ...input }])
+  expect(h.hasPendingArtifactReviews()).toBe(true)
+  await execute(h.skills, 'readRange', { documentId: 'created', sheetId: 'sheet-1', row: 0, column: 0, rows: 1, columns: 2 })
+  await execute(h.skills, 'recordArtifactReview', {
+    documentId: 'created', versionId: 'first',
+    checks: ['Checked the saved budget value and the formula reference.'], limitations: ['Recalculation unavailable.'],
+  })
+  expect(h.hasPendingArtifactReviews()).toBe(false)
 })
 
 
@@ -241,6 +274,7 @@ test('durable replay returns the original commit without a second mutation or du
   expect(await execute(h.skills, 'createDocument', creationInput)).toEqual(saved)
   expect(h.writes).toHaveLength(0)
   expect(h.commits).toEqual([{ documentId: 'existing', versionId: 'first', versionNumber: 1 }])
+  expect(h.hasPendingArtifactReviews()).toBe(false)
 })
 
 test('a coherent multi-operation batch receives one review and creates one committed version', async () => {

@@ -51,6 +51,33 @@ test('creation commits content, first version, attribution and durable receipt t
   expect(snapshot.body.textRuns[0]).toMatchObject({ st: 0, ed: 8, ts: { bl: 1 } })
 })
 
+test('agent document creation persists title hierarchy and spacing without explicit font settings', async () => {
+  const h = harness()
+  await h.service().createDocument(scope, {
+    ...input, title: 'The Five Oceans', paragraphs: [
+      { text: 'The Five Oceans' },
+      { text: 'Earth’s ocean is one vast, connected body of salt water.' },
+      { text: 'Pacific Ocean', role: 'heading', style: { fontSize: 20 } },
+      { text: 'The largest ocean.' },
+    ],
+  }, actor)
+  const { snapshot } = JSON.parse([...h.objects.values()][0])
+  expect(snapshot.body.dataStream).toBe('The Five Oceans\rEarth’s ocean is one vast, connected body of salt water.\rPacific Ocean\rThe largest ocean.\r\n')
+  expect(snapshot.body.paragraphs).toHaveLength(4)
+  expect(snapshot.body.paragraphs[0].paragraphStyle).toMatchObject({ namedStyleType: 2, keepNext: 1 })
+  expect(snapshot.body.paragraphs[2].paragraphStyle).toMatchObject({ namedStyleType: 4, outlineLevel: 0 })
+  expect(snapshot.body.textRuns.map(({ ts }: { ts: object }) => ts)).toEqual([{ bl: 1, fs: 26 }, { fs: 12 }, { bl: 1, fs: 20 }, { fs: 12 }])
+  expect(snapshot.documentStyle.defaultParagraphStyle).toMatchObject({ spaceBelow: { v: 8 } })
+})
+
+test('plain layout and explicit body role disable inferred title formatting', () => {
+  const document = { ...input, title: 'Brief', paragraphs: [{ text: 'Brief' }] }
+  const plain = creationContent(parseCreation({ ...document, layout: 'plain' }), 'doc').snapshot
+  expect(plain.body).toMatchObject({ textRuns: [] })
+  const body = creationContent(parseCreation({ ...document, paragraphs: [{ text: 'Brief', role: 'body' }] }), 'doc').snapshot
+  expect(body.body).toMatchObject({ textRuns: [{ ts: { fs: 12 } }] })
+})
+
 test('concurrent attempts and retries from a new service/run return one durable creation', async () => {
   const h = harness()
   const results = await Promise.all([h.service().createDocument(scope, input, actor), h.service().createDocument(scope, input, actor)])

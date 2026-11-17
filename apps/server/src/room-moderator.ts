@@ -23,7 +23,9 @@ import { streamPrivateRoomAgent } from './private-room-agent-stream'
 import { createAgentModel } from './ai'
 import { agentAppearanceSelect } from './agents'
 import { personalAgentScope, registerPersonalRoomAgent } from './personal-agents'
-import { SkillOperationError } from './skill-operation-error'
+import { AgentRunError, SkillOperationError } from './skill-operation-error'
+import { documentId as documentIdSchema, versionId as versionIdSchema } from './agent_interface/schemas'
+import { roomArtifactFinalReview, roomArtifactFormatting } from './room-artifact-quality'
 
 export type Proposal = {
   id: string; documentId: string; expectedVersionId: string; kind: 'DOCUMENT' | 'SPREADSHEET'
@@ -39,9 +41,16 @@ type Dependencies = {
 }
 
 /** Specialists can prepare typed edits, but cannot call a shared-document writer. */
-export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRunContext, signal: AbortSignal, deps: Dependencies): AgentSkill[] {
+export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRunContext, signal: AbortSignal, deps: Dependencies) {
   const proposals = new Map<string, Proposal>()
   const creations = new Map<string, { input: DocumentCreation; status: Proposal['status'] }>()
+  const artifactReviews = new Map<string, { versionId: string; reviewed: boolean }>()
+  const recordCommit: AgentRunContext['committed'] = async (commit) => {
+    if (artifactReviews.get(commit.documentId)?.versionId !== commit.versionId) {
+      artifactReviews.set(commit.documentId, { versionId: commit.versionId, reviewed: false })
+    }
+    await run.committed(commit)
+  }
   let delegated = 0
   const evidence = new Map<string, { version: string | null; kind: string; reads: unknown[] }>()
   const tracked = (agent: PrivateAgentProfile, source: SkillBackend, write: SkillBackend['edit'], create?: SkillBackend['create']): SkillBackend => ({
@@ -76,7 +85,7 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
       phase: 'applying', target: targetLabel(edits[0]?.type ?? '', edits[0] ?? {}) }, profile.id)
     const result = await source.edit(documentId, expectedVersionId, kind, edits, summary, commitSignal) as { versionId: string; versionNumber: number }
     // Record success even when cancellation arrives immediately after the commit.
-    await run.committed({ documentId, versionId: result.versionId, versionNumber: result.versionNumber })
+    await recordCommit({ documentId, versionId: result.versionId, versionNumber: result.versionNumber })
     return result
   }
   const create: NonNullable<SkillBackend['create']> = async (raw, activeSignal) => {
@@ -100,13 +109,15 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
     await source.authorize()
     await run.activity({ runId: run.id, agentId: profile.id, agentName: profile.name, color: profile.color, phase: 'applying', target: `Creating ${input.title}` }, profile.id)
     const result = await source.create(input, active) as CreationResult
-    await run.committed({ documentId: result.documentId, versionId: result.versionId, versionNumber: result.versionNumber })
+    await recordCommit({ documentId: result.documentId, versionId: result.versionId, versionNumber: result.versionNumber })
     return result
   }
-  return [...createOfficeSkills(tracked(profile, source, commit, source.create ? create : undefined), signal), {
+  const skills: AgentSkill[] = [...createOfficeSkills(tracked(profile, source, commit, source.create ? create : undefined), signal), {
     id: 'room-moderator',
     instructions: [
       'You are the room moderator acting as the selected agent for this private request.',
+      roomArtifactFormatting,
+      roomArtifactFinalReview,
       'You alone may commit shared document edits. Humans cannot edit persisted room documents while this run holds the room lease.',
       'Create requested documents and spreadsheets with createDocument/createSpreadsheet. Reuse the identical creation requestId and input when retrying uncertain outcomes. Creation saves version 1. Specialists may propose creations only when allowCreation is explicitly enabled for their assignment.',
       'For simple requests use document tools directly. For independent sections or sheets delegate bounded work to specialists using delegateWork.',
@@ -118,6 +129,27 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
       'Resolve named documents with resolveDocument and read them before work; do not assume that an earlier document is still the target. Prepare a complete coherent section or a small worksheet in one atomic batch, at most 100 operations. Do not save titles, headings and individual questions in separate calls when they can be safely batched. Each write pays for a separate independent review. After a rejected scope review, do not repeatedly retry the same scope through smaller edits or delegation. Report the blocker accurately. Report partial completion honestly. Delegation is limited to six assignments per request.',
     ].join('\n'),
     tools: {
+      recordArtifactReview: tool({
+        description: 'Record the final checks on the latest saved version of an artifact changed in this run. Read that version before calling. Record each artifact after applying any in-scope corrections.',
+        inputSchema: z.strictObject({
+          documentId: documentIdSchema,
+          versionId: versionIdSchema,
+          checks: z.array(z.string().trim().min(1).max(300)).min(1).max(10),
+          limitations: z.array(z.string().trim().min(1).max(300)).max(10),
+        }),
+        execute: async ({ documentId, versionId, checks, limitations }) => {
+          signal.throwIfAborted()
+          await source.authorize()
+          signal.throwIfAborted()
+          const artifact = artifactReviews.get(documentId)
+          const context = evidence.get(documentId)
+          if (artifact?.versionId !== versionId || context?.version !== versionId) {
+            throw new SkillOperationError('ARTIFACT_REVIEW_REQUIRED', 'review', 'Read the latest saved version from this run before recording its final review.')
+          }
+          artifact.reviewed = true
+          return { documentId, versionId, checks, limitations }
+        },
+      }),
       listSpecialists: tool({ description: 'List other agents personally created by this user that can prepare scoped edit proposals. First delegation registers the selected agent with the room.', inputSchema: z.strictObject({}),
         execute: async () => { await source.authorize(); return (await deps.profiles()).filter(({ id }) => id !== profile.id).map(({ id, name, role }) => ({ id, name, role })) } }),
       delegateWork: tool({ description: 'Run up to three independent specialist assignments in parallel. Read only named documents; allowCreation explicitly enables new-file proposals and permits an empty documentIds list. No shared writes are made.',
@@ -167,7 +199,7 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
             }
             const skills = createOfficeSkills(tracked(agent, scoped, scoped.edit, scoped.create), activeSignal, 'proposal').map((skill) => ({
               ...skill,
-              instructions: `${skill.instructions}\nYou are a specialist preparing proposals only. Your edit tools save proposals, never shared document versions. Do not claim edits are saved. Later proposals must not assume earlier proposals have been applied.`,
+              instructions: `${skill.instructions}\n${roomArtifactFormatting}\nYou are a specialist preparing proposals only. Before returning, check the proposed operations against the request and formatting guidance, and report any checks that need the saved version. Your edit tools save proposals, never shared document versions. Do not claim edits are saved. Later proposals must not assume earlier proposals have been applied.`,
               tools: Object.fromEntries(Object.entries(skill.tools).map(([name, definition]) => {
                 return [name.replace(/^apply/, 'propose').replace(/^create/, 'proposeCreate'), definition]
               })),
@@ -218,6 +250,10 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
       }),
     },
   }]
+  return {
+    skills,
+    hasPendingArtifactReviews: () => [...artifactReviews.values()].some((artifact) => !artifact.reviewed),
+  }
 }
 
 function targetLabel(operation: string, args: Record<string, unknown>) {
@@ -230,7 +266,7 @@ function targetLabel(operation: string, args: Record<string, unknown>) {
   return operation === 'readWorkbook' ? 'Workbook' : 'Document'
 }
 
-export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, run: AgentRunContext,
+export async function* streamRoomModerator(env: Bindings, identity: ChatIdentity, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, run: AgentRunContext,
   withDatabase: <T>(action: (db: Database) => Promise<T>) => Promise<T>) {
   const loggingContext = { roomId: identity.roomId, runId: run.id }
   const knowledgeEvidence = createHubEvidence(identity, withDatabase)
@@ -244,10 +280,11 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
     } }, signal, 'read')
     skills.push(createPlannerReadSkill(identity, profile, run, withDatabase, signal))
     if (run.askUser) skills.push(createAgentQuestionSkill(run, signal))
-    return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, completeHubSkills(skills, hubRun, identity, withDatabase, signal), {
+    yield* streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, completeHubSkills(skills, hubRun, identity, withDatabase, signal), {
       reasoning: run.options?.reasoning, tool: run.tool, steps: 16, timeout: 175_000, toolCallConcurrency: 3, stage: run.stage,
       loggingContext: { ...loggingContext, kind: 'read-only' }, onIssue: run.issue,
     })
+    return
   }
   const dependencies: Dependencies = {
     reviewCreation: async (creation, activeSignal) => reviewDocumentCreation(createAgentModel(env), messages, { ...creation, reads: [...creation.reads, ...await knowledgeEvidence.reads()] }, activeSignal, loggingContext),
@@ -270,10 +307,21 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
       return report
     },
   }
-  const skills = createModeratorSkills(profile, run, signal, dependencies)
-  if (run.askUser) skills.push(createAgentQuestionSkill(run, signal))
+  const { skills, hasPendingArtifactReviews } = createModeratorSkills(profile, run, signal, dependencies)
+  const askUser = run.askUser
+  if (askUser) skills.push(createAgentQuestionSkill({
+    ...run,
+    askUser: async (input) => {
+      if (hasPendingArtifactReviews()) {
+        throw new SkillOperationError('ARTIFACT_REVIEW_REQUIRED', 'review', 'Finish reviewing the saved versions before pausing for input.')
+      }
+      await askUser(input)
+    },
+  }, signal))
   skills.push(createProgressSkill(identity, { agentId: profile.id, workToken: run.token, runId: run.id }, withDatabase, signal))
   skills.push(createPlannerSkill(identity, profile, run, withDatabase, signal, { ...dependencies, review: async (edit, active) => reviewPlannerEdit(createAgentModel(env), messages, { ...edit, reads: [...edit.reads, ...await knowledgeEvidence.reads()] }, active, loggingContext) }))
   if (!identity.scheduledDeliveryId) skills.push(createSchedulerSkill(identity, profile.id, withDatabase, signal))
-  return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, completeHubSkills(skills, hubRun, identity, withDatabase, signal), { stage: run.stage, reasoning: run.options?.reasoning, tool: run.tool, steps: 32, timeout: 175_000, preview: run.preview, onIssue: run.issue, loggingContext: { ...loggingContext, kind: 'moderator' } })
+  yield* streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, completeHubSkills(skills, hubRun, identity, withDatabase, signal), { stage: run.stage, reasoning: run.options?.reasoning, tool: run.tool, steps: 32, timeout: 175_000, preview: run.preview, onIssue: run.issue, loggingContext: { ...loggingContext, kind: 'moderator' } })
+  // The queue consumes this stream before setting the job's terminal status.
+  if (hasPendingArtifactReviews()) throw new AgentRunError('ARTIFACT_REVIEW_REQUIRED')
 }

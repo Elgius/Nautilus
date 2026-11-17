@@ -11,8 +11,20 @@ const fields = {
   title: z.string().trim().min(1).max(150), category: z.string().trim().min(1).max(70).default('Notes'),
   changeSummary: z.string().trim().min(1).max(500),
 }
+// Univer snapshot NamedStyleType values for Title, Heading 1, and Heading 2.
+const paragraphRoles = {
+  title: { namedStyleType: 2, fontSize: 26, spaceAbove: 0, spaceBelow: 12 },
+  heading: { namedStyleType: 4, fontSize: 18, spaceAbove: 12, spaceBelow: 6, outlineLevel: 0 },
+  subheading: { namedStyleType: 5, fontSize: 14, spaceAbove: 8, spaceBelow: 4, outlineLevel: 1 },
+} as const
 export const createDocumentInput = z.strictObject({ ...fields,
-  paragraphs: z.array(z.strictObject({ text: z.string().max(100_000).regex(/^[^\x00-\x08\x0a-\x1f]*$/), style: style.optional() })).min(1).max(1000),
+  layout: z.literal('plain').optional().describe('Use only when the user requests plain or unformatted content. Otherwise the server applies document layout defaults.'),
+  paragraphs: z.array(z.strictObject({
+    text: z.string().max(100_000).regex(/^[^\x00-\x08\x0a-\x1f]*$/),
+    role: z.enum(['title', 'heading', 'subheading', 'body']).optional()
+      .describe('Use title for the visible document title and heading or subheading for real sections. Use body for ordinary prose. An opening paragraph matching the file title is styled as a title by default.'),
+    style: style.optional(),
+  })).min(1).max(1000),
 }).refine((input) => input.paragraphs.reduce((size, p) => size + p.text.length, 0) <= 100_000, 'Keep document text within 100,000 characters.')
 export const createSpreadsheetInput = z.strictObject({ ...fields,
   sheets: z.array(z.strictObject({
@@ -54,17 +66,35 @@ function textStyle(input: z.infer<typeof style> = {}) {
 export function creationContent(input: DocumentCreation, id: string) {
   if (input.kind === 'DOCUMENT') {
     let dataStream = ''
-    const paragraphs: { startIndex: number; paragraphId: string }[] = []
     const textRuns: { st: number; ed: number; ts: ReturnType<typeof textStyle> }[] = []
-    input.paragraphs.forEach((paragraph, index) => {
+    const plain = input.layout === 'plain'
+    const inferTitle = !input.paragraphs.some((paragraph) => paragraph.role === 'title')
+    const firstText = input.paragraphs.findIndex(({ text }) => !!text.trim())
+    const paragraphs = input.paragraphs.map(({ text, role, style }, index) => {
+      const matchesTitle = inferTitle && index === firstText && text.trim().toLowerCase() === input.title.toLowerCase()
+      const paragraphRole = role ?? (matchesTitle ? 'title' : 'body')
+      const preset = plain || paragraphRole === 'body' ? undefined : paragraphRoles[paragraphRole]
+      const runStyle = plain ? style : { fontSize: preset?.fontSize ?? 12, ...(preset ? { bold: true } : {}), ...style }
       const start = dataStream.length
-      dataStream += paragraph.text
-      if (paragraph.style && paragraph.text.length) textRuns.push({ st: start, ed: dataStream.length, ts: textStyle(paragraph.style) })
-      paragraphs.push({ startIndex: dataStream.length, paragraphId: `paragraph-${index}` })
+      dataStream += text
+      const end = dataStream.length
+      if (runStyle && text.length) textRuns.push({ st: start, ed: end, ts: textStyle(runStyle) })
+      const paragraphId = `paragraph-${index}`
+      const paragraphStyle = preset && {
+        namedStyleType: preset.namedStyleType,
+        spaceAbove: { v: preset.spaceAbove },
+        spaceBelow: { v: preset.spaceBelow },
+        keepNext: 1,
+        ...('outlineLevel' in preset ? { headingId: paragraphId, outlineLevel: preset.outlineLevel } : {}),
+      }
       dataStream += '\r'
+      return { startIndex: end, paragraphId, ...(paragraphStyle ? { paragraphStyle } : {}) }
     })
     return validateOfficeContent(input.kind, { format: 'univer', kind: input.kind, snapshot: { id, title: input.title,
-      documentStyle: { documentFlavor: 1, pageSize: { width: 794, height: 1123 }, marginTop: 72, marginBottom: 72, marginLeft: 72, marginRight: 72 },
+      documentStyle: {
+        documentFlavor: 1, pageSize: { width: 794, height: 1123 }, marginTop: 72, marginBottom: 72, marginLeft: 72, marginRight: 72,
+        ...(!plain ? { defaultParagraphStyle: { lineSpacing: 1.15, spaceBelow: { v: 8 } } } : {}),
+      },
       body: { dataStream: dataStream + '\n', paragraphs, textRuns },
     } })
   }
