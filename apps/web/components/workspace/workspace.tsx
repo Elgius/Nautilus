@@ -45,7 +45,6 @@ import {
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -68,6 +67,7 @@ import dynamic from "next/dynamic";
 import { useWorkspaceData } from "@/lib/workspace-data";
 import { ViewBoundary, ViewLoading } from "./view-boundary";
 
+const AgentActivity = dynamic(() => import("./agent-activity").then((module) => module.AgentActivity), { loading: ViewLoading });
 const KnowledgeBase = dynamic(() => import("@/components/knowledge/knowledge-base").then((module) => module.KnowledgeBase), { loading: ViewLoading });
 const loadDocuments = () => import("./room-document-library");
 const loadPlanner = () => import("./planner");
@@ -658,24 +658,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
               agents={agents} rooms={rooms} onEdit={setEditingAgentId} onOpenRoom={openRoom}
               onCreate={() => { setNotice(""); setModal("agent"); }}
               onCreateRoom={(id) => { setSelectedAgents([id]); setNotice(""); setModal("room"); }} />}
-            {view === "Activity" && (
-              <section className="full-panel">
-                <div className="section-heading">
-                  <h2>Workspace timeline</h2>
-                  <Badge variant="outline">
-                    This session
-                  </Badge>
-                </div>
-                <ActivityFeed
-                  events={events}
-                  onOpen={(name) => {
-                    const room = rooms.find((item) => item.name === name);
-                    if (room) openRoom(room);
-                    else navigate("Agents");
-                  }}
-                />
-              </section>
-            )}
+            {view === "Activity" && <ViewBoundary><AgentActivity key={`${session.activeOrganization!.id}:${session.user.id}`} organizationId={session.activeOrganization!.id} userId={session.user.id} /></ViewBoundary>}
             {view === "Knowledge" && <ViewBoundary><KnowledgeBase key={session.activeOrganization!.id} organizationId={session.activeOrganization!.id} /></ViewBoundary>}
             {view === "Settings" && (
               <>

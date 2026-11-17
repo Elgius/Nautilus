@@ -27,9 +27,12 @@ type Dependencies = {
   send: (identity: ChatIdentity, event: PrivateAgentEvent) => Promise<void>
   waitUntil: (task: Promise<void>) => void
   changed?: (identity: ChatIdentity) => Promise<void>
+  archive?: (identity: ChatIdentity, job: PrivateAgentJob) => Promise<void>
 }
 const QUEUE = 'room-work:queue'
 const ACTIVITIES = 'room-work:activities:'
+const OUTBOX = 'activity-archive:'
+type ArchiveEntry = { identity: ChatIdentity; job: PrivateAgentJob }
 const RUN_MS = 180_000
 
 /** Durable room FIFO; only the moderator owns write tools. Private conversations
@@ -45,9 +48,54 @@ export class PrivateRoomAgents {
   private notificationRequested = false
   private deliveries = new Map<string, Promise<void>>()
   private active = new Map<string, AbortController>()
+  private archiving = false
+  private lastArchived = new Map<string, { at: number; signature: string }>()
   constructor(private deps: Dependencies) {}
   private prefix(identity: ChatIdentity) { return `private-agent:${encodeURIComponent(identity.userId)}:` }
   private key(identity: ChatIdentity, id: string) { return `${this.prefix(identity)}job:${id}` }
+  // Write the archive outbox in the same transaction as the job. A database
+  // outage must neither lose history nor turn successful agent work into failure.
+  private async putJob(tx: Pick<DurableObjectStorage, 'put'>, identity: ChatIdentity, job: PrivateAgentJob) {
+    await tx.put(this.key(identity, job.id), job)
+    if (this.deps.archive) await tx.put(`${OUTBOX}${this.key(identity, job.id)}`, { identity, job })
+  }
+  private async storeJob(identity: ChatIdentity, job: PrivateAgentJob) {
+    await this.deps.storage.transaction((tx) => this.putJob(tx, identity, job))
+  }
+  private async flushArchive() {
+    if (!this.deps.archive) return true
+    const entries = await this.deps.storage.list<ArchiveEntry>({ prefix: OUTBOX, limit: 50 })
+    let success = true
+    for (const [key, entry] of entries) {
+      if (!entry) continue
+      try {
+        await this.deps.archive(entry.identity, entry.job)
+        await this.deps.storage.transaction(async (tx) => {
+          const current = await tx.get<ArchiveEntry>(key)
+          if (current?.job.revision === entry.job.revision) await tx.delete(key)
+        })
+      } catch { success = false }
+    }
+    return success
+  }
+  async archiveHistory(identity: ChatIdentity) {
+    const jobs = await this.history(identity)
+    await this.deps.storage.transaction(async (tx) => {
+      for (const job of jobs) {
+        const key = `${OUTBOX}${this.key(identity, job.id)}`
+        const pending = await tx.get<ArchiveEntry>(key)
+        // Import must never overwrite a job or an outbox snapshot that advanced
+        // while history was being read.
+        if (this.deps.archive && (!pending || pending.job.revision <= job.revision)) await tx.put(key, { identity, job })
+      }
+    })
+    const success = await this.flushArchive()
+    // Concurrent imports can enqueue more than one batch, or both flush the
+    // same batch. Successful writes still need an alarm for anything left over.
+    const pending = (await this.deps.storage.list({ prefix: OUTBOX, limit: 1 })).size > 0
+    if (!success || pending) await scheduleRoomAlarm(this.deps.storage, Date.now() + 30_000)
+    return success
+  }
   async activity() {
     const queue = await this.deps.storage.get<Entry[]>(QUEUE) ?? []
     const activities = await Promise.all(queue.filter((entry) => entry.deadline && entry.deadline > Date.now())
@@ -64,8 +112,8 @@ export class PrivateRoomAgents {
       if (!job) continue
       // Migrate interrupted pre-queue jobs without replaying their writes.
       if ((job.status === 'running' || job.status === 'queued') && !queue.some((entry) => this.key(entry.identity, entry.id) === key)) {
-        job.status = 'failed'; job.error = 'The agent was interrupted. Please retry.'; job.revision++
-        await this.deps.storage.put(key, job)
+        job.status = 'failed'; job.error = 'The agent was interrupted. Please retry.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+        await this.storeJob(identity, job)
       }
       jobs.push(job)
     }
@@ -97,7 +145,7 @@ export class PrivateRoomAgents {
       }
       const queue = await tx.get<Entry[]>(QUEUE) ?? []
       if (queue.length >= 100 || queue.filter((entry) => entry.identity.userId === identity.userId).length >= 20) throw new Error('Too many queued requests. Wait for some work to finish.')
-      const job: PrivateAgentJob = { id, agentId: profile.id, agentName: profile.name, instruction, reply: '', status: 'queued', createdAt: now, updatedAt: now, revision: 0, mode, commits: [] }
+      const job: PrivateAgentJob = { id, agentId: profile.id, agentName: profile.name, instruction, reply: '', status: 'queued', createdAt: now, updatedAt: now, revision: 0, mode, commits: [], source: scheduled ? 'scheduled' : 'manual' }
       const indexKey = `${this.prefix(identity)}index`
       const ids = await tx.get<string[]>(indexKey) ?? []
       const retained: string[] = []
@@ -108,7 +156,7 @@ export class PrivateRoomAgents {
         }
       }
       await tx.put(indexKey, [...ids.filter((oldId) => !retained.includes(oldId)), id])
-      await tx.put(key, job)
+      await this.putJob(tx, identity, job)
       if (scheduled) await tx.put(receiptKey, true)
       await tx.put(QUEUE, [...queue, { identity, id, mode }])
       // Persist a wakeup with acceptance, before relying on waitUntil.
@@ -122,7 +170,26 @@ export class PrivateRoomAgents {
     this.wake()
     this.deps.waitUntil(Promise.all([this.safeSend(identity, job), this.changed(identity)]).then(() => {}))
   }
+  private requestArchive() {
+    if (!this.deps.archive || this.archiving) return
+    this.archiving = true
+    this.deps.waitUntil((async () => {
+      try {
+        const success = await this.flushArchive()
+        // A run may advance while its prior snapshot is being archived.
+        if (success) await this.flushArchive()
+        const pending = (await this.deps.storage.list({ prefix: OUTBOX, limit: 1 })).size > 0
+        const first = (await this.deps.storage.get<Entry[]>(QUEUE))?.[0]
+        const retry = pending ? Date.now() + (success ? 5000 : 30_000) : Infinity
+        const recovery = first ? (first.deadline ? first.deadline + 1000 : Date.now() + 1000) : Infinity
+        if (Number.isFinite(Math.min(retry, recovery))) await scheduleRoomAlarm(this.deps.storage, Math.min(retry, recovery))
+      } catch {
+        await scheduleRoomAlarm(this.deps.storage, Date.now() + 30_000)
+      } finally { this.archiving = false }
+    })())
+  }
   wake() {
+    this.requestArchive()
     this.readsRequested = true; this.writesRequested = true
     if (!this.pumpingReads) {
       this.pumpingReads = true
@@ -152,7 +219,7 @@ export class PrivateRoomAgents {
         return entry.identity
       }
       const job = await tx.get<PrivateAgentJob>(key)
-      if (job) { job.status = 'failed'; job.error = 'Cancelled before starting.'; job.revision++; await tx.put(key, job) }
+      if (job) { job.status = 'failed'; job.error = 'Cancelled before starting.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++; await this.putJob(tx, identity, job) }
       await tx.put(QUEUE, queue.filter((item) => item !== entry))
       return entry.identity
     })
@@ -183,8 +250,8 @@ export class PrivateRoomAgents {
         if ((entry.deadline ?? 0) > Date.now()) {
           await scheduleRoomAlarm(this.deps.storage, entry.deadline! + 1000)
         } else {
-          job.status = 'failed'; job.error = 'The agent was interrupted. Please retry.'; job.revision++
-          await this.deps.storage.put(this.key(entry.identity, entry.id), job)
+          job.status = 'failed'; job.error = 'The agent was interrupted. Please retry.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+          await this.storeJob(entry.identity, job)
           await this.safeSend(entry.identity, job)
           await this.remove(entry)
           return this.pumpReads()
@@ -200,8 +267,8 @@ export class PrivateRoomAgents {
       if (!job || job.status === 'failed' || job.status === 'complete') { await this.remove(entry); continue }
       const profile = await this.deps.profile(entry.identity, job.agentId)
       if (!profile || !await this.deps.canAccess(entry.identity)) {
-        job.status = 'failed'; job.error = 'Room or agent access expired.'; job.revision++
-        await this.deps.storage.put(key, job); await this.safeSend(entry.identity, job); await this.remove(entry); continue
+        job.status = 'failed'; job.error = 'Room or agent access expired.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+        await this.storeJob(entry.identity, job); await this.safeSend(entry.identity, job); await this.remove(entry); continue
       }
       const claimed = await this.deps.storage.transaction(async (tx) => {
         const current = await tx.get<Entry[]>(QUEUE) ?? []
@@ -220,6 +287,14 @@ export class PrivateRoomAgents {
   }
   private async safeSend(identity: ChatIdentity, job: PrivateAgentJob) {
     const key = this.key(identity, job.id), snapshot = structuredClone(job)
+    if (this.deps.archive) {
+      const signature = JSON.stringify([job.status, job.commits?.length, job.taskCommits?.length, job.activities])
+      const previous = this.lastArchived.get(key)
+      if (!previous || previous.signature !== signature || Date.now() - previous.at >= 5000) {
+        this.lastArchived.set(key, { at: Date.now(), signature })
+        this.requestArchive()
+      }
+    }
     // Preserve revisions across acceptance, streaming and terminal notifications.
     // A disconnected subscriber must not change execution/commit state.
     const delivery = (this.deliveries.get(key) ?? Promise.resolve()).then(async () => {
@@ -255,20 +330,20 @@ export class PrivateRoomAgents {
         if ((entry.deadline ?? 0) > Date.now()) {
           await scheduleRoomAlarm(this.deps.storage, entry.deadline! + 1000); return
         }
-        job.status = 'failed'; job.error = 'The agent was interrupted. Saved changes are preserved; review them before retrying.'; job.revision++
-        await this.deps.storage.put(key, job)
+        job.status = 'failed'; job.error = 'The agent was interrupted. Saved changes are preserved; review them before retrying.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+        await this.storeJob(entry.identity, job)
         await this.deps.release(entry.identity, entry.token)
         await this.safeSend(entry.identity, job)
         await this.remove(entry); continue
       }
       if (!await this.deps.canAccess(entry.identity)) {
-        job.status = 'failed'; job.error = 'Room access expired.'; job.revision++
-        await this.deps.storage.put(key, job); await this.safeSend(entry.identity, job); await this.remove(entry); continue
+        job.status = 'failed'; job.error = 'Room access expired.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+        await this.storeJob(entry.identity, job); await this.safeSend(entry.identity, job); await this.remove(entry); continue
       }
       const profile = await this.deps.profile(entry.identity, job.agentId)
       if (!profile) {
-        job.status = 'failed'; job.error = 'This agent is no longer assigned to the room.'; job.revision++
-        await this.deps.storage.put(key, job); await this.safeSend(entry.identity, job); await this.remove(entry); continue
+        job.status = 'failed'; job.error = 'This agent is no longer assigned to the room.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+        await this.storeJob(entry.identity, job); await this.safeSend(entry.identity, job); await this.remove(entry); continue
       }
       const token = crypto.randomUUID()
       if (!await this.deps.acquire(entry.identity, token)) { await scheduleRoomAlarm(this.deps.storage, Date.now() + 5000); return }
@@ -288,6 +363,8 @@ export class PrivateRoomAgents {
     }
   }
   private async remove(entry: Entry) {
+    this.lastArchived.delete(this.key(entry.identity, entry.id))
+    this.requestArchive()
     await this.deps.storage.transaction(async (tx) => {
       const queue = await tx.get<Entry[]>(QUEUE) ?? []
       await tx.put(QUEUE, queue.filter((item) => this.key(item.identity, item.id) !== this.key(entry.identity, entry.id)))
@@ -325,7 +402,7 @@ export class PrivateRoomAgents {
           // Persist checkpoints less often than socket output, with one in-flight
           // delivery and at most one pending cumulative snapshot per run.
           if (Date.now() - lastPersisted >= 1000) {
-            await this.deps.storage.put(key, update); lastPersisted = Date.now()
+            await this.storeJob(entry.identity, update); lastPersisted = Date.now()
           }
           await this.safeSend(entry.identity, update)
           if (update.reply) stage('output.sent')
@@ -336,7 +413,7 @@ export class PrivateRoomAgents {
       // A terminal or committed state must follow every in-flight partial update.
       await pending
       latest = undefined
-      await this.deps.storage.put(key, snapshot())
+      await this.storeJob(entry.identity, snapshot())
       const delivery = this.safeSend(entry.identity, job)
       if (waitForDelivery) await delivery
       else this.deps.waitUntil(delivery)
@@ -348,7 +425,7 @@ export class PrivateRoomAgents {
       const current = (await this.deps.storage.get<Entry[]>(QUEUE) ?? []).find((item) => this.key(item.identity, item.id) === key)
       if (current?.cancelRequested) controller.abort()
       controller.signal.throwIfAborted()
-      stage('dequeued'); job.status = 'running'; await save(false)
+      stage('dequeued'); job.status = 'running'; job.startedAt = new Date().toISOString(); await save(false)
       const messages: PrivateAgentMessage[] = [{ role: 'user', content: job.instruction }]
       let budget = 32_000 - job.instruction.length
       const history = entry.identity.scheduledDeliveryId ? [] : await this.history(entry.identity)
@@ -372,7 +449,9 @@ export class PrivateRoomAgents {
             }
             activities.set(agentId, { ...activity, color })
           } else activities.delete(agentId)
-          await this.deps.storage.put(ACTIVITIES + key, [...activities.values()])
+          job.activities = [...activities.values()]
+          await this.deps.storage.put(ACTIVITIES + key, job.activities)
+          await save(false)
           this.deps.waitUntil(this.changed(entry.identity))
         },
         committed: async (commit) => {
@@ -403,9 +482,10 @@ export class PrivateRoomAgents {
         }
       }
       if (!job.reply.trim() || !await this.deps.canAccess(entry.identity)) throw new Error('No response or access expired')
-      job.status = 'complete'; await save(); stage('complete')
+      job.status = 'complete'; job.finishedAt = new Date().toISOString(); job.activities = []; await save(); stage('complete')
     } catch {
       job.status = 'failed'; job.error = controller.signal.aborted ? 'Cancelled. Any saved changes are preserved.' : 'The agent could not complete this response. Please retry.'
+      job.finishedAt = new Date().toISOString(); job.activities = []
       await save(); stage('failed')
     } finally { controller.abort(); this.active.delete(key) }
   }

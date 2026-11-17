@@ -1,3 +1,4 @@
+import { agentActivity } from './agent-activity'
 import { runScheduler } from './scheduler'
 export { KnowledgeWorker } from './knowledge/worker'
 import { knowledgeRoutes } from './knowledge/routes'
@@ -121,6 +122,10 @@ const organizationMember = createMiddleware<AppEnv>(async (c, next) => {
   c.set('organizationId', organizationId)
   await next()
 })
+
+const activityPath = '/api/organizations/:organizationId/activity'
+app.use(`${activityPath}/*`, authenticated, organizationMember)
+app.route(activityPath, agentActivity)
 
 const documentLibraryPath = '/api/organizations/:organizationId/documents'
 app.use(documentLibraryPath, authenticated, organizationMember)

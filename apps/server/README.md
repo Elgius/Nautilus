@@ -662,3 +662,33 @@ organization/user fixtures. It checks tenant/bucket separation, sharing authorit
 six-hour scheduling, idempotency, checkpoint recovery, unchanged-source skipping,
 citations, and revocation during generation. AI calls are mocked; it never sends
 fixture data to an external model.
+
+## Personal agent activity
+
+The workspace Activity view reads `/api/organizations/:organizationId/activity`.
+It shows only the signed-in user's room-agent requests in rooms they currently
+belong to. Organization administrator roles do not grant access to other users'
+private requests. The endpoint supports `agentId`, `roomId`, `status`, inclusive
+ISO datetime `from`/`to`, and an opaque `cursor`. Request details are loaded from
+`/activity/:roomId/:runId` only when expanded.
+
+Apply migration `20261117120000_agent_activity` with the normal
+`bun run --filter @nautilus/server db:deploy` command before running the new
+server. The `agentActivityRun` archive survives rolling chat-history pruning;
+room or owner deletion removes it. The room coordinator writes a durable outbox
+with each job snapshot and retries database failures via its alarm. Database
+writes use monotonic revisions so delayed snapshots cannot replace newer work.
+
+On opening Activity, the client imports retained private history through the
+bounded `POST /activity/sync?after=...` endpoint (five rooms per page). Expired
+chat jobs cannot be recovered. Old jobs may have no execution start/finish times.
+The feed refreshes every ten seconds while visible; request details refresh during
+active work. Live phases are current state, not a retained tool-by-tool audit log.
+
+Validation:
+
+- `bun test apps/server/tests/agent-activity.test.ts apps/server/tests/private-room-agents.test.ts`
+- `bun run --filter @nautilus/web test:activity`
+- `ACTIVITY_TEST_DATABASE_URL=... bun test apps/server/tests/agent-activity.integration.test.ts`
+  against a migrated, dedicated test database. `ACTIVITY_TEST_WS_PROXY` optionally
+  supports a local WebSocket-to-Postgres proxy, as in the knowledge integration test.
