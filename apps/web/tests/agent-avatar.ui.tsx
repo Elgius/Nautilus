@@ -22,7 +22,7 @@ const bodies: Record<string, unknown>[] = [];
 let stored: Record<string, unknown> | undefined;
 let failCreate = true;
 globalThis.fetch = (async (url, init) => {
-  if (String(url).endsWith('/agent-hub-history')) return Response.json({ turns: [], next: null });
+  if (String(url).endsWith('/agent-hub-history')) return Response.json({ summaries: [], next: null });
   if (String(url).endsWith('/avatar-preview')) return Response.json({ avatar: avatarDesign });
   const body = JSON.parse(String(init?.body)); bodies.push(body);
   if (String(url).endsWith('/agent_creator_agent') && failCreate) {
@@ -54,15 +54,31 @@ const saved = new Map<string, Record<string, unknown>>();
 const legacyId = crypto.randomUUID();
 const legacyKey = 'nautilus:agent-chat:v1:test-user:test:' + legacyId;
 dom.localStorage.setItem(legacyKey, JSON.stringify({ id: legacyId, agentId: 'pencil', conversationId: crypto.randomUUID(), createdAt: 1, prompt: 'Old question', reply: 'Old reply' }));
+const transcriptReads: string[] = [];
+const summaryReads: string[] = [];
+let extraPage = false;
 globalThis.fetch = (async (url, init) => {
-  if (String(url).endsWith('/agent-hub-history')) {
+  if (new Headers(init?.headers).get('X-Hub-User') !== signedInUser) return new Response(null, { status: 403 });
+  const path = String(url).split('/agent-hub-history')[1];
+  if (path !== undefined) {
     if (init?.method === 'POST') {
       const turn = JSON.parse(String(init.body));
       assert.equal(turn.userId, signedInUser);
       saved.set(turn.id, turn);
       return Response.json({ turn });
     }
-    return Response.json({ turns: [...saved.values()].filter((turn) => turn.userId === signedInUser), next: null });
+    const owned = [...saved.values()].filter((turn) => turn.userId === signedInUser);
+    if (path.startsWith('/')) {
+      transcriptReads.push(path.slice(1));
+      return Response.json({ turns: owned.filter((turn) => turn.conversationId === path.slice(1)) });
+    }
+    summaryReads.push(path);
+    const summaries = new Map();
+    for (const turn of owned.sort((a, b) => Number(a.createdAt) - Number(b.createdAt))) {
+      const id = turn.conversationId;
+      summaries.set(id, { id, agentId: turn.agentId, title: summaries.get(id)?.title ?? turn.prompt, preview: turn.reply, lastId: turn.id, updatedAt: turn.createdAt });
+    }
+    return Response.json({ summaries: path ? [] : [...summaries.values()].reverse(), next: extraPage && !path ? 'older' : null });
   }
   assert.match(String(url), /agents\/pencil\/chat$/);
   const { messages, history } = JSON.parse(String(init?.body)) as { messages: { content: string }[]; history: { id: string; conversationId: string } };
@@ -75,6 +91,21 @@ globalThis.fetch = (async (url, init) => {
 await act(async () => root.render(hub('test-user')));
 assert.equal(dom.localStorage.getItem(legacyKey), null);
 assert.match(document.querySelector('.hub-history')!.textContent!, /Old reply/);
+const originalConversation = transcriptReads.at(-1)!;
+await type('.hub-composer textarea', 'Draft in original chat');
+extraPage = true;
+const remote = crypto.randomUUID();
+saved.set(remote, { id: remote, conversationId: crypto.randomUUID(), createdAt: 2, userId: signedInUser, agentId: 'pencil', prompt: 'Other device', reply: 'Remote reply' });
+const readsBeforeFocus = transcriptReads.length;
+await act(async () => { dom.dispatchEvent(new dom.Event('focus')); });
+assert.equal(document.querySelector<HTMLTextAreaElement>('.hub-composer textarea')!.value, 'Draft in original chat');
+assert.match(document.querySelector('.hub-history')!.textContent!, /Old reply/);
+assert.equal(transcriptReads.length, readsBeforeFocus);
+assert.ok(summaryReads.every((path) => !path));
+await button('Load more conversations');
+assert.equal(summaryReads.at(-1), '?after=older');
+assert.deepEqual([...new Set(transcriptReads)], [originalConversation]);
+extraPage = false;
 await button('New chat');
 await type('.hub-composer textarea', 'First question');
 await submit('.hub-composer');
@@ -84,7 +115,7 @@ await submit('.hub-composer');
 assert.deepEqual(prompts[1], ['Separate question']);
 await act(async () => root.render(null));
 await act(async () => root.render(hub('test-user')));
-assert.equal(document.querySelectorAll('.hub-recent-item').length, 3);
+assert.equal(document.querySelectorAll('.hub-recent-item').length, 4);
 const firstChat = [...document.querySelectorAll<HTMLButtonElement>('.hub-recent-item')].find((item) => item.textContent?.includes('First question'))!;
 await act(async () => firstChat.click());
 assert.match(document.querySelector('.hub-history')!.textContent!, /Reply to First question/);
@@ -92,6 +123,10 @@ await type('.hub-composer textarea', 'Follow up');
 await submit('.hub-composer');
 assert.deepEqual(prompts[2], ['First question', 'Reply to First question', 'Follow up']);
 signedInUser = 'another-user';
+await act(async () => { dom.dispatchEvent(new dom.Event('focus')); });
+assert.equal(document.querySelector('.hub-history'), null);
+assert.equal(document.querySelector('.hub-composer'), null);
+assert.match(document.querySelector('[role=alert]')!.textContent!, /session changed/);
 await act(async () => root.render(hub(signedInUser)));
 assert.ok(document.querySelector('[aria-label="No conversation history"] svg'));
 assert.equal(document.querySelectorAll('.hub-recent-item').length, 0);

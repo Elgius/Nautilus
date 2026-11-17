@@ -27,15 +27,26 @@ export function readHistory(prefix: string): HubTurn[] {
   return turns;
 }
 
-export async function loadHubHistory(organizationId: string, userId: string, signal: AbortSignal) {
-  const url = `/api/organizations/${encodeURIComponent(organizationId)}/agent-hub-history`;
+export type HubSummary = { id: string; agentId: string; title: string; preview: string; lastId: string; updatedAt: number };
+export type HubPage = { summaries: HubSummary[]; next: string | null };
+export class HubSessionChanged extends Error {}
+
+export async function hubFetch(url: string, userId: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("X-Hub-User", userId);
+  const response = await fetch(url, { ...init, headers, credentials: "include", cache: "no-store" });
+  if ([401, 403, 404].includes(response.status)) throw new HubSessionChanged();
+  return response;
+}
+
+export async function importHubHistory(url: string, userId: string, organizationId: string, signal: AbortSignal) {
   const prefix = historyPrefix(userId, organizationId);
   let legacy: HubTurn[] = [];
   try { legacy = readHistory(prefix); } catch { /* Browser storage may be disabled. */ }
   let importError = "";
   for (const turn of legacy) {
-    const response = await fetch(url, {
-      method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
+    const response = await hubFetch(url, userId, {
+      method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...turn, userId }), signal,
     });
     if (!response.ok) {
@@ -44,14 +55,5 @@ export async function loadHubHistory(organizationId: string, userId: string, sig
     }
     window.localStorage.removeItem(prefix + turn.id);
   }
-  const turns: HubTurn[] = [];
-  let next: string | null = null;
-  do {
-    const response: Response = await fetch(url + (next ? `?after=${encodeURIComponent(next)}` : ""), { credentials: "include", cache: "no-store", signal });
-    if (!response.ok) throw new Error("Couldn’t load saved conversations.");
-    const page = await response.json() as { turns: HubTurn[]; next: string | null };
-    turns.push(...page.turns);
-    next = page.next;
-  } while (next);
-  return { turns, importError };
+  return importError;
 }

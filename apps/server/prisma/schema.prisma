@@ -726,6 +726,7 @@ model HubTurn {
   userId         String
   id             String @db.Uuid
   conversationId String @db.Uuid
+  claimToken     String? @db.Uuid
   prompt         String
   reply          String
   createdAt      DateTime @default(now())

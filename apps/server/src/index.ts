@@ -46,7 +46,7 @@ app.use('/api/*', cors({
   origin: (origin, c) => origin === c.env.WEB_ORIGIN ? origin : undefined,
   credentials: true,
   allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'X-Invitation-Id'],
+  allowHeaders: ['Content-Type', 'X-Invitation-Id', 'X-Hub-User'],
 }))
 
 app.use('/api/*', async (c, next) => {
@@ -173,7 +173,7 @@ app.use(`${agentPath}/:agentId/chat`, authenticated, organizationMember)
 app.route(agentPath, agentChat)
 
 const historyPath = '/api/organizations/:organizationId/agent-hub-history'
-app.use(historyPath, authenticated, organizationMember)
+app.use(`${historyPath}/*`, authenticated, organizationMember)
 app.route(historyPath, hubHistory)
 
 const roomPath = '/api/organizations/:organizationId/rooms'

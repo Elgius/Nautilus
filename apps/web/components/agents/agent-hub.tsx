@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUp, ArrowUpRight, Bot, Ghost, Hash, MessageCircle, Plus, Search, Settings2, X } from "lucide-react";
 import { Message as ChatMessage } from "@/components/ui/message";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
-import { loadHubHistory, type HubTurn } from "@/lib/hub-history";
+import { hubFetch, HubSessionChanged, importHubHistory, type HubPage, type HubSummary, type HubTurn } from "@/lib/hub-history";
 import { AgentPortrait } from "./agent-portrait";
 import { Button } from "@/components/ui/button";
 import type { Agent } from "@/lib/agent-data";
@@ -28,10 +28,19 @@ function chatContext(messages: Message[]) {
   return messages.slice(start);
 }
 
-export function AgentHub({ userId, organizationId, agents, rooms, onCreate, onEdit, onCreateRoom, onOpenRoom }: {
+type HubProps = {
   userId: string; organizationId: string; agents: Agent[]; rooms: Room[]; onCreate: () => void;
   onEdit: (id: string) => void; onCreateRoom: (id: string) => void; onOpenRoom: (room: Room) => void;
-}) {
+};
+
+export function AgentHub(props: HubProps) {
+  const [changed, setChanged] = useState(false);
+  const onSessionChanged = useCallback(() => setChanged(true), []);
+  if (changed) return <section role="alert">Your session changed. <Button onClick={() => window.location.reload()}>Reload workspace</Button></section>;
+  return <HubWorkspace {...props} onSessionChanged={onSessionChanged} />;
+}
+
+function HubWorkspace({ userId, organizationId, agents, rooms, onCreate, onEdit, onCreateRoom, onOpenRoom, onSessionChanged }: HubProps & { onSessionChanged: () => void }) {
   const [selected, setSelected] = useState("");
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
@@ -39,42 +48,78 @@ export function AgentHub({ userId, organizationId, agents, rooms, onCreate, onEd
   const requests = useRef(new Map<string, AbortController>());
   const scroll = useRef<HTMLDivElement>(null);
   const [reload, setReload] = useState(0);
-  const [turns, setTurns] = useState<HubTurn[]>([]);
+  const [summaries, setSummaries] = useState<HubSummary[]>([]);
+  const [next, setNext] = useState<string | null>(null);
+  const [after, setAfter] = useState<string | null>(null);
+  const [paging, setPaging] = useState(false);
   const [historyReady, setHistoryReady] = useState(false);
   const [storageError, setStorageError] = useState("");
-  const [choices, setChoices] = useState<Record<string, string>>({});
+  const [choices, setChoices] = useState<Record<string, string | null>>({});
+  const [transcript, setTranscript] = useState<{ id: string; lastId: string; turns: HubTurn[] } | null>(null);
   const agent = agents.find((item) => item.id === selected) ?? agents[0];
-  const ordered = [...turns].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
-  const conversations = new Map<string, { first: HubTurn; last: HubTurn }>();
-  for (const turn of ordered) {
-    const previous = conversations.get(turn.conversationId);
-    conversations.set(turn.conversationId, { first: previous?.first ?? turn, last: turn });
+  const url = `/api/organizations/${encodeURIComponent(organizationId)}/agent-hub-history`;
+  // Pin the initial selection once, including an empty conversation for a new agent.
+  if (historyReady && agent && choices[agent.id] === undefined) {
+    setChoices({ ...choices, [agent.id]: summaries.find((item) => item.agentId === agent.id)?.id ?? null });
   }
-  const recent = [...conversations.values()].sort((a, b) => b.last.createdAt - a.last.createdAt);
-  const conversationId = choices[agent?.id] ?? recent.find(({ first }) => first.agentId === agent?.id)?.first.conversationId;
+  const conversationId = choices[agent?.id];
+  const summary = summaries.find((item) => item.id === conversationId);
+  const lastId = summary?.lastId;
+  const turns = transcript?.id === conversationId ? transcript?.turns ?? [] : [];
+  const transcriptReady = !summary || (transcript?.id === conversationId && transcript?.lastId === lastId);
   const thread = threads[conversationId ?? agent?.id] ?? empty;
-  const messages: Message[] = ordered.filter((turn) => turn.conversationId === conversationId)
-    .flatMap((turn) => [{ role: "user", content: turn.prompt }, { role: "assistant", content: turn.reply }]);
+  const messages: Message[] = turns.flatMap((turn) => [{ role: "user", content: turn.prompt }, { role: "assistant", content: turn.reply }]);
   if (thread.pending) messages.push({ role: "user", content: thread.pending });
 
   useEffect(() => {
     const controller = new AbortController();
     async function load() {
       try {
-        const result = await loadHubHistory(organizationId, userId, controller.signal);
+        const warning = after ? "" : await importHubHistory(url, userId, organizationId, controller.signal);
+        const response = await hubFetch(url + (after ? `?after=${encodeURIComponent(after)}` : ""), userId, { signal: controller.signal });
+        if (!response.ok) throw new Error();
+        const page: HubPage = await response.json();
         if (controller.signal.aborted) return;
-        setTurns((previous) => [...new Map([...previous, ...result.turns].map((turn) => [turn.id, turn])).values()]);
-        setStorageError(result.importError);
+        setSummaries((previous) => {
+          const items = new Map(previous.map((item) => [item.id, item]));
+          for (const item of page.summaries) {
+            if ((items.get(item.id)?.updatedAt ?? 0) <= item.updatedAt) items.set(item.id, item);
+          }
+          return [...items.values()].sort((a, b) => b.updatedAt - a.updatedAt || b.id.localeCompare(a.id));
+        });
+        setNext(page.next);
+        setStorageError(warning);
         setHistoryReady(true);
-      } catch {
-        if (!controller.signal.aborted) setStorageError("Couldn’t load saved conversations.");
-      }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof HubSessionChanged) onSessionChanged();
+        else setStorageError("Couldn’t load saved conversations.");
+      } finally { if (!controller.signal.aborted) setPaging(false); }
     }
     void load();
-    const refresh = () => setReload((value) => value + 1);
+    const refresh = () => { setAfter(null); setReload((value) => value + 1); };
     window.addEventListener("focus", refresh);
     return () => { controller.abort(); window.removeEventListener("focus", refresh); };
-  }, [organizationId, userId, reload]);
+  }, [after, url, organizationId, userId, reload, onSessionChanged]);
+
+  useEffect(() => {
+    if (!conversationId || !lastId || transcriptReady) return;
+    const controller = new AbortController();
+    async function loadTranscript(id: string, version: string) {
+      try {
+        const response = await hubFetch(`${url}/${id}`, userId, { signal: controller.signal });
+        if (!response.ok) throw new Error();
+        const data: { turns: HubTurn[] } = await response.json();
+        if (!controller.signal.aborted) setTranscript({ id, lastId: version, turns: data.turns });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof HubSessionChanged) onSessionChanged();
+        else setStorageError("Couldn’t load this conversation.");
+      }
+    }
+    void loadTranscript(conversationId, lastId);
+    return () => controller.abort();
+  }, [conversationId, lastId, transcriptReady, url, userId, onSessionChanged, reload]);
   const visible = agents.filter((item) => (item.name + " " + item.role).toLowerCase().includes(query.toLowerCase().trim()));
   const assigned = rooms.filter((room) => room.agentIds.includes(agent?.id));
 
@@ -91,7 +136,7 @@ export function AgentHub({ userId, organizationId, agents, rooms, onCreate, onEd
   }
   async function send(text: string) {
     const content = text.trim();
-    if (!agent || !content || !historyReady) return;
+    if (!agent || !content || !historyReady || !transcriptReady) return;
     const id = conversationId ?? crypto.randomUUID();
     if (requests.current.has(id)) return;
     setChoices((previous) => ({ ...previous, [agent.id]: id }));
@@ -101,7 +146,7 @@ export function AgentHub({ userId, organizationId, agents, rooms, onCreate, onEd
     const context: Message[] = [...messages, { role: "user", content }];
     update(id, { draft: "", pending: content, error: "" });
     try {
-      const response = await fetch(`/api/organizations/${encodeURIComponent(organizationId)}/agents/${encodeURIComponent(agent.id)}/chat`, {
+      const response = await hubFetch(`/api/organizations/${encodeURIComponent(organizationId)}/agents/${encodeURIComponent(agent.id)}/chat`, userId, {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
         body: JSON.stringify({ messages: chatContext(context), history: { id: turnId, conversationId: id } }), signal: controller.signal,
       });
@@ -110,9 +155,16 @@ export function AgentHub({ userId, organizationId, agents, rooms, onCreate, onEd
         throw new Error(result?.error || "The agent couldn’t reply. Try sending again.");
       }
       const turn: HubTurn = result.turn;
-      setTurns((previous) => [...previous.filter((item) => item.id !== turn.id), turn]);
+      setTranscript((current) => {
+        if (current && current.id !== id) return current;
+        const updated = (current?.turns ?? turns).filter((item) => item.id !== turn.id);
+        return { id, lastId: turn.id, turns: [...updated, turn] };
+      });
+      setSummaries((previous) => [{ id, agentId: agent.id, title: summary?.title ?? content.slice(0, 160),
+        preview: turn.reply.slice(0, 160), updatedAt: turn.createdAt, lastId: turn.id }, ...previous.filter((item) => item.id !== id)]);
       update(id, { pending: "", retry: undefined });
     } catch (error) {
+      if (error instanceof HubSessionChanged) { onSessionChanged(); return; }
       if (!controller.signal.aborted) update(id, { retry: { prompt: content, id: turnId }, draft: text, pending: "", error: error instanceof Error ? error.message : "Couldn’t send message." });
     } finally { requests.current.delete(id); }
   }
@@ -140,16 +192,17 @@ export function AgentHub({ userId, organizationId, agents, rooms, onCreate, onEd
           }}><Plus />New chat</Button>
         </div>
         <div className="hub-recent-list">
-          {recent.map(({ first, last }) => {
-            const owner = agents.find((item) => item.id === first.agentId);
+          {summaries.map((item) => {
+            const owner = agents.find((owner) => owner.id === item.agentId);
             if (!owner) return null;
-            return <Button key={first.conversationId} variant="ghost" className="hub-recent-item" aria-current={conversationId === first.conversationId ? "true" : undefined}
-              onClick={() => { setSelected(owner.id); setChoices((previous) => ({ ...previous, [owner.id]: first.conversationId })); }}>
-              <AgentPortrait agent={owner} small /><span><strong>{first.prompt}</strong><small>{owner.name} · {last.reply}</small></span>
+            return <Button key={item.id} variant="ghost" className="hub-recent-item" aria-current={conversationId === item.id ? "true" : undefined}
+              onClick={() => { setSelected(owner.id); setChoices((previous) => ({ ...previous, [owner.id]: item.id })); }}>
+              <AgentPortrait agent={owner} small /><span><strong>{item.title}</strong><small>{owner.name} · {item.preview}</small></span>
             </Button>;
           })}
-          {!recent.some(({ first }) => agents.some((item) => item.id === first.agentId)) && (historyReady ? <div className="hub-empty-history" role="img" aria-label="No conversation history"><Ghost size={30} strokeWidth={1.4} aria-hidden="true" /></div> : !storageError && <p>Loading conversations…</p>)}
+          {!summaries.some((item) => agents.some((owner) => owner.id === item.agentId)) && (historyReady ? <div className="hub-empty-history" role="img" aria-label="No conversation history"><Ghost size={30} strokeWidth={1.4} aria-hidden="true" /></div> : !storageError && <p>Loading conversations…</p>)}
         </div>
+        {next && <Button variant="ghost" size="sm" disabled={paging} onClick={() => { setPaging(true); setAfter(next); }}>Load more conversations</Button>}
         {storageError && <div role="alert">{storageError} <Button variant="ghost" size="sm" onClick={() => setReload((value) => value + 1)}>Retry</Button></div>}
       </section>
     </aside>
@@ -166,7 +219,8 @@ export function AgentHub({ userId, organizationId, agents, rooms, onCreate, onEd
           </DropdownMenuContent></DropdownMenu>
       </header>
       <div className="hub-history" ref={scroll} aria-label={`Conversation with ${agent.name}`} tabIndex={0}>
-        {!messages.length && <div className="hub-welcome"><AgentPortrait agent={agent} animated /><h2>{agent.name}</h2><p>{agent.role}</p>
+        {!transcriptReady && !storageError && <p role="status">Loading conversation…</p>}
+        {transcriptReady && !messages.length && <div className="hub-welcome"><AgentPortrait agent={agent} animated /><h2>{agent.name}</h2><p>{agent.role}</p>
           <button disabled={!historyReady} onClick={() => void send("What can you help me with?")}><MessageCircle size={15} />What can you help me with?<ArrowUpRight size={14} /></button></div>}
         {messages.map((message, index) => <ChatMessage key={index} align={message.role === "user" ? "end" : "start"}>
           <Bubble variant={message.role === "user" ? "default" : "muted"}><BubbleContent className="hub-message-content">
@@ -176,11 +230,11 @@ export function AgentHub({ userId, organizationId, agents, rooms, onCreate, onEd
       </div>
       <div className="hub-compose-wrap">{thread.error && <p role="alert">{thread.error}</p>}
         <form className="hub-composer" onSubmit={(event) => { event.preventDefault(); void send(thread.draft); }}>
-          <textarea rows={1} maxLength={32000} disabled={!!thread.pending || !historyReady} aria-label={`Message ${agent.name}`} placeholder={`Message ${agent.name}…`} value={thread.draft}
+          <textarea rows={1} maxLength={32000} disabled={!!thread.pending || !historyReady || !transcriptReady} aria-label={`Message ${agent.name}`} placeholder={`Message ${agent.name}…`} value={thread.draft}
             onChange={(event) => update(conversationId ?? agent.id, { draft: event.target.value })} onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
             }} />
-          <Button type="submit" size="icon-sm" disabled={!historyReady || !!thread.pending || !thread.draft.trim()} aria-label="Send message"><ArrowUp /></Button>
+          <Button type="submit" size="icon-sm" disabled={!historyReady || !transcriptReady || !!thread.pending || !thread.draft.trim()} aria-label="Send message"><ArrowUp /></Button>
         </form>
       </div>
     </div> : <div className="hub-welcome"><Bot size={42} /><h2>Create your first agent</h2><Button onClick={onCreate}><Plus />Create agent</Button></div>}
