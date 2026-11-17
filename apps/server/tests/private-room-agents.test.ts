@@ -9,6 +9,9 @@ const profile = { id: 'scout', name: 'Scout', role: 'Research', rules: ['Cite so
 function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<void>; reply?: string; preview?: string; archive?: (identity: ChatIdentity, job: PrivateAgentJob) => Promise<void> } = {}) {
   const values = new Map<string, unknown>()
   let transactions: Promise<unknown> = Promise.resolve()
+  const alarms: number[] = []
+  const list = (source: Map<string, unknown>, { prefix, limit }: { prefix: string; limit?: number }) =>
+    new Map([...source].filter(([key]) => key.startsWith(prefix)).sort(([a], [b]) => a.localeCompare(b)).slice(0, limit))
   const store = {
     get: async <T>(key: string) => structuredClone(values.get(key)) as T | undefined,
     put: async (key: string, value: unknown) => { values.set(key, structuredClone(value)) },
@@ -20,8 +23,8 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
           get: async <T>(key: string) => structuredClone(local.get(key)) as T | undefined,
           put: async (key: string, value: unknown) => { changed.add(key); local.set(key, structuredClone(value)) },
           delete: async (key: string) => { changed.add(key); return local.delete(key) },
-          list: async ({ prefix }: { prefix: string }) => new Map([...local].filter(([key]) => key.startsWith(prefix))),
-          setAlarm: async () => {},
+          list: async (options: { prefix: string; limit?: number }) => list(local, options),
+          setAlarm: async (time: number) => { alarms.push(time) },
         }
         const result = await callback(tx)
         for (const key of changed) { if (local.has(key)) values.set(key, local.get(key)); else values.delete(key) }
@@ -30,8 +33,8 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
       transactions = task.catch(() => {})
       return task
     },
-    setAlarm: async () => {},
-    list: async ({ prefix }: { prefix: string }) => new Map([...values].filter(([key]) => key.startsWith(prefix))),
+    setAlarm: async (time: number) => { alarms.push(time) },
+    list: async (options: { prefix: string; limit?: number }) => list(values, options),
   }
   const events: { userId: string; scheduledDeliveryId?: string; event: PrivateAgentEvent }[] = []
   const tasks: Promise<void>[] = []
@@ -57,7 +60,7 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
   }
   const service = new PrivateRoomAgents(deps)
   const invoke = (identity = alice, instruction = 'Alice secret', id = crypto.randomUUID()) => service.invoke(identity, { requestId: id, agentId: profile.id, instruction, userId: 'attacker' })
-  return { service, invoke, values, events, calls, tasks, restart: () => new PrivateRoomAgents(deps), revoke: () => { allowed = false } }
+  return { service, invoke, values, events, calls, tasks, alarms, restart: () => new PrivateRoomAgents(deps), revoke: () => { allowed = false } }
 }
 
 test('document previews are ephemeral and sent only through the requesting user’s private channel', async () => {
@@ -334,4 +337,27 @@ test('the activity archive outlives rolling room chat history', async () => {
   expect(history.some((job) => job.id === first)).toBe(false)
   expect(archived.size).toBe(55)
   expect(archived.get(first)).toMatchObject({ status: 'complete', instruction: 'Request 0' })
+})
+
+
+test('concurrent history imports schedule and finish entries beyond the archive batch limit', async () => {
+  const archived = new Map<string, PrivateAgentJob>()
+  const h = harness({ archive: async (identity, job) => { archived.set(`${identity.userId}:${job.id}`, structuredClone(job)) } })
+  for (const identity of [alice, bob]) {
+    const ids = Array.from({ length: 50 }, () => crypto.randomUUID())
+    h.values.set(`private-agent:${identity.userId}:index`, ids)
+    for (const id of ids) h.values.set(`private-agent:${identity.userId}:job:${id}`, {
+      id, agentId: profile.id, agentName: profile.name, instruction: `${identity.userId} private request`, reply: 'Saved',
+      status: 'complete', revision: 2, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    } satisfies PrivateAgentJob)
+  }
+  expect(await Promise.all([h.service.archiveHistory(alice), h.service.archiveHistory(bob)])).toEqual([true, true])
+  expect(archived.size).toBe(50)
+  expect([...h.values.keys()].filter((key) => key.startsWith('activity-archive:'))).toHaveLength(50)
+  expect(h.alarms.some((alarm) => alarm > Date.now())).toBe(true)
+  // Simulate the scheduled alarm on a newly created coordinator, without a new
+  // invocation, another import, or any connected room chat sockets.
+  h.restart().wake(); await settle(h.tasks)
+  expect(archived.size).toBe(100)
+  expect([...h.values.keys()].filter((key) => key.startsWith('activity-archive:'))).toHaveLength(0)
 })

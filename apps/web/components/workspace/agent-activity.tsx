@@ -29,7 +29,11 @@ async function syncHistory([base]: [string, string]) {
 }
 
 function RunDetails({ base, run, userId }: { base: string; run: ActivityRun; userId: string }) {
-  const { data, error, mutate } = useSWR<ActivityDetail>([`${base}/${encodeURIComponent(run.roomId)}/${encodeURIComponent(run.id)}`, userId], ([url]: [string, string]) => workspaceFetch<ActivityDetail>(url), { refreshInterval: run.status === "running" || run.status === "queued" ? 5000 : 0 });
+  const { data, error, mutate } = useSWR<ActivityDetail>(
+    [`${base}/${encodeURIComponent(run.roomId)}/${encodeURIComponent(run.id)}`, userId, run.updatedAt, run.status] as const,
+    ([url]: readonly [string, string, string, ActivityStatus]) => workspaceFetch<ActivityDetail>(url),
+    { refreshInterval: run.status === "running" || run.status === "queued" ? 5000 : 0 },
+  );
   if (error) return <div role="alert"><p>Couldn’t load this request.</p><Button variant="outline" size="sm" onClick={() => void mutate()}>Retry request</Button></div>;
   if (!data) return <p role="status">Loading request…</p>;
   return <div className="agent-run-details">

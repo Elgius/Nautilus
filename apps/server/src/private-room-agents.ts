@@ -80,7 +80,10 @@ export class PrivateRoomAgents {
       }
     })
     const success = await this.flushArchive()
-    if (!success) await this.deps.storage.setAlarm(Date.now() + 30_000)
+    // Concurrent imports can enqueue more than one batch, or both flush the
+    // same batch. Successful writes still need an alarm for anything left over.
+    const pending = (await this.deps.storage.list({ prefix: OUTBOX, limit: 1 })).size > 0
+    if (!success || pending) await this.deps.storage.setAlarm(Date.now() + 30_000)
     return success
   }
   async activity() {
