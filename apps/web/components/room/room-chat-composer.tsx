@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { agentMention, selectAgentMention } from "@/lib/agent-mention";
 import { defaultRoomSuggestions } from "./use-room-suggestions";
 import { withDocumentSelection, type DocumentSelection } from '@/lib/document-selection';
-import type { RoomAgentOption } from "../../../../shared/room-chat";
+import type { RoomAgentOption, HubOptions } from "../../../../shared/room-chat";
 
 type Props = {
   selection?: DocumentSelection | null;
@@ -22,7 +22,7 @@ type Props = {
   agentBusy: boolean;
   loadAgents: () => void;
   sendMessage: (text: string) => boolean;
-  invokeAgent: (agent: RoomAgentOption, instruction: string) => boolean | Promise<boolean>;
+  invokeAgent: (agent: RoomAgentOption, instruction: string, options?: Pick<HubOptions, 'knowledge' | 'reasoning'>) => boolean | Promise<boolean>;
   sendTyping: () => void;
 };
 const reasoningLevels = ["Low", "Medium", "High"];
@@ -65,7 +65,7 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
       submitting.current = true; setPreparing(true);
       const sentInstruction = instruction;
       try {
-        if (await invokeAgent(selected, text)) {
+        if (await invokeAgent(selected, text, { knowledge: ['ORGANIZATION'], reasoning: reasoning.toLowerCase() as HubOptions['reasoning'] })) {
           setInstruction((current) => current === sentInstruction ? '' : current);
           if (sentSelection) onClearSelection?.(sentSelection);
         }
@@ -141,7 +141,7 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
       <InputGroupAddon align="block-end" className="room-composer-footer">
         <InputGroupButton variant="outline" size="icon-sm" className="rounded-full" aria-label="Attach files" title="Attach files · local preview only" onClick={() => fileInput.current?.click()}><Plus size={17} /></InputGroupButton>
         <Select value={reasoning} onValueChange={(value) => { if (value) setReasoning(value); }}>
-          <SelectTrigger aria-label="Reasoning effort" title="Reasoning effort · UI preview only" className="room-reasoning-trigger"><Brain size={14} /><SelectValue /></SelectTrigger>
+          <SelectTrigger aria-label="Reasoning effort" title="Reasoning effort" className="room-reasoning-trigger"><Brain size={14} /><SelectValue /></SelectTrigger>
           <SelectContent aria-label="Reasoning effort">
             {reasoningLevels.map((level) => <SelectItem key={level} value={level}>{level}</SelectItem>)}
           </SelectContent>
@@ -150,7 +150,7 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
       </InputGroupAddon>
     </InputGroup>
     {submitError && <p role="alert" className="room-local-note">{submitError}</p>}
-    <p className="room-local-note">Enter to send · Shift + Enter for a new line · Reasoning is a UI preview</p>
+    <p className="room-local-note">Enter to send · Shift + Enter for a new line</p>
     {attachments.length > 0 && <p id={attachmentNoteId} role="status" className="room-local-note">Files stay on this device. Remove attachments to send a text message.</p>}
     <p className="room-local-note">{selected ? 'Only you can see this instruction and the agent’s reply.' : 'Room messages are shared with members. Use @ for private agent instructions.'}</p>
   </form>;

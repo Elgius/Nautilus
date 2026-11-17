@@ -74,6 +74,7 @@ import dynamic from "next/dynamic";
 import { useWorkspaceData } from "@/lib/workspace-data";
 import { ViewBoundary, ViewLoading } from "./view-boundary";
 
+const AgentHubChat = dynamic(() => import("@/components/agent-hub/agent-hub-chat").then((module) => module.AgentHubChat), { loading: ViewLoading });
 const KnowledgeBase = dynamic(() => import("@/components/knowledge/knowledge-base").then((module) => module.KnowledgeBase), { loading: ViewLoading });
 const loadDocuments = () => import("./room-document-library");
 const loadPlanner = () => import("./planner");
@@ -708,6 +709,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
                 className="agent-directory"
                 aria-labelledby="agent-directory-title"
               >
+                <AgentHubChat key={`${session.activeOrganization!.id}:${session.user.id}`} organizationId={session.activeOrganization!.id} userId={session.user.id} />
                 <div className="section-heading">
                   <div>
                     <h2 id="agent-directory-title">

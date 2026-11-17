@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { useSearchParams } from "next/navigation";
 import { CalendarDays, Circle, CircleCheck, CircleDashed, CircleDot, Columns3, List, ListFilter, Plus, Search, SlidersHorizontal, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,7 +30,9 @@ export function Planner({ mode, storageKey, organizationId }: { mode: "Kanban" |
   const readError = loadError ? 'Tasks could not be refreshed. Retry before editing.' : isLoading ? 'Loading tasks…' : '';
   const [roomFilter, setRoomFilter] = useState('');
   const [busy, setBusy] = useState(false);
-  const [draft, setDraft] = useState<Task | null>(null);
+  const linkedTaskId = useSearchParams()?.get('task');
+  const [draftOverride, setDraft] = useState<Task | null | undefined>(undefined);
+  const draft = draftOverride === undefined ? tasks.find((task) => task.id === linkedTaskId) ?? null : draftOverride;
   const [error, setError] = useState("");
   const [announcement, setAnnouncement] = useState("");
   const [dragging, setDragging] = useState<string | null>(null);

@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test'
-import { PrivateRoomAgents, type PrivateAgentMessage } from '../src/private-room-agents'
+import { PrivateRoomAgents, type PrivateAgentMessage, type AgentRunContext } from '../src/private-room-agents'
 import type { ChatIdentity } from '../src/room-chat-service'
-import type { PrivateAgentEvent } from '../../../shared/room-chat'
+import type { PrivateAgentEvent, PrivateAgentJob, HubSource } from '../../../shared/room-chat'
 
 const alice: ChatIdentity = { organizationId: 'org', roomId: 'room', userId: 'alice', sessionId: 'alice-session' }
 const bob = { ...alice, userId: 'bob', sessionId: 'bob-session' }
 const profile = { id: 'scout', name: 'Scout', role: 'Research', rules: ['Cite sources'] }
-function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<void>; reply?: string; preview?: string } = {}) {
+function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<void>; reply?: string; preview?: string; onRun?: (run: AgentRunContext, signal: AbortSignal) => Promise<void>; onEvent?: (event: PrivateAgentEvent) => void; filterHistory?: ConstructorParameters<typeof PrivateRoomAgents>[0]['filterHistory'] } = {}) {
   const values = new Map<string, unknown>()
   let transactions: Promise<unknown> = Promise.resolve()
   const store = {
@@ -39,19 +39,21 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
   let allowed = true
   const deps: ConstructorParameters<typeof PrivateRoomAgents>[0] = {
     storage: store as unknown as DurableObjectStorage,
+    filterHistory: options.filterHistory,
     canAccess: async () => allowed,
     acquire: async () => true,
     release: async () => {},
     profile: async (identity, id) => !options.denyAgent && identity.organizationId === 'org' && id === profile.id ? profile : null,
     stream: async function* (_profile, messages, signal, _identity, run) {
       calls.push(messages)
+      await options.onRun?.(run, signal)
       if (calls.length === 1) await options.gate
       signal.throwIfAborted()
       if (options.preview) await run.preview?.('write', options.preview)
       if (options.fail) throw new Error('PROVIDER_SECRET_AND_PROMPT')
       yield options.reply ?? 'Private response'
     },
-    send: async (identity, event) => { if (allowed) events.push({ userId: identity.userId, scheduledDeliveryId: identity.scheduledDeliveryId, event: structuredClone(event) }) },
+    send: async (identity, event) => { if (allowed) events.push({ userId: identity.userId, scheduledDeliveryId: identity.scheduledDeliveryId, event: structuredClone(event) }); options.onEvent?.(event) },
     waitUntil: (task) => { tasks.push(task) },
   }
   const service = new PrivateRoomAgents(deps)
@@ -256,4 +258,133 @@ test('scheduled execution excludes earlier unrelated private conversation', asyn
   await h.service.invoke({ ...alice, scheduledDeliveryId: id }, { requestId: id, agentId: profile.id, instruction: 'Future authorized task' }, true)
   await Promise.all(h.tasks)
   expect(h.calls[1]).toEqual([{ role: 'user', content: 'Future authorized task' }])
+})
+
+
+test('Hub conversations and knowledge scopes cannot inherit another conversation context', async () => {
+  const h = harness(), one = crypto.randomUUID(), two = crypto.randomUUID()
+  const invoke = async (conversationId: string, knowledge: string[], instruction: string) => {
+    await h.service.invoke(alice, { requestId: crypto.randomUUID(), agentId: profile.id, conversationId, knowledge, instruction }); await Promise.all(h.tasks)
+  }
+  await invoke(one, ['PERSONAL'], 'Private reference')
+  await invoke(two, ['ORGANIZATION'], 'New chat')
+  await invoke(one, ['ORGANIZATION'], 'Shared request')
+  expect(h.calls[1]).toEqual([{ role: 'user', content: 'New chat' }])
+  expect(h.calls[2]).toEqual([{ role: 'user', content: 'Shared request' }])
+  await invoke(one, ['PERSONAL'], 'Follow up privately')
+  expect(h.calls[3][0].content).toBe('Private reference')
+})
+
+test('tool cards persist without raw arguments and confirmation is owner-scoped', async () => {
+  const pending = Promise.withResolvers<{ jobId: string; confirmationId: string }>()
+  let approved = false
+  const h = harness({
+    onRun: async (run) => {
+      await run.tool?.({ id: 'delete', name: 'deleteTask', status: 'running' })
+      approved = await run.confirm!('Delete task?')
+      await run.tool?.({ id: 'delete', name: 'deleteTask', status: 'complete' })
+    },
+    onEvent: (event) => {
+      if (event.type === 'agent.update' && event.job.confirmations?.[0]?.status === 'pending') pending.resolve({ jobId: event.job.id, confirmationId: event.job.confirmations[0].id })
+    },
+  })
+  await h.invoke()
+  const { jobId, confirmationId } = await pending.promise
+  await expect(h.service.confirm(bob, jobId, confirmationId, true)).rejects.toThrow('no longer available')
+  await h.service.confirm(alice, jobId, confirmationId, true)
+  await Promise.all(h.tasks)
+  expect(approved).toBe(true)
+  const saved = (await h.service.history(alice))[0]
+  expect(saved.tools).toEqual([{ id: 'delete', name: 'deleteTask', status: 'complete' }])
+  expect(saved.confirmations?.[0].status).toBe('approved')
+  await expect(h.service.confirm(alice, jobId, confirmationId, true)).rejects.toThrow('no longer available')
+})
+
+test('cancelling during confirmation declines it and releases the room queue', async () => {
+  const pending = Promise.withResolvers<string>()
+  let approved = true
+  const h = harness({ onRun: async (run) => { approved = await run.confirm!('Delete task?') }, onEvent: (event) => {
+    if (event.type === 'agent.update' && event.job.confirmations?.[0]?.status === 'pending') pending.resolve(event.job.id)
+  } })
+  await h.invoke()
+  await h.service.cancel(alice, await pending.promise)
+  await Promise.all(h.tasks)
+  expect(approved).toBe(false)
+  expect((await h.service.history(alice))[0].status).toBe('failed')
+})
+
+test('citation records are included in streamed job JSON and survive history replay', async () => {
+  const source = { id: 'plan', title: 'Launch plan', scope: 'ORGANIZATION' as const, body: 'Approved', roomId: 'room', documentId: 'doc', messageId: null, updatedAt: '',
+    citations: [{ quote: 'Launch approved.', locator: 'Document body', documentVersionId: 'v1' }] }
+  const h = harness({ reply: 'Launch is approved [Plan](#source-plan). [Fake](#source-unknown)', onRun: async (run) => { await run.sources?.([source]) } })
+  await h.invoke(); await Promise.all(h.tasks)
+  const job = (await h.service.history(alice))[0]
+  expect(job.citations).toMatchObject([{ sourceId: 'plan', number: 1, quote: 'Launch approved.', documentVersionId: 'v1' }])
+  const event = h.events.filter(({ event }) => event.type === 'agent.update').at(-1)!.event
+  expect(event).toMatchObject({ type: 'agent.update', job: { citations: job.citations } })
+  expect(JSON.parse(JSON.stringify(job)).citations).toEqual(job.citations)
+  expect((await h.restart().history(alice))[0].citations).toEqual(job.citations)
+})
+
+
+const knowledgeSource: HubSource = { id: 'knowledge-source', title: 'Plan', revision: 1, scope: 'ORGANIZATION', body: 'TEAM_SECRET', roomId: 'room', documentId: 'doc', messageId: null, updatedAt: '', citations: [{ quote: 'TEAM_SECRET', locator: 'Body', documentVersionId: 'v1' }] }
+function withdrawnHistory(jobs: PrivateAgentJob[]) {
+  return jobs.map((job) => job.knowledgeReferences?.some((ref) => ref.id === knowledgeSource.id) ? { ...job, sources: [], citations: [], knowledgeUnavailable: true, reply: 'Knowledge is no longer available.' } : job)
+}
+
+test('withdrawing knowledge filters every live update and stops the active run', async () => {
+  let withdrawn = false
+  const afterWithdrawal: PrivateAgentEvent[] = []
+  const h = harness({ reply: 'TEAM_SECRET [Plan](#source-knowledge-source)',
+    filterHistory: async (_identity, jobs) => withdrawn ? withdrawnHistory(jobs) : jobs,
+    onRun: async (run) => { await run.sources?.([knowledgeSource]); withdrawn = true },
+    onEvent: (event) => { if (withdrawn) afterWithdrawal.push(structuredClone(event)) },
+  })
+  await h.invoke(); await Promise.all(h.tasks)
+  expect(afterWithdrawal.length).toBeGreaterThan(0)
+  expect(JSON.stringify(afterWithdrawal)).not.toContain('TEAM_SECRET')
+  expect(afterWithdrawal.at(-1)).toMatchObject({ type: 'agent.update', job: { status: 'failed', knowledgeUnavailable: true, citations: [] } })
+  expect((await h.service.history(alice))[0].reply).not.toContain('TEAM_SECRET')
+})
+
+test('knowledge authorization outages never fall back to sending an unfiltered response', async () => {
+  let outage = false
+  const sent: PrivateAgentEvent[] = []
+  const h = harness({ reply: 'TEAM_SECRET', onRun: async (run) => { await run.sources?.([knowledgeSource]); outage = true },
+    filterHistory: async (_identity, jobs) => { if (outage) throw new Error('database unavailable'); return jobs },
+    onEvent: (event) => { if (outage) sent.push(event) },
+  })
+  await h.invoke(); await Promise.all(h.tasks)
+  expect(sent).toEqual([])
+})
+
+test('follow-ups inherit source dependencies even without new retrieval and after parent history is pruned', async () => {
+  let withdrawn = false, turns = 0
+  const h = harness({ reply: 'TEAM_SECRET [Plan](#source-knowledge-source)',
+    filterHistory: async (_identity, jobs) => withdrawn ? withdrawnHistory(jobs) : jobs,
+    onRun: async (run) => { if (++turns === 1) await run.sources?.([knowledgeSource]) },
+  })
+  await h.invoke(alice, 'Original question'); await Promise.all(h.tasks)
+  await h.invoke(alice, 'Restate your answer'); await Promise.all(h.tasks)
+  const before = await h.service.history(alice)
+  expect(before[1].knowledgeReferences).toEqual([{ id: knowledgeSource.id, revision: 1 }])
+  expect(before[1].citations?.[0].sourceId).toBe(knowledgeSource.id)
+  expect(h.calls[1].some((message) => message.role === 'assistant' && message.content.includes('TEAM_SECRET'))).toBe(true)
+  h.values.delete(`private-agent:alice:job:${before[0].id}`)
+  withdrawn = true
+  expect(JSON.stringify(await h.restart().history(alice))).not.toContain('TEAM_SECRET')
+  await h.invoke(alice, 'A new question'); await Promise.all(h.tasks)
+  expect(h.calls[2]).toEqual([{ role: 'user', content: 'A new question' }])
+})
+
+test('answers citing more than ten documents retain all evidence through persistence and replay', async () => {
+  const sources = Array.from({ length: 12 }, (_, index) => ({ ...knowledgeSource, id: `document-${index}`, kind: 'document' as const, scope: 'ROOM' as const }))
+  const reply = sources.map((source) => `[Document](#source-${source.id})`).join(' ')
+  const h = harness({ reply, onRun: async (run) => { await run.sources?.(sources) } })
+  await h.invoke(); await Promise.all(h.tasks)
+  const job = (await h.restart().history(alice))[0]
+  expect(job.status).toBe('complete')
+  expect(job.sources).toHaveLength(12)
+  expect(job.citations).toHaveLength(12)
+  expect(job.citations?.[0].sourceId).toBe(sources[0].id)
 })

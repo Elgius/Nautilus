@@ -72,7 +72,7 @@ test('progress survives a new service/run and reads flag changed or missing docu
 test('concurrent retries are idempotent and older receipts survive subsequent updates', async () => {
   const h = harness(), service = progressService(h.db, identity, actor)
   const results = await Promise.all([service.save(input), service.save(input)])
-  expect(results.map((result) => result.replayed)).toEqual([false, true])
+  expect(results.map((result) => result.replayed).sort()).toEqual([false, true])
   expect(h.state().progress).toHaveLength(1); expect(h.state().receipts).toHaveLength(1)
   const update = { ...input, requestId: crypto.randomUUID(), expectedRevision: 1, remaining: [], status: 'complete' }
   expect(await service.save(update)).toMatchObject({ revision: 2, replayed: false })

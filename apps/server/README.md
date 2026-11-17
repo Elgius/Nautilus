@@ -174,7 +174,7 @@ Only user and assistant text messages are accepted, with up to 50 messages and
 are not persisted or automatically added to rooms. Client-supplied models,
 system instructions, and tools are ignored. Each call has a 60-second timeout,
 a 4,096 output-token limit, and at most one retry. Disconnects abort generation.
-No tools, file uploads, or background agent execution are enabled by this endpoint.
+This compatibility endpoint exposes document discovery and organization knowledge reads. Shared actions execute through the dedicated Agent Hub durable-run routes. File uploads remain unavailable here.
 
 Room conversations use `POST /api/organizations/:organizationId/rooms/:roomId/messages`
 to save the user message first, then `POST /api/organizations/:organizationId/rooms/:roomId/messages/:messageId/reply`
@@ -612,3 +612,7 @@ organization/user fixtures. It checks tenant/bucket separation, sharing authorit
 six-hour scheduling, idempotency, checkpoint recovery, unchanged-source skipping,
 citations, and revocation during generation. AI calls are mocked; it never sends
 fixture data to an external model.
+
+## Agent Hub
+
+See [the Agent Hub module](src/agent-hub/README.md) for its durable-run routes, document and planner tooling, knowledge permissions, and chat UI validation.

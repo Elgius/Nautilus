@@ -25,7 +25,7 @@ import { clampChatWidth } from "@/lib/room-layout";
 import type { DocumentSelection } from '@/lib/document-selection';
 import { initialRoomFileState, roomFileReducer } from "@/lib/room-file-state";
 
-export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
+export function RoomWorkspace({ initialData, initialDocumentId }: { initialData: RoomDetail; initialDocumentId?: string }) {
   const { session } = useWorkspaceSession();
   const organizationId = session.activeOrganization!.id;
   const { room } = initialData;
@@ -35,10 +35,10 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
   const panels = useRef<HTMLElement>(null);
   const [joined, setJoined] = useState(room.members.some(({ member }) => member.user.id === session.user.id));
   const [joining, setJoining] = useState(false);
-  const { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, cancelAgent, canSend, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage } = useRoomChat(organizationId, room.id, session.user.id, joined, initialData);
+  const { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, cancelAgent, confirmAgent, canSend, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage } = useRoomChat(organizationId, room.id, session.user.id, joined, initialData);
   const suggestions = useRoomSuggestions(organizationId, room.id, session.user.id, joined, messages);
-  const [mobilePanel, setMobilePanel] = useState<"chat" | "document">("chat");
-  const [fileState, dispatchFiles] = useReducer(roomFileReducer, room.documents[0]?.id, initialRoomFileState);
+  const [mobilePanel, setMobilePanel] = useState<"chat" | "document">(initialDocumentId ? "document" : "chat");
+  const [fileState, dispatchFiles] = useReducer(roomFileReducer, room.documents.find((document) => document.id === initialDocumentId)?.id ?? room.documents[0]?.id, initialRoomFileState);
   const [documentNavigation, setDocumentNavigation] = useState<HTMLDivElement | null>(null);
   const [documentActions, setDocumentActions] = useState<HTMLDivElement | null>(null);
   const [dirtyDocumentIds, setDirtyDocumentIds] = useState<Set<string>>(new Set());
@@ -115,7 +115,7 @@ export function RoomWorkspace({ initialData }: { initialData: RoomDetail }) {
               <p className="room-message-meta" role="status">{message.status === 'pending' ? 'Sending…' : 'Message failed'}{message.status === 'failed' && <Button variant="ghost" size="sm" disabled={!canSend} onClick={() => sendMessage(message.text, message.id)}>Retry</Button>}</p>
             </MessageContent></Message>
           </MessageScrollerItem>)}
-          <PrivateAgentConversation agents={room.agents.map(({ agent }) => agent)} jobs={agentJobs} canSend={canSend} busy={agentBusy} retry={invokeAgent} cancel={cancelAgent} />
+          <PrivateAgentConversation agents={room.agents.map(({ agent }) => agent)} jobs={agentJobs} canSend={canSend} busy={agentBusy} retry={invokeAgent} cancel={cancelAgent} confirm={confirmAgent} roomId={room.id} />
         </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton />

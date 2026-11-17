@@ -1,3 +1,5 @@
+import { createHubEvidence } from './agent-hub/evidence'
+import { completeHubSkills, withHubReadSources } from './agent-hub/runtime'
 import { createProgressSkill } from './progress/skill'
 import { reviewDocumentCreation, type CreationReview } from './edit-review'
 import { parseCreation, type DocumentCreation, type CreationResult } from './documents/creation'
@@ -224,9 +226,11 @@ function targetLabel(operation: string, args: Record<string, unknown>) {
 export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, run: AgentRunContext,
   withDatabase: <T>(action: (db: Database) => Promise<T>) => Promise<T>) {
   const loggingContext = { roomId: identity.roomId, runId: run.id }
+  const knowledgeEvidence = createHubEvidence(identity, withDatabase)
+  const hubRun: AgentRunContext = { ...run, sources: async (sources) => { knowledgeEvidence.record(sources); await run.sources?.(sources) } }
   const dependencies: Dependencies = {
-    reviewCreation: (creation, activeSignal) => reviewDocumentCreation(createAgentModel(env), messages, creation, activeSignal, loggingContext),
-    review: (edit, activeSignal) => reviewDocumentEdit(createAgentModel(env), messages, edit, activeSignal, loggingContext),
+    reviewCreation: async (creation, activeSignal) => reviewDocumentCreation(createAgentModel(env), messages, { ...creation, reads: [...creation.reads, ...await knowledgeEvidence.reads()] }, activeSignal, loggingContext),
+    review: async (edit, activeSignal) => reviewDocumentEdit(createAgentModel(env), messages, { ...edit, reads: [...edit.reads, ...await knowledgeEvidence.reads()] }, activeSignal, loggingContext),
     backend: (agent) => createRoomSkillBackend(env, identity, agent.id, withDatabase, run.token, run.id),
     profiles: () => withDatabase(async (db) => {
       if (!await canChat(db, identity)) throw new Error('Access expired')
@@ -236,7 +240,7 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
     }),
     specialist: async (agent, instruction, activeSignal, specialistSkills) => {
       let report = ''
-      for await (const chunk of streamPrivateRoomAgent(env, agent, [{ role: 'user', content: instruction }], activeSignal, createAgentModel, specialistSkills, { preview: run.preview, loggingContext: { ...loggingContext, kind: 'specialist', parentAgentId: profile.id } })) {
+      for await (const chunk of streamPrivateRoomAgent(env, agent, [{ role: 'user', content: instruction }], activeSignal, createAgentModel, withHubReadSources(specialistSkills, identity, hubRun.sources), { preview: run.preview, loggingContext: { ...loggingContext, kind: 'specialist', parentAgentId: profile.id } })) {
         report += chunk
         if (report.length > 16_000) throw new Error('Specialist report too large')
       }
@@ -245,7 +249,7 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
   }
   const skills = createModeratorSkills(profile, run, signal, dependencies)
   skills.push(createProgressSkill(identity, { agentId: profile.id, workToken: run.token, runId: run.id }, withDatabase, signal))
-  skills.push(createPlannerSkill(identity, profile, run, withDatabase, signal, { ...dependencies, review: (edit, active) => reviewPlannerEdit(createAgentModel(env), messages, edit, active, loggingContext) }))
+  skills.push(createPlannerSkill(identity, profile, run, withDatabase, signal, { ...dependencies, review: async (edit, active) => reviewPlannerEdit(createAgentModel(env), messages, { ...edit, reads: [...edit.reads, ...await knowledgeEvidence.reads()] }, active, loggingContext) }))
   if (!identity.scheduledDeliveryId) skills.push(createSchedulerSkill(identity, profile.id, withDatabase, signal))
-  return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, skills, { steps: 32, timeout: 175_000, preview: run.preview, loggingContext: { ...loggingContext, kind: 'moderator' } })
+  return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, completeHubSkills(skills, hubRun, identity, withDatabase, signal), { reasoning: run.options?.reasoning, tool: run.tool, steps: 32, timeout: 175_000, preview: run.preview, loggingContext: { ...loggingContext, kind: 'moderator' } })
 }

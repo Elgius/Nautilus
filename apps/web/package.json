@@ -22,7 +22,9 @@
     "test:document-stream": "bun tests/document-stream.ui.mjs",
     "test:agent-avatar": "bun tests/agent-avatar.ui.tsx",
     "test:instant-navigation": "node tests/instant-navigation.ui.mjs",
-    "test:workspace-navigation": "API_ORIGIN=http://127.0.0.1:8791 bun run build && node tests/workspace-navigation.ui.mjs"
+    "test:workspace-navigation": "API_ORIGIN=http://127.0.0.1:8791 bun run build && node tests/workspace-navigation.ui.mjs",
+    "test:agent-hub": "bun tests/agent-hub.ui.tsx",
+    "test:agent-citations": "bun tests/agent-citations.ui.tsx"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
