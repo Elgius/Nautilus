@@ -8,12 +8,7 @@ import { roomRequest, toRoom, type RoomRecord } from "@/lib/room-client";
 import { type Agent, type AgentProfile, type AgentCreationInput } from "@/lib/agent-data";
 import { createAgentFromDescription, persistAgent } from "@/lib/agent-client";
 import { AgentPortrait } from "@/components/agents/agent-portrait";
-import {
-  Accordion,
-  AccordionItem,
-  AccordionTrigger,
-  AccordionContent,
-} from "@/components/ui/accordion";
+
 
 import "@/app/documents.css";
 import { ThemeSettings } from "@/components/theme-settings";
@@ -78,6 +73,7 @@ const loadDocuments = () => import("./room-document-library");
 const loadPlanner = () => import("./planner");
 const RoomDocumentLibrary = dynamic(() => loadDocuments().then((module) => module.RoomDocumentLibrary), { loading: ViewLoading });
 const Planner = dynamic(() => loadPlanner().then((module) => module.Planner), { loading: ViewLoading });
+const AgentHub = dynamic(() => import("@/components/agents/agent-hub").then((module) => module.AgentHub), { loading: ViewLoading });
 const AgentProfileDialog = dynamic(() => import("@/components/agents/agent-profile-dialog").then((module) => module.AgentProfileDialog));
 const CreateAgentDialog = dynamic(() => import("@/components/agents/create-agent-dialog").then((module) => module.CreateAgentDialog));
 function prefetchView(view: WorkspaceView) {
@@ -159,7 +155,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
   const agents = agentData.data ?? [];
   const setRooms = (change: (current: Room[]) => Room[]) => { void roomData.mutate((current) => change(current ?? []), { revalidate: true }); };
   const setAgents = (change: (current: Agent[]) => Agent[]) => { void agentData.mutate((current) => change(current ?? []), { revalidate: true }); };
-  const needsRooms = view === "Overview" || view === "Rooms";
+  const needsRooms = view === "Overview" || view === "Rooms" || view === "Agents";
   const dataError = (needsRooms && roomData.error) || (viewNeedsAgents && agentData.error);
   const waitingForData = (needsRooms && !roomData.data) || (viewNeedsAgents && !agentData.data);
   const editingAgent = agents.find((agent) => agent.id === editingAgentId);
@@ -358,24 +354,24 @@ export function Workspace({ children }: { children?: ReactNode }) {
               </span>
             </div>
           </header>
-          <main className="main-content">
+          <main className={view === "Agents" ? "main-content agent-hub-main" : "main-content"}>
             {children}
             <ViewBoundary key={view}>
             <Suspense fallback={<ViewLoading />}>
             {dataError && <div role="alert" className="mb-4 rounded-xl border p-4"><p>{dataError.message}</p><Button variant="outline" className="mt-2" onClick={() => { if (needsRooms) void roomData.mutate(); if (needsAgents) void agentData.mutate(); }}>Retry loading</Button></div>}
             {waitingForData ? (!dataError && <ViewLoading />) : <>
-            {view !== "Documents" && view !== "Kanban" && view !== "Calendar" && (
+            {view !== "Agents" && view !== "Documents" && view !== "Kanban" && view !== "Calendar" && (
               <div className="page-heading">
                 <h1>{view}{view === "Rooms" && <span className="ml-2 text-muted-foreground">{rooms.length}</span>}</h1>
                 <Button
                   className="primary-action"
                   onClick={() => {
                     setNotice("");
-                    setModal(view === "Agents" ? "agent" : "room");
+                    setModal("room");
                   }}
                 >
                   <Plus size={16} />
-                  {view === "Agents" ? "Create agent" : "Create room"}
+                  Create room
                 </Button>
               </div>
             )}
@@ -658,120 +654,10 @@ export function Workspace({ children }: { children?: ReactNode }) {
                 </section>
               </div>
             )}
-            {view === "Agents" && (
-              <section
-                className="agent-directory"
-                aria-labelledby="agent-directory-title"
-              >
-                <div className="section-heading">
-                  <div>
-                    <h2 id="agent-directory-title">
-                      Your agent team <span>{agents.length}</span>
-                    </h2>
-                    <p className="agent-directory-description">
-                      Explore each agent’s role, customize their identity, and
-                      set the rules they work by.
-                    </p>
-                  </div>
-                  <Badge variant="outline">
-                    {workingAgents} working · {agents.length - workingAgents}{" "}
-                    available
-                  </Badge>
-                </div>
-                <Accordion className="agent-accordion" multiple>
-                  {agents.map((agent) => {
-                    const assignedRooms = rooms.filter((room) =>
-                      room.agents.includes(agent.name),
-                    );
-                    return (
-                      <AccordionItem
-                        key={agent.id}
-                        value={agent.id}
-                        className="agent-accordion-item"
-                      >
-                        <div className="agent-accordion-header">
-                          <div className="agent-profile-button">
-                            <AgentPortrait agent={agent} />
-                            <span>
-                              <strong>{agent.name}</strong>
-                              <small>{agent.role}</small>
-                            </span>
-                          </div>
-                          <span
-                            className={`agent-state ${agent.status.toLowerCase()}`}
-                          >
-                            <i />
-                            {agent.status}
-                          </span>
-                          <AccordionTrigger
-                            className="agent-expand"
-                            aria-label={`Toggle ${agent.name} details`}
-                          >
-                            <span className="sr-only">
-                              {agent.name} details
-                            </span>
-                          </AccordionTrigger>
-                        </div>
-                        <AccordionContent>
-                          <div className="agent-accordion-details">
-                            <div>
-                              <h3>Agent rules</h3>
-                              <p className="agent-rules-summary">
-                                {agent.rules.join("\n") ||
-                                  "No rules yet. Add instructions to guide this agent."}
-                              </p>
-                            </div>
-                            <div>
-                              <h3>
-                                Assigned rooms{" "}
-                                <span>{assignedRooms.length}</span>
-                              </h3>
-                              <div className="agent-assigned-rooms">
-                                {assignedRooms.length ? (
-                                  assignedRooms.map((room) => (
-                                    <Button variant="ghost" size="sm"
-                                      key={room.id}
-                                      onClick={() => openRoom(room)}
-                                    >
-                                      <MessageSquare size={14} />
-                                      {room.name}
-                                      <ArrowUpRight size={12} />
-                                    </Button>
-                                  ))
-                                ) : (
-                                  <p>No rooms assigned yet.</p>
-                                )}
-                              </div>
-                            </div>
-                            <div className="agent-detail-actions">
-                              <Button
-                                variant="outline"
-                                onClick={() => setEditingAgentId(agent.id)}
-                              >
-                                Customize agent
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                onClick={() => {
-                                  setSelectedAgents([agent.id]);
-                                  setModal("room");
-                                }}
-                              >
-                                <Plus size={14} />
-                                Start a room
-                              </Button>
-                            </div>
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
-                    );
-                  })}
-                </Accordion>
-                <p className="form-note">
-                  Agent profiles are saved to your organisation.
-                </p>
-              </section>
-            )}
+            {view === "Agents" && <AgentHub userId={session.user.id} key={`${session.user.id}:${session.activeOrganization!.id}`} organizationId={session.activeOrganization!.id}
+              agents={agents} rooms={rooms} onEdit={setEditingAgentId} onOpenRoom={openRoom}
+              onCreate={() => { setNotice(""); setModal("agent"); }}
+              onCreateRoom={(id) => { setSelectedAgents([id]); setNotice(""); setModal("room"); }} />}
             {view === "Activity" && (
               <section className="full-panel">
                 <div className="section-heading">

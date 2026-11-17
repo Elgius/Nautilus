@@ -8,6 +8,7 @@ import { HTTPException } from 'hono/http-exception'
 import { createMiddleware } from 'hono/factory'
 import { bodyLimit } from 'hono/body-limit'
 import { agentSelect, agentProfileData, parseAgentProfile } from './agents'
+import { hubHistory } from './hub-history'
 import { agentChat } from './agent-chat'
 import { agentCreator } from './agent-creator-route'
 import { avatarGeneration } from './avatar-generation-route'
@@ -170,6 +171,10 @@ app.patch(`${agentPath}/:agentId`, authenticated, organizationMember, async (c) 
 
 app.use(`${agentPath}/:agentId/chat`, authenticated, organizationMember)
 app.route(agentPath, agentChat)
+
+const historyPath = '/api/organizations/:organizationId/agent-hub-history'
+app.use(historyPath, authenticated, organizationMember)
+app.route(historyPath, hubHistory)
 
 const roomPath = '/api/organizations/:organizationId/rooms'
 app.use(`${roomPath}/*`, authenticated, organizationMember)

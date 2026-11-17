@@ -22,6 +22,7 @@ const bodies: Record<string, unknown>[] = [];
 let stored: Record<string, unknown> | undefined;
 let failCreate = true;
 globalThis.fetch = (async (url, init) => {
+  if (String(url).endsWith('/agent-hub-history')) return Response.json({ turns: [], next: null });
   if (String(url).endsWith('/avatar-preview')) return Response.json({ avatar: avatarDesign });
   const body = JSON.parse(String(init?.body)); bodies.push(body);
   if (String(url).endsWith('/agent_creator_agent') && failCreate) {
@@ -33,6 +34,69 @@ globalThis.fetch = (async (url, init) => {
 }) as typeof fetch;
 const container = document.createElement('div'); document.body.append(container);
 const root = createRoot(container);
+const { AgentHub } = await import('../components/agents/agent-hub');
+const hub = (userId: string) => createElement(AgentHub, {
+  key: userId, userId, organizationId: 'test', agents: [{ id: 'pencil', name: 'Pencil', initials: 'P', color: 'green', avatarIcon: 'circle', role: 'Writing', status: 'Available', rules: [] }],
+  rooms: [], onCreate() {}, onEdit() {}, onCreateRoom() {}, onOpenRoom() {},
+});
+await act(async () => root.render(hub('test-user')));
+const settingsTrigger = document.querySelector<HTMLButtonElement>('button[aria-label="Agent settings and rooms"]')!;
+await act(async () => settingsTrigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+const roomGroup = document.querySelector('[role="menu"] [role="group"]');
+assert.ok(roomGroup, 'Agent settings menu opens with a group for assigned rooms');
+assert.equal(document.getElementById(roomGroup.getAttribute('aria-labelledby')!)?.textContent, 'Assigned rooms');
+assert.match(roomGroup.textContent ?? '', /Start a room/);
+await act(async () => root.render(null));
+const profileFetch = globalThis.fetch;
+const prompts: string[][] = [];
+let signedInUser = 'test-user';
+const saved = new Map<string, Record<string, unknown>>();
+const legacyId = crypto.randomUUID();
+const legacyKey = 'nautilus:agent-chat:v1:test-user:test:' + legacyId;
+dom.localStorage.setItem(legacyKey, JSON.stringify({ id: legacyId, agentId: 'pencil', conversationId: crypto.randomUUID(), createdAt: 1, prompt: 'Old question', reply: 'Old reply' }));
+globalThis.fetch = (async (url, init) => {
+  if (String(url).endsWith('/agent-hub-history')) {
+    if (init?.method === 'POST') {
+      const turn = JSON.parse(String(init.body));
+      assert.equal(turn.userId, signedInUser);
+      saved.set(turn.id, turn);
+      return Response.json({ turn });
+    }
+    return Response.json({ turns: [...saved.values()].filter((turn) => turn.userId === signedInUser), next: null });
+  }
+  assert.match(String(url), /agents\/pencil\/chat$/);
+  const { messages, history } = JSON.parse(String(init?.body)) as { messages: { content: string }[]; history: { id: string; conversationId: string } };
+  prompts.push(messages.map((message) => message.content));
+  const prompt = messages.at(-1)!.content;
+  const turn = { ...history, userId: signedInUser, agentId: 'pencil', createdAt: Date.now(), prompt, reply: 'Reply to ' + prompt };
+  saved.set(turn.id, turn);
+  return Response.json({ text: turn.reply, turn });
+}) as typeof fetch;
+await act(async () => root.render(hub('test-user')));
+assert.equal(dom.localStorage.getItem(legacyKey), null);
+assert.match(document.querySelector('.hub-history')!.textContent!, /Old reply/);
+await button('New chat');
+await type('.hub-composer textarea', 'First question');
+await submit('.hub-composer');
+await button('New chat');
+await type('.hub-composer textarea', 'Separate question');
+await submit('.hub-composer');
+assert.deepEqual(prompts[1], ['Separate question']);
+await act(async () => root.render(null));
+await act(async () => root.render(hub('test-user')));
+assert.equal(document.querySelectorAll('.hub-recent-item').length, 3);
+const firstChat = [...document.querySelectorAll<HTMLButtonElement>('.hub-recent-item')].find((item) => item.textContent?.includes('First question'))!;
+await act(async () => firstChat.click());
+assert.match(document.querySelector('.hub-history')!.textContent!, /Reply to First question/);
+await type('.hub-composer textarea', 'Follow up');
+await submit('.hub-composer');
+assert.deepEqual(prompts[2], ['First question', 'Reply to First question', 'Follow up']);
+signedInUser = 'another-user';
+await act(async () => root.render(hub(signedInUser)));
+assert.ok(document.querySelector('[aria-label="No conversation history"] svg'));
+assert.equal(document.querySelectorAll('.hub-recent-item').length, 0);
+await act(async () => root.render(null));
+globalThis.fetch = profileFetch;
 async function click(selector: string) {
   const button = document.querySelector(selector) as HTMLButtonElement | null;
   assert.ok(button, selector);

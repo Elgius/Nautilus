@@ -9,7 +9,7 @@ import type { AgentAppearance } from "../../../../shared/agent-appearance";
 import { Button } from "@/components/ui/button";
 import type { AgentRunMode, PrivateAgentJob, RoomAgentOption } from "../../../../shared/room-chat";
 
-const AgentReply = memo(function AgentReply({ text }: { text: string }) {
+export const AgentReply = memo(function AgentReply({ text }: { text: string }) {
   return <div className="room-private-reply">
     <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{
       a: ({ href, title, children }) => href ? <a href={href} title={title} target="_blank" rel="noopener noreferrer">{children}</a> : <span>{children}</span>,
