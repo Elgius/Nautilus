@@ -5,20 +5,20 @@ import { generateAgentInstructions } from '../src/agent-creator'
 import { generateAvatarPreview } from '../src/avatar-generation'
 import { streamPrivateRoomAgent } from '../src/private-room-agent-stream'
 import type { Bindings } from '../src/env'
-import type { AvatarDesign } from '../../../shared/avatar-design'
+import type { BotAvatarDesign } from '../../../shared/avatar-design'
 
 type ProviderRequest = {
   model: string; store: boolean; max_output_tokens: number; input: unknown
-  text: { format: { schema: { additionalProperties: boolean; properties: { eyes: unknown } } } }
+  text: { format: { schema: { additionalProperties: boolean; properties: { definition: { properties: { eyes: unknown } } } } } }
 }
 
 // Exercise the real provider adapter without credentials or paid API requests.
 const env = { OPENAI_API_KEY: 'test-key', LLM_MODEL: 'gpt-test' } as Bindings
 const profile = { id: 'scout', name: 'Scout', role: 'Research', rules: ['Cite sources.'] }
 const usage = { input_tokens: 3, output_tokens: 2, total_tokens: 5 }
-const avatar: AvatarDesign = {
-  bodyPath: 'M 22 9 L 78 9 Q 91 9 91 22 L 91 78 Q 91 91 78 91 L 22 91 Q 9 91 9 78 L 9 22 Q 9 9 22 9 Z',
-  color: '#9c5bfa', eyes: [{ cx: 38, cy: 56, rx: 5, ry: 7 }, { cx: 64, cy: 56, rx: 5, ry: 7 }],
+const avatar: BotAvatarDesign = {
+  color: '#9c5bfa',
+  definition: { version: 1, id: 'box', name: 'Box', body: { path: 'M20 20L80 20L80 80L20 80Z' }, eyes: { x: 50, y: 46, spacing: 15, scale: 1 } },
 }
 
 function mockFetch(handler: (...args: Parameters<typeof globalThis.fetch>) => ReturnType<typeof globalThis.fetch>) {
@@ -67,7 +67,7 @@ test('OpenAI requests preserve chat and structured generation contracts with sto
       expect(requests[index].text.format).toMatchObject({ type: 'json_schema', name, strict: true })
       expect(requests[index].text.format.schema.additionalProperties).toBe(false)
     }
-    expect(requests[2].text.format.schema.properties.eyes).toMatchObject({ minItems: 2, maxItems: 2 })
+    expect(requests[2].text.format.schema.properties.definition.properties.eyes).toMatchObject({ required: ['x', 'y', 'spacing', 'scale'] })
   } finally { fetch.mockRestore() }
 })
 

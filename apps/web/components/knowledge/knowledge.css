@@ -1,0 +1,29 @@
+.main-content[data-view="Knowledge"] {
+  padding: clamp(28px, 3.2vw, 48px) clamp(18px, 4.25vw, 64px);
+}
+[data-view="Knowledge"] .page-heading { flex-wrap: wrap; margin-bottom: 30px; }
+[data-view="Knowledge"] .page-heading p, .knowledge-scope p { font-size: 14px; line-height: 26px; color: var(--muted-foreground); }
+[data-view="Knowledge"] .page-heading p { margin-top: 12px; }
+[data-view="Knowledge"] .primary-action { height: 40px; margin: 0; }
+.knowledge-library, .knowledge-scope, .knowledge-source-summary { display: grid; min-width: 0; }
+.knowledge-library { gap: 24px; }
+.knowledge-scope { gap: 16px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+.knowledge-section-title, .knowledge-source-row, .knowledge-actions {
+  display: flex; align-items: center; gap: 16px;
+}
+.knowledge-section-title, .knowledge-source-row { justify-content: space-between; flex-wrap: wrap; }
+.knowledge-section-title h2 { font-size: 15px; font-weight: 550; line-height: 32px; }
+.knowledge-section-title span, .knowledge-source-summary p { font-size: 12px; line-height: 24px; color: var(--muted-foreground); }
+.knowledge-source { padding: 24px 28px; border: 1px solid var(--border); border-radius: 10px; }
+.knowledge-source { min-width: 0; border-inline-start: 3px solid var(--primary); background: var(--card); overflow-wrap: anywhere; }
+.knowledge-source-summary { gap: 12px; }
+.knowledge-source-summary h3 { font-size: 14px; font-weight: 500; line-height: 28px; }
+.knowledge-source-summary p, .knowledge-source-link { display: inline-flex; align-items: center; gap: 8px; }
+.knowledge-source-summary svg { flex-shrink: 0; }
+.knowledge-actions { gap: 8px; flex-wrap: wrap; }
+.knowledge-actions button, .knowledge-scope button, .knowledge-source-link { min-height: 40px; }
+.knowledge-source-link { padding: 0 12px; border: 1px solid var(--border); border-radius: 7px; color: var(--foreground); font-size: 13px; }
+.knowledge-source-link:hover { background: var(--muted); }
+@media (max-width: 640px) {
+  .knowledge-source { padding: 20px; }
+}

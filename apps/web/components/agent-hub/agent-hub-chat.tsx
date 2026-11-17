@@ -33,7 +33,7 @@ export function AgentHubChat({ organizationId, userId }: { organizationId: strin
   const rooms = useSWR(['hub-rooms', organizationId, userId], () => hubRequest<{ rooms: HubRoom[] }>(organizationId, '/rooms'));
   const capabilities = useSWR(['hub-capabilities', organizationId, userId], () => hubRequest<Capabilities>(organizationId, '/capabilities'));
   const room = rooms.data?.rooms.find((item) => item.id === roomId) ?? rooms.data?.rooms[0];
-  return <section className="agent-hub" aria-label="Agent Hub chat">
+  return <section className="agent-hub-tools" aria-label="Agent Hub chat">
     <header className="agent-hub-heading"><div><h2>Agent Hub</h2><p>Talk privately with your agents and work across documents, Kanban, and Calendar.</p></div>
       <label>Room<select aria-label="Agent Hub room" value={room?.id ?? ''} onChange={(event) => setRoomId(event.target.value)}><option value="" disabled>Choose a room</option>{rooms.data?.rooms.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
     </header>

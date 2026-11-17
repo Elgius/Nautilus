@@ -16,6 +16,7 @@ datasource db {
 }
 
 model User {
+  activityRuns AgentActivityRun[]
   knowledgeBases KnowledgeBase[]
   knowledgeSources KnowledgeSource[]
   agentProgress AgentProgress[]
@@ -108,6 +109,7 @@ model Organization {
 }
 
 model Member {
+  hubConversations HubConversation[]
   id             String       @id
   organizationId String
   userId         String
@@ -178,6 +180,8 @@ enum AgentStatus {
 }
 
 model Agent {
+  knowledgeSchedules KnowledgeAgentSchedule[]
+  hubConversations HubConversation[]
   agentProgress AgentProgress[]
   scheduledDeliveries SchedulerDelivery[]
   id             String       @id @default(uuid())
@@ -250,6 +254,7 @@ enum DocumentStatus {
 }
 
 model Room {
+  activityRuns AgentActivityRun[]
   agentProgress AgentProgress[]
   tasks PlannerTask[]
   scheduledEvents SchedulerEvent[]
@@ -593,12 +598,26 @@ enum KnowledgeScope {
   ORGANIZATION
 }
 
+model KnowledgeAgentSchedule {
+  baseId        String
+  agentId       String
+  refreshHours  Int
+  nextRefreshAt DateTime @db.Timestamptz(3)
+  base          KnowledgeBase @relation(fields: [baseId], references: [id], onDelete: Cascade)
+  agent         Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  @@id([baseId, agentId])
+  @@index([nextRefreshAt])
+  @@map("knowledgeAgentSchedule")
+}
+
 model KnowledgeBase {
+  agentSchedules KnowledgeAgentSchedule[]
   id String @id @default(uuid())
   organizationId String
   scope KnowledgeScope
   ownerUserId String?
   enabled Boolean @default(true)
+  pausedAgentIds String[] @default([])
   nextRefreshAt DateTime @default(now()) @db.Timestamptz(3)
   lastCheckedAt DateTime? @db.Timestamptz(3)
   createdAt DateTime @default(now())
@@ -703,4 +722,64 @@ model KnowledgeRun {
   @@index([status, nextAttemptAt])
   @@index([sourceId, createdAt])
   @@map("knowledgeRun")
+}
+
+model HubConversation {
+  organizationId String
+  userId         String
+  id             String @db.Uuid
+  agentId        String
+  member         Member @relation(fields: [organizationId, userId], references: [organizationId, userId], onDelete: Cascade)
+  agent          Agent  @relation(fields: [organizationId, agentId], references: [organizationId, id], onDelete: Cascade)
+  turns          HubTurn[]
+
+  @@id([organizationId, userId, id])
+  @@index([organizationId, agentId])
+  @@map("hubConversation")
+}
+
+model HubTurn {
+  organizationId String
+  userId         String
+  id             String @db.Uuid
+  conversationId String @db.Uuid
+  claimToken     String? @db.Uuid
+  prompt         String
+  reply          String
+  createdAt      DateTime @default(now())
+  conversation   HubConversation @relation(fields: [organizationId, userId, conversationId], references: [organizationId, userId, id], onDelete: Cascade)
+
+  @@id([organizationId, userId, id])
+  @@index([organizationId, userId, conversationId, createdAt])
+  @@map("hubTurn")
+}
+
+// Owner-private run archive, independent of the room chat's rolling history.
+model AgentActivityRun {
+  organizationId String
+  roomId String
+  userId String
+  id String
+  agentId String
+  agentName String
+  title String @db.VarChar(200)
+  status String
+  source String
+  revision Int
+  instruction String
+  reply String
+  error String?
+  activities Json
+  commits Json
+  taskCommits Json
+  createdAt DateTime
+  updatedAt DateTime
+  startedAt DateTime?
+  finishedAt DateTime?
+  room Room @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Cascade, map: "agentActivityRun_room_fkey")
+  owner User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([organizationId, roomId, userId, id])
+  @@index([organizationId, userId, createdAt, id, roomId])
+  @@index([organizationId, userId, status, createdAt])
+  @@map("agentActivityRun")
 }

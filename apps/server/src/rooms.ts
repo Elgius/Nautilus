@@ -138,7 +138,7 @@ rooms.get('/:roomId/work', async (c) => {
     if (!response.ok) throw new HTTPException(503, { message: 'Room activity is unavailable.' })
     activity = await response.json<typeof activity>()
   }
-  return c.json({ ...activity, activities: locked ? activity.activities : [], locked,
+  return c.json({ ...activity, locked,
     expiresAt: locked ? room.agentWorkExpiresAt!.toISOString() : null,
     versions: Object.fromEntries(room.documents.map((document) => [document.id, document.currentVersionId])) }, 200, { 'Cache-Control': 'no-store' })
 })

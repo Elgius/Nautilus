@@ -1,14 +1,18 @@
 import { expect, test } from 'bun:test'
 import { PrivateRoomAgents, type PrivateAgentMessage, type AgentRunContext } from '../src/private-room-agents'
 import type { ChatIdentity } from '../src/room-chat-service'
-import type { PrivateAgentEvent, PrivateAgentJob, HubSource } from '../../../shared/room-chat'
+import type { HubSource, AgentRunMode, PrivateAgentJob, PrivateAgentEvent } from '../../../shared/room-chat'
+import { scheduleRoomAlarm } from '../src/room-alarm'
 
 const alice: ChatIdentity = { organizationId: 'org', roomId: 'room', userId: 'alice', sessionId: 'alice-session' }
 const bob = { ...alice, userId: 'bob', sessionId: 'bob-session' }
 const profile = { id: 'scout', name: 'Scout', role: 'Research', rules: ['Cite sources'] }
-function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<void>; reply?: string; preview?: string; onRun?: (run: AgentRunContext, signal: AbortSignal) => Promise<void>; onEvent?: (event: PrivateAgentEvent) => void; filterHistory?: ConstructorParameters<typeof PrivateRoomAgents>[0]['filterHistory'] } = {}) {
+function harness(options: { archive?: (identity: ChatIdentity, job: PrivateAgentJob) => Promise<void>; denyAgent?: boolean; fail?: boolean; gate?: Promise<void>; reply?: string; preview?: string; onRun?: (run: AgentRunContext, signal: AbortSignal) => Promise<void>; onEvent?: (event: PrivateAgentEvent) => void; filterHistory?: ConstructorParameters<typeof PrivateRoomAgents>[0]['filterHistory'] } = {}) {
   const values = new Map<string, unknown>()
   let transactions: Promise<unknown> = Promise.resolve()
+  const alarms: number[] = []
+  const list = (source: Map<string, unknown>, { prefix, limit }: { prefix: string; limit?: number }) =>
+    new Map([...source].filter(([key]) => key.startsWith(prefix)).sort(([a], [b]) => a.localeCompare(b)).slice(0, limit))
   const store = {
     get: async <T>(key: string) => structuredClone(values.get(key)) as T | undefined,
     put: async (key: string, value: unknown) => { values.set(key, structuredClone(value)) },
@@ -20,8 +24,9 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
           get: async <T>(key: string) => structuredClone(local.get(key)) as T | undefined,
           put: async (key: string, value: unknown) => { changed.add(key); local.set(key, structuredClone(value)) },
           delete: async (key: string) => { changed.add(key); return local.delete(key) },
-          list: async ({ prefix }: { prefix: string }) => new Map([...local].filter(([key]) => key.startsWith(prefix))),
-          setAlarm: async () => {},
+          list: async (options: { prefix: string; limit?: number }) => list(local, options),
+          getAlarm: async () => local.get('@alarm') ?? null,
+          setAlarm: async (at: number) => { alarms.push(at); changed.add('@alarm'); local.set('@alarm', at) },
         }
         const result = await callback(tx)
         for (const key of changed) { if (local.has(key)) values.set(key, local.get(key)); else values.delete(key) }
@@ -30,8 +35,9 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
       transactions = task.catch(() => {})
       return task
     },
-    setAlarm: async () => {},
-    list: async ({ prefix }: { prefix: string }) => new Map([...values].filter(([key]) => key.startsWith(prefix))),
+    getAlarm: async () => values.get('@alarm') ?? null,
+    setAlarm: async (at: number) => { alarms.push(at); values.set('@alarm', at) },
+    list: async (options: { prefix: string; limit?: number }) => list(values, options),
   }
   const events: { userId: string; scheduledDeliveryId?: string; event: PrivateAgentEvent }[] = []
   const tasks: Promise<void>[] = []
@@ -40,6 +46,7 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
   const deps: ConstructorParameters<typeof PrivateRoomAgents>[0] = {
     storage: store as unknown as DurableObjectStorage,
     filterHistory: options.filterHistory,
+    archive: options.archive,
     canAccess: async () => allowed,
     acquire: async () => true,
     release: async () => {},
@@ -57,8 +64,12 @@ function harness(options: { denyAgent?: boolean; fail?: boolean; gate?: Promise<
     waitUntil: (task) => { tasks.push(task) },
   }
   const service = new PrivateRoomAgents(deps)
-  const invoke = (identity = alice, instruction = 'Alice secret', id = crypto.randomUUID()) => service.invoke(identity, { requestId: id, agentId: profile.id, instruction, userId: 'attacker' })
-  return { service, invoke, values, events, calls, tasks, restart: () => new PrivateRoomAgents(deps), revoke: () => { allowed = false } }
+  const invoke = async (identity = alice, instruction = 'Alice secret', id = crypto.randomUUID(), mode: AgentRunMode = 'write') => {
+    await service.invoke(identity, { requestId: id, agentId: profile.id, instruction, mode, userId: 'attacker' })
+    // Let nonblocking acceptance and mocked I/O settle without awaiting a gated run.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  return { service, invoke, deps, alarms, values, events, calls, tasks, restart: () => new PrivateRoomAgents(deps), revoke: () => { allowed = false } }
 }
 
 test('document previews are ephemeral and sent only through the requesting user’s private channel', async () => {
@@ -152,6 +163,7 @@ test('multiple users queue requests while one moderator owns execution', async (
   await h.invoke(alice, 'Third', third)
   expect((await h.service.history(bob))[0].status).toBe('queued')
   expect((await h.service.activity()).queued).toBe(2)
+  await waitFor(() => h.calls.length === 1)
   expect(h.calls).toHaveLength(1)
   gate.resolve(); await settle(h.tasks)
   expect(h.calls.map((messages) => messages.at(-1)?.content)).toEqual(['First', 'Second', 'Third'])
@@ -179,7 +191,7 @@ test('browser cancellation preserves a queued scheduled job’s delivery identit
   await h.service.cancel(bob, id)
   expect((await h.service.history(alice))[0].status).toBe('queued')
   await h.service.cancel(alice, id)
-  expect(h.events.at(-1)).toMatchObject({ userId: 'alice', scheduledDeliveryId: id,
+  expect(h.events.findLast(({ event }) => event.type === 'agent.update' && event.job.id === id)).toMatchObject({ userId: 'alice', scheduledDeliveryId: id,
     event: { type: 'agent.update', job: { id, status: 'failed', error: 'Cancelled before starting.' } } })
   expect((await h.restart().history(alice))[0].status).toBe('failed')
   gate.resolve(); await settle(h.tasks)
@@ -332,6 +344,22 @@ function withdrawnHistory(jobs: PrivateAgentJob[]) {
   return jobs.map((job) => job.knowledgeReferences?.some((ref) => ref.id === knowledgeSource.id) ? { ...job, sources: [], citations: [], knowledgeUnavailable: true, reply: 'Knowledge is no longer available.' } : job)
 }
 
+test('activity archives cannot replay retrieved answers without source authorization', async () => {
+  const archived: PrivateAgentJob[] = []
+  const h = harness({ reply: 'TEAM_SECRET [Plan](#source-knowledge-source)',
+    archive: async (_identity, job) => { archived.push(structuredClone(job)) },
+    onRun: async (run) => { await run.sources?.([knowledgeSource]) },
+  })
+  await h.invoke(); await settle(h.tasks)
+  const job = (await h.service.history(alice))[0]
+  expect(job.reply).toContain('TEAM_SECRET')
+  await h.service.archiveHistory(alice)
+  const terminal = archived.filter((entry) => entry.id === job.id && entry.status === 'complete')
+  expect(terminal.length).toBeGreaterThan(0)
+  expect(terminal.every((entry) => !entry.reply.includes('TEAM_SECRET'))).toBe(true)
+  expect(terminal.at(-1)?.reply).toContain('private room conversation')
+})
+
 test('withdrawing knowledge filters every live update and stops the active run', async () => {
   let withdrawn = false
   const afterWithdrawal: PrivateAgentEvent[] = []
@@ -387,4 +415,227 @@ test('answers citing more than ten documents retain all evidence through persist
   expect(job.sources).toHaveLength(12)
   expect(job.citations).toHaveLength(12)
   expect(job.citations?.[0].sourceId).toBe(sources[0].id)
+})
+
+test('Ask finishes beside a blocked writer without acquiring or releasing a write lease', async () => {
+  const gate = deferred(), h = harness({ gate: gate.promise })
+  const leases: string[] = []
+  h.deps.acquire = async (_identity, token) => { leases.push(token); return true }
+  h.deps.release = async (_identity, token) => { leases.push(`release:${token}`) }
+  await h.invoke(alice, 'Long write')
+  const id = crypto.randomUUID()
+  await h.invoke(bob, 'Quick question', id, 'read')
+  expect((await h.service.history(bob))[0]).toMatchObject({ status: 'complete', mode: 'read' })
+  expect((await h.service.history(alice))[0].status).toBe('running')
+  expect(leases).toHaveLength(1)
+  gate.resolve(); await settle(h.tasks)
+  expect(leases).toHaveLength(2)
+})
+
+test('Ask slots are bounded to three per room and two per user; cancellation releases only its slot', async () => {
+  const h = harness(), gates = new Map<string, ReturnType<typeof deferred>>()
+  h.deps.stream = async function* (_profile, _messages, signal, _identity, run) {
+    const gate = deferred(); gates.set(run.id, gate)
+    await Promise.race([gate.promise, new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))])
+    signal.throwIfAborted(); yield 'Answer'
+  }
+  const ids = Array.from({ length: 5 }, () => crypto.randomUUID())
+  await h.invoke(alice, 'A1', ids[0], 'read'); await h.invoke(alice, 'A2', ids[1], 'read')
+  await h.invoke(alice, 'A3', ids[2], 'read'); await h.invoke(bob, 'B1', ids[3], 'read')
+  await h.invoke(bob, 'B2', ids[4], 'read')
+  expect([...gates.keys()]).toEqual([ids[0], ids[1], ids[3]])
+  expect((await h.service.activity()).activities).toHaveLength(3)
+  await h.service.cancel(bob, ids[0])
+  expect((await h.service.history(alice))[0].status).toBe('running')
+  await h.service.cancel(alice, ids[0])
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  expect((await h.service.history(alice))[0].status).toBe('failed')
+  expect(gates.has(ids[2])).toBe(true)
+  expect((await h.service.history(bob))[0].status).toBe('running')
+  gates.get(ids[1])!.resolve(); gates.get(ids[2])!.resolve(); gates.get(ids[3])!.resolve()
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  gates.get(ids[4])!.resolve(); await settle(h.tasks)
+  expect((await h.service.activity()).activities).toEqual([])
+})
+
+test('changing a deduplicated request mode is rejected and scheduled requests remain writers', async () => {
+  const h = harness(), id = crypto.randomUUID()
+  await h.invoke(alice, 'Question', id, 'read'); await settle(h.tasks)
+  await expect(h.invoke(alice, 'Question', id, 'write')).rejects.toThrow('Invalid reuse')
+  await expect(h.service.invoke(alice, { requestId: crypto.randomUUID(), agentId: profile.id, instruction: 'Question', mode: 'auto' })).rejects.toThrow('Invalid request mode')
+  const scheduled = crypto.randomUUID()
+  await h.service.invoke({ ...alice, scheduledDeliveryId: scheduled }, { requestId: scheduled, agentId: profile.id, instruction: 'Work', mode: 'read' }, true)
+  await settle(h.tasks)
+  expect((await h.service.history(alice)).find((job) => job.id === scheduled)?.mode).toBe('write')
+})
+
+test('queued Ask requests survive restart; orphaned reads never replay and do not hold the write lane', async () => {
+  const h = harness(), id = crypto.randomUUID()
+  await h.invoke(alice, 'Question', id, 'read'); await settle(h.tasks)
+  const key = `private-agent:alice:job:${id}`
+  h.values.set(key, { ...(h.values.get(key) as object), status: 'queued', reply: '' })
+  h.values.set('room-work:queue', [{ identity: alice, id, mode: 'read' }])
+  const restarted = h.restart(); restarted.wake(); await settle(h.tasks)
+  expect((await restarted.history(alice))[0].status).toBe('complete')
+  const calls = h.calls.length
+  h.values.set(key, { ...(h.values.get(key) as object), status: 'running' })
+  h.values.set('room-work:queue', [{ identity: alice, id, mode: 'read', token: 'orphan', deadline: Date.now() + 240_000 }])
+  const orphaned = h.restart(); orphaned.wake(); await settle(h.tasks)
+  expect((await orphaned.history(alice))[0].status).toBe('running')
+  expect(h.calls).toHaveLength(calls)
+  await orphaned.invoke(bob, { requestId: crypto.randomUUID(), agentId: profile.id, instruction: 'Write' }); await settle(h.tasks)
+  expect((await orphaned.history(bob))[0].status).toBe('complete')
+  h.values.set('room-work:queue', [{ identity: alice, id, mode: 'read', token: 'orphan', deadline: 0 }])
+  orphaned.wake(); await settle(h.tasks)
+  expect((await orphaned.history(alice))[0].status).toBe('failed')
+  expect(h.calls).toHaveLength(calls + 1)
+})
+
+test('slow acceptance notifications do not delay model startup', async () => {
+  const h = harness(), delivery = deferred(), model = deferred()
+  h.deps.send = async () => { await delivery.promise }
+  h.deps.changed = async () => { await delivery.promise }
+  h.deps.stream = async function* () { model.resolve(); yield 'Immediate answer' }
+  await h.invoke()
+  await model.promise
+  delivery.resolve(); await settle(h.tasks)
+  expect((await h.service.history(alice))[0].status).toBe('complete')
+})
+
+test('slow streamed deliveries do not block model consumption and terminal revisions stay ordered', async () => {
+  const h = harness(), delivery = deferred(), sending = deferred(), consumed = deferred(), finish = deferred()
+  const original = h.deps.send
+  h.deps.send = async (identity, event) => {
+    if (event.type === 'agent.update' && event.job.status === 'running' && event.job.reply) {
+      sending.resolve(); await delivery.promise
+    }
+    await original(identity, event)
+  }
+  h.deps.stream = async function* () {
+    yield 'A'; await sending.promise
+    yield 'B'; consumed.resolve(); await finish.promise
+  }
+  await h.invoke()
+  await consumed.promise
+  expect(h.events.some(({ event }) => event.type === 'agent.update' && event.job.reply)).toBe(false)
+  delivery.resolve(); finish.resolve(); await settle(h.tasks)
+  const updates = h.events.flatMap(({ event }) => event.type === 'agent.update' ? [event.job] : [])
+  expect(updates.at(-1)).toMatchObject({ reply: 'AB', status: 'complete' })
+  expect(updates.map((job) => job.revision)).toEqual(updates.map((job) => job.revision).toSorted((a, b) => a - b))
+  expect((await h.service.history(alice))[0]).toMatchObject({ reply: 'AB', status: 'complete' })
+})
+
+test('presence and watchdog scheduling cannot postpone queue retry alarms', async () => {
+  const h = harness(), now = Date.now()
+  await Promise.all([
+    scheduleRoomAlarm(h.deps.storage, now + 30_000),
+    scheduleRoomAlarm(h.deps.storage, now + 1000),
+    scheduleRoomAlarm(h.deps.storage, now + 240_000),
+    scheduleRoomAlarm(h.deps.storage, now + 5000),
+  ])
+  expect(h.values.get('@alarm')).toBe(now + 1000)
+  // Model the platform consuming the alarm, then schedule its next deadline.
+  h.values.delete('@alarm')
+  await scheduleRoomAlarm(h.deps.storage, now + 5000)
+  await scheduleRoomAlarm(h.deps.storage, now + 30_000)
+  expect(h.values.get('@alarm')).toBe(now + 5000)
+})
+
+async function waitFor(check: () => boolean) {
+  for (let i = 0; i < 100 && !check(); i++) await new Promise((resolve) => setTimeout(resolve, 1))
+  expect(check()).toBe(true)
+}
+
+test('archive outbox survives database outage and coordinator restart without failing agent work', async () => {
+  let failing = true
+  const archived: { userId: string; job: PrivateAgentJob }[] = []
+  const h = harness({ archive: async (identity, job) => {
+    if (failing) throw new Error('database unavailable')
+    archived.push({ userId: identity.userId, job: structuredClone(job) })
+  } })
+  const id = crypto.randomUUID()
+  await h.invoke(alice, 'Keep my work', id); await settle(h.tasks)
+  expect((await h.service.history(alice))[0].status).toBe('complete')
+  expect([...h.values.keys()].filter((key) => key.startsWith('activity-archive:'))).toHaveLength(1)
+  failing = false
+  h.restart().wake(); await settle(h.tasks)
+  expect(archived).toHaveLength(1)
+  expect(archived[0]).toMatchObject({ userId: 'alice', job: { id, status: 'complete', source: 'manual', reply: 'Private response' } })
+  expect(archived[0].job.startedAt).toBeDefined(); expect(archived[0].job.finishedAt).toBeDefined()
+  expect([...h.values.keys()].filter((key) => key.startsWith('activity-archive:'))).toHaveLength(0)
+})
+
+test('archive history imports only the requested owner and preserves scheduled provenance and cancellation', async () => {
+  const gate = deferred(), archived: { userId: string; job: PrivateAgentJob }[] = []
+  const h = harness({ gate: gate.promise, archive: async (identity, job) => { archived.push({ userId: identity.userId, job: structuredClone(job) }) } })
+  await h.invoke(bob, 'Bob private request'); await waitFor(() => h.calls.length === 1)
+  const id = crypto.randomUUID()
+  await h.service.invoke({ ...alice, sessionId: '', scheduledDeliveryId: id }, { requestId: id, agentId: profile.id, instruction: 'Scheduled' }, true)
+  await h.service.cancel(alice, id)
+  gate.resolve(); await settle(h.tasks)
+  expect(archived.findLast((entry) => entry.job.id === id)).toMatchObject({ userId: 'alice', job: { source: 'scheduled', status: 'failed', error: 'Cancelled before starting.' } })
+  archived.length = 0
+  expect(await h.service.archiveHistory(alice)).toBe(true)
+  expect(archived).toHaveLength(1)
+  expect(archived[0].userId).toBe('alice')
+  expect(archived[0].job.finishedAt).toBeDefined()
+  expect(JSON.stringify(archived)).not.toContain('Bob private request')
+})
+
+test('history import cannot replace a newer job or pending archive snapshot', async () => {
+  const h = harness({ archive: async () => { throw new Error('offline') } })
+  await h.invoke(); await settle(h.tasks)
+  const completed = (await h.service.history(alice))[0]
+  h.service.history = async () => [{ ...completed, status: 'queued', revision: 0, reply: '' }]
+  expect(await h.service.archiveHistory(alice)).toBe(false)
+  expect((await h.restart().history(alice))[0]).toMatchObject({ status: 'complete', revision: completed.revision })
+  const pending = [...h.values.entries()].find(([key]) => key.startsWith('activity-archive:'))?.[1]
+  expect(pending).toMatchObject({ job: { status: 'complete', revision: completed.revision } })
+})
+
+test('a slow archive database does not block execution or completion', async () => {
+  const gate = deferred(), h = harness({ archive: async () => { await gate.promise } })
+  await h.invoke()
+  await waitFor(() => h.events.some(({ event }) => event.type === 'agent.update' && event.job.status === 'complete'))
+  expect((await h.service.history(alice))[0]).toMatchObject({ status: 'complete', reply: 'Private response' })
+  gate.resolve(); await settle(h.tasks)
+  expect([...h.values.keys()].filter((key) => key.startsWith('activity-archive:'))).toHaveLength(0)
+})
+
+test('the activity archive outlives rolling room chat history', async () => {
+  const archived = new Map<string, PrivateAgentJob>()
+  const h = harness({ archive: async (_identity, job) => { archived.set(job.id, structuredClone(job)) } })
+  let first = ''
+  for (let index = 0; index < 55; index++) {
+    const id = crypto.randomUUID(); if (!index) first = id
+    await h.invoke(alice, `Request ${index}`, id); await settle(h.tasks)
+  }
+  const history = await h.service.history(alice)
+  expect(history).toHaveLength(50)
+  expect(history.some((job) => job.id === first)).toBe(false)
+  expect(archived.size).toBe(55)
+  expect(archived.get(first)).toMatchObject({ status: 'complete', instruction: 'Request 0' })
+})
+
+
+test('concurrent history imports schedule and finish entries beyond the archive batch limit', async () => {
+  const archived = new Map<string, PrivateAgentJob>()
+  const h = harness({ archive: async (identity, job) => { archived.set(`${identity.userId}:${job.id}`, structuredClone(job)) } })
+  for (const identity of [alice, bob]) {
+    const ids = Array.from({ length: 50 }, () => crypto.randomUUID())
+    h.values.set(`private-agent:${identity.userId}:index`, ids)
+    for (const id of ids) h.values.set(`private-agent:${identity.userId}:job:${id}`, {
+      id, agentId: profile.id, agentName: profile.name, instruction: `${identity.userId} private request`, reply: 'Saved',
+      status: 'complete', revision: 2, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    } satisfies PrivateAgentJob)
+  }
+  expect(await Promise.all([h.service.archiveHistory(alice), h.service.archiveHistory(bob)])).toEqual([true, true])
+  expect(archived.size).toBe(50)
+  expect([...h.values.keys()].filter((key) => key.startsWith('activity-archive:'))).toHaveLength(50)
+  expect(h.alarms.some((alarm) => alarm > Date.now())).toBe(true)
+  // Simulate the scheduled alarm on a newly created coordinator, without a new
+  // invocation, another import, or any connected room chat sockets.
+  h.restart().wake(); await settle(h.tasks)
+  expect(archived.size).toBe(100)
+  expect([...h.values.keys()].filter((key) => key.startsWith('activity-archive:'))).toHaveLength(0)
 })

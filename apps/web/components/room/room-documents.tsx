@@ -1,12 +1,12 @@
 "use client";
 
+import { ChoiceMenu } from "@/components/ui/choice-menu";
 import { useCallback, useEffect, useEffectEvent, useRef, useState, type FormEvent, type Dispatch } from 'react';
 import { KnowledgeSourceTag } from '@/components/knowledge/source-tag';
 import { createPortal } from 'react-dom';
 import { Download, Plus, Save, Upload, FileText, Sheet, FileImage, File, FolderOpen, X, History, ChevronDown, MousePointer2, LockKeyhole, Trash2 } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from '@/components/ui/input';
 import { Dropzone } from '@/components/ui/dropzone';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -175,19 +175,16 @@ export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsCo
         <DialogDescription>Start a new document or spreadsheet in this room.</DialogDescription></DialogHeader>
         <form onSubmit={create} className="flex flex-wrap gap-2" aria-busy={creating}>
           <Input name="title" aria-label="New document title" placeholder="Document title" maxLength={150} required className="min-w-32 flex-1" disabled={creating} />
-          <Select name="kind" defaultValue="DOCUMENT" disabled={creating}
-            items={[{ value: 'DOCUMENT', label: 'Document' }, { value: 'SPREADSHEET', label: 'Spreadsheet' }]}>
-            <SelectTrigger aria-label="Document type"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="DOCUMENT">Document</SelectItem><SelectItem value="SPREADSHEET">Spreadsheet</SelectItem></SelectContent>
-          </Select>
+          <ChoiceMenu name="kind" defaultValue="DOCUMENT" disabled={creating}
+            label="Document type" options={[{ value: 'DOCUMENT', label: 'Document' }, { value: 'SPREADSHEET', label: 'Spreadsheet' }]} />
           <Button type="submit" size="sm" variant="outline" disabled={creating || work.readOnly}><Plus size={14} />{creating ? 'Creating…' : 'Create'}</Button>
         </form>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       </DialogContent>
     </Dialog>
-    {(work.readOnly || work.queued > 0) && <div className="room-agent-work" role="status">
-      <p><LockKeyhole size={14} />{!work.available ? 'Checking room activity. Documents are read-only.' : work.locked ? 'Agents are working. Room documents are read-only until they finish.' : 'Requests are queued.'}{work.queued > 0 ? ` ${work.queued} queued.` : ''}</p>
-      {work.activities.map((activity) => <button type="button" key={activity.agentId} className="room-agent-work-target" disabled={!activity.documentId}
+    {(work.readOnly || work.queued > 0 || work.activities.length > 0) && <div className="room-agent-work" role="status">
+      <p>{work.readOnly ? <LockKeyhole size={14} /> : <FileText size={14} />}{!work.available ? 'Checking room activity. Documents are read-only.' : work.locked ? 'Agents are working. Room documents are read-only until they finish.' : work.activities.length ? 'Agents are reading saved documents. Editing is available.' : 'Requests are queued.'}{work.queued > 0 ? ` ${work.queued} queued.` : ''}</p>
+      {work.activities.map((activity) => <button type="button" key={`${activity.runId}:${activity.agentId}`} className="room-agent-work-target" disabled={!activity.documentId}
         onClick={() => { if (activity.documentId) onSelect(activity.documentId); }}>
         <MousePointer2 size={15} fill="currentColor" style={{ color: avatarColorValues[activity.color ?? 'violet'] }} />
         <strong>{activity.agentName}</strong><span>{activity.phase} · {documents.find((document) => document.id === activity.documentId)?.title ?? 'Planning'}{activity.target ? ` · ${activity.target}` : ''}</span>

@@ -1,5 +1,6 @@
 "use client";
 
+import { ChoiceMenu } from "@/components/ui/choice-menu";
 import { useState, type FormEvent } from "react";
 import { useSearchParams } from "next/navigation";
 import { CalendarDays, Circle, CircleCheck, CircleDashed, CircleDot, Columns3, List, ListFilter, Plus, Search, SlidersHorizontal, Trash2 } from "lucide-react";
@@ -19,6 +20,7 @@ const statusIcons = { "To do": Circle, "In progress": CircleDot, "In review": Ci
 const statuses = ["To do", "In progress", "In review", "Done"] as const;
 type Status = typeof statuses[number];
 export type Task = PlannerTask;
+const statusOptions = statuses.map((value) => ({ value, label: value }));
 const selectClass = "h-8 w-full rounded-lg border border-input bg-background px-2 text-sm";
 function dateKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -94,14 +96,14 @@ export function Planner({ mode, storageKey, organizationId }: { mode: "Kanban" |
         <button type="button" onClick={() => setDraft({ ...task })} className="block w-full break-words text-left text-sm font-medium leading-relaxed hover:text-primary focus-visible:outline-ring">{task.title}</button>
         <p className="mt-2 text-xs text-muted-foreground">{rooms.find((room) => room.id === task.roomId)?.name} · {task.agentIds.map((id) => rooms.find((room) => room.id === task.roomId)?.agents.find(({ agent }) => agent.id === id)?.agent.name || 'Unassigned agent').join(', ') || 'Unassigned'}</p>
         {task.description && (!isBoard || fields.description) && <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">{task.description}</p>}
-        {(!isBoard || fields.status) && <div className="mt-4 flex items-center gap-1.5"><StatusIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" /><select disabled={busy || !!readError} aria-label={`Status for ${task.title}`} className="h-7 max-w-full rounded-md border border-border/70 bg-card px-2 text-xs text-foreground focus-visible:outline-ring" value={task.status} onChange={(event) => move(task.id, event.target.value as Status)}>{statuses.map((status) => <option key={status}>{status}</option>)}</select></div>}
+        {(!isBoard || fields.status) && <div className="mt-4 flex items-center gap-1.5"><StatusIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" /><ChoiceMenu disabled={busy || !!readError} label={`Status for ${task.title}`} className="h-7 max-w-full rounded-md border border-border/70 bg-card px-2 text-xs text-foreground focus-visible:outline-ring" value={task.status} onValueChange={(value) => move(task.id, value)} options={statusOptions} /></div>}
       </article>
     );
   }
   return (
     <section className="space-y-6">
       <div className="page-heading">
-        <div><div className="eyebrow"><span /> YOUR TEAM, IN SYNC</div><h1>{mode === "Kanban" ? "Your team’s work." : "Your team’s calendar."}</h1><p>{mode === "Kanban" ? "Organize tasks and move work forward, one card at a time." : "Plan your days and keep task due dates in view."}</p></div>
+        <h1>{mode}</h1>
         <Button onClick={() => add()} disabled={!!readError || busy}><Plus />Add task</Button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-5">
@@ -121,7 +123,7 @@ export function Planner({ mode, storageKey, organizationId }: { mode: "Kanban" |
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <label className="text-sm">Room <select aria-label="Filter tasks by room" className={selectClass} value={roomFilter} onChange={(event) => setRoomFilter(event.target.value)}><option value="">All joined rooms</option>{rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></label>
+        <label className="text-sm">Room <ChoiceMenu label="Filter tasks by room" className={selectClass} value={roomFilter} onValueChange={setRoomFilter} options={[{ value: "", label: "All joined rooms" }, ...rooms.map(({ id, name }) => ({ value: id, label: name }))]} /></label>
         <Button variant="outline" disabled={busy || !roomFilter || !!readError} onClick={() => void importLocal()}>Import browser tasks into selected room</Button>
         <Button variant="ghost" onClick={() => void mutate().catch(() => undefined)}>Refresh</Button>
       </div>
@@ -146,11 +148,11 @@ export function Planner({ mode, storageKey, organizationId }: { mode: "Kanban" |
       <Dialog open={draft !== null} onOpenChange={(open) => { if (!open) setDraft(null); }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto"><DialogHeader><DialogTitle>{tasks.some((task) => task.id === draft?.id) ? "Edit task" : "Add task"}</DialogTitle><DialogDescription>Track work on the board and add a due date to show it on your calendar.</DialogDescription></DialogHeader>
           {draft && <form onSubmit={save} className="space-y-4">
-            <label className="block space-y-2 text-sm font-medium">Room<select className={selectClass} disabled={!!draft.revision} value={draft.roomId} onChange={(event) => setDraft({ ...draft, roomId: event.target.value, agentIds: [] })}>{rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></label>
+            <label className="block space-y-2 text-sm font-medium">Room<ChoiceMenu className={selectClass} disabled={!!draft.revision} value={draft.roomId} onValueChange={(value) => setDraft({ ...draft, roomId: value, agentIds: [] })} label="Room" options={rooms.map(({ id, name }) => ({ value: id, label: name }))} /></label>
             <fieldset className="space-y-2"><legend className="text-sm font-medium">Assigned agents</legend>{assignmentOptions.map((agent) => <label key={agent.id} className="mr-3 inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.agentIds.includes(agent.id)} disabled={!draft.agentIds.includes(agent.id) && draft.agentIds.length >= 5} onChange={(event) => setDraft({ ...draft, agentIds: event.target.checked ? [...draft.agentIds, agent.id] : draft.agentIds.filter((id) => id !== agent.id) })} />{agent.name}</label>)}</fieldset>
             <label className="block space-y-2 text-sm font-medium">Title<Input autoFocus required maxLength={200} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label>
             <label className="block space-y-2 text-sm font-medium">Description<Textarea maxLength={4000} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
-            <div className="grid grid-cols-2 gap-4"><label className="space-y-2 text-sm font-medium">Status<select className={selectClass} value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as Status })}>{statuses.map((status) => <option key={status}>{status}</option>)}</select></label><label className="space-y-2 text-sm font-medium">Due date<Input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} /></label></div>
+            <div className="grid grid-cols-2 gap-4"><label className="space-y-2 text-sm font-medium">Status<ChoiceMenu className={selectClass} value={draft.status} onValueChange={(value) => setDraft({ ...draft, status: value })} label="Status" options={statusOptions} /></label><label className="space-y-2 text-sm font-medium">Due date<Input type="date" value={draft.date} onChange={(event) => setDraft({ ...draft, date: event.target.value })} /></label></div>
             {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
             <div className="flex flex-wrap justify-end gap-2">{tasks.some((task) => task.id === draft.id) && <Button type="button" variant="destructive" className="mr-auto" onClick={() => { void write(() => roomRequest(organizationId, `/${draft.roomId}/tasks/${draft.id}`, 'DELETE', { expectedRevision: draft.revision }), 'Task deleted.').then((saved) => { if (saved) setDraft(null); }); }}><Trash2 />Delete</Button>}<Button type="button" variant="outline" onClick={() => setDraft(null)}>Cancel</Button><Button type="submit" disabled={busy || !!readError || !draft.title.trim()}>Save task</Button></div>
           </form>}

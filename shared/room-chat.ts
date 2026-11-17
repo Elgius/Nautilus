@@ -36,6 +36,7 @@ export type HubCitation = {
 export type HubToolCall = { id: string; name: string; status: 'running' | 'complete' | 'failed'; summary?: string };
 export type HubConfirmation = { id: string; label: string; status: 'pending' | 'approved' | 'declined' };
 export type HubOptions = { conversationId?: string; knowledge: ('PERSONAL' | 'ORGANIZATION')[]; reasoning: 'low' | 'medium' | 'high' };
+export type AgentRunMode = 'read' | 'write';
 export type PrivateAgentJob = {
   id: string;
   agentId: string;
@@ -54,6 +55,11 @@ export type PrivateAgentJob = {
   knowledgeUnavailable?: boolean;
   knowledgeReferences?: { id: string; revision?: number }[];
   confirmations?: HubConfirmation[];
+  mode?: AgentRunMode;
+  source?: "manual" | "scheduled";
+  startedAt?: string;
+  finishedAt?: string;
+  activities?: AgentWorkActivity[];
   taskCommits?: { taskId: string; revision: number }[];
   commits?: { documentId: string; versionId: string; versionNumber: number }[];
 };

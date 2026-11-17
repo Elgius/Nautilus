@@ -14,12 +14,13 @@ const container = document.createElement('div'); document.body.append(container)
 const root = createRoot(container);
 const publicSends: string[] = [], privateSends: { agentId: string; instruction: string }[] = [];
 let loads = 0, typing = 0;
+const modes: string[] = [];
 const agents = [{ id: 'scout', name: 'Scout', role: 'Research' }, { id: 'scribe', name: 'Scribe', role: 'Writing' }];
 const props = {
   agents, agentsLoading: false, agentBusy: false, canSend: true,
   loadAgents: () => { loads++; }, sendTyping: () => { typing++; },
   sendMessage: (text: string) => { publicSends.push(text); return true; },
-  invokeAgent: (agent: { id: string }, instruction: string) => { privateSends.push({ agentId: agent.id, instruction }); return true; },
+  invokeAgent: (agent: { id: string }, instruction: string, mode = 'write') => { modes.push(mode); privateSends.push({ agentId: agent.id, instruction }); return true; },
 };
 async function type(value: string) {
   await act(async () => {
@@ -61,6 +62,7 @@ try {
   assert.match(container.textContent!, /Only you/);
   await click('button[type="submit"]');
   assert.deepEqual(privateSends, [{ agentId: 'scout', instruction: 'summarize privately' }]);
+  assert.equal(modes[0], 'write');
   assert.deepEqual(publicSends, []); assert.equal(typing, 0);
   await type('Another secret draft');
   await click('button[aria-label="Return to room chat"]');
@@ -77,9 +79,12 @@ try {
   assert.equal(publicSends.length, 2);
   await type('@'); await key('ArrowDown'); await key('Enter');
   assert.match(container.querySelector('textarea')!.getAttribute('aria-label')!, /Scribe/);
+  await click('[aria-label="Agent request mode"] button');
+  assert.match(container.textContent!, /cannot make changes/);
   await type('Only to Scribe'); await click('button[type="submit"]');
   assert.equal(privateSends.at(-1)!.agentId, 'scribe');
   assert.equal(privateSends.at(-1)!.instruction, 'Only to Scribe');
+  assert.equal(modes.at(-1), 'read');
   await click('.room-chat-suggestions button');
   assert.equal(container.querySelector('textarea')!.value, 'Summarize the discussion');
   assert.equal(privateSends.length, 2); assert.equal(publicSends.length, 2);

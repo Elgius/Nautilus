@@ -4,6 +4,7 @@ import { createDocumentService } from '../documents/document-service'
 import { createAgentModel } from '../ai'
 import { sourceAccess, sourceInclude, REFRESH_MS, type Source } from './service'
 import { documentChunks, textChunks, reportBody, type Chunk, type Finding } from './content'
+import { queueSources } from './queue-sources'
 import { generateFindings } from './generate'
 
 export const LEASE_MS = 180_000
@@ -15,14 +16,28 @@ export async function hashText(text: string) {
 /** Cron queues checks, never performs model calls. Bounded bases and deliveries per tick. */
 export async function enqueueKnowledge(db: Database, now = new Date()) {
   await db.$transaction(async (tx) => {
-    const due = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM "knowledgeBase" WHERE enabled = true AND "nextRefreshAt" <= ${now}
+    const due = await tx.$queryRaw<{ id: string; nextRefreshAt: Date; lastCheckedAt: Date | null }[]>`SELECT id, "nextRefreshAt", "lastCheckedAt" FROM "knowledgeBase" WHERE enabled = true AND "nextRefreshAt" <= ${now}
       ORDER BY "nextRefreshAt", id LIMIT 4 FOR UPDATE SKIP LOCKED`
     for (const base of due) {
       // One active run per source, enforced by a partial unique index. Replays do not duplicate work.
-      await tx.$executeRaw`INSERT INTO "knowledgeRun" (id, "sourceId", "sourceRevision", trigger, "createdAt", "nextAttemptAt")
-        SELECT gen_random_uuid()::text, id, revision, 'refresh', ${now}, ${now} FROM "knowledgeSource"
-        WHERE "knowledgeBaseId" = ${base.id} AND "revokedAt" IS NULL ON CONFLICT DO NOTHING`
+      // The first check includes custom schedules so newly tagged sources do not wait
+      // for their agent's interval. Later early wakes include them for source changes.
+      const requestedEarly = !base.lastCheckedAt || base.nextRefreshAt.getTime() < base.lastCheckedAt.getTime() + REFRESH_MS
+      await queueSources(tx, base.id, now, null, !requestedEarly)
       await tx.knowledgeBase.update({ where: { id: base.id }, data: { lastCheckedAt: now, nextRefreshAt: new Date(now.getTime() + REFRESH_MS) } })
+    }
+    // Lock the same base as pause and schedule edits before dispatching an agent.
+    const dueAgents = await tx.$queryRaw<{ baseId: string; agentId: string; refreshHours: number }[]>`
+      SELECT s."baseId", s."agentId", s."refreshHours"
+      FROM "knowledgeAgentSchedule" s JOIN "knowledgeBase" b ON b.id = s."baseId"
+      WHERE b.enabled AND NOT (s."agentId" = ANY(b."pausedAgentIds")) AND s."nextRefreshAt" <= ${now}
+      ORDER BY s."nextRefreshAt", s."baseId", s."agentId" LIMIT 16 FOR UPDATE OF b, s SKIP LOCKED`
+    for (const { baseId, agentId, refreshHours } of dueAgents) {
+      await queueSources(tx, baseId, now, agentId)
+      await tx.knowledgeAgentSchedule.update({
+        where: { baseId_agentId: { baseId, agentId } },
+        data: { nextRefreshAt: new Date(now.getTime() + refreshHours * 3_600_000) },
+      })
     }
   })
 }

@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { flushRoomDocuments } from "@/lib/room-document-save";
+import { startAgentTiming } from "@/lib/agent-pipeline";
 import { errorMessage } from "@/lib/auth-client";
 import { roomRequest, RoomRequestError, type RoomMessage, type RoomDetail } from "@/lib/room-client";
 
-import type { ChatServerEvent, ChatUser, PrivateAgentJob, RoomAgentOption, HubOptions } from "../../../../shared/room-chat";
+import type { HubOptions, AgentRunMode, ChatServerEvent, ChatUser, PrivateAgentJob, RoomAgentOption } from "../../../../shared/room-chat";
 
 export type PendingMessage = { id: string; text: string; status: "pending" | "failed" };
 export function useRoomChat(organizationId: string, roomId: string, userId: string, enabled: boolean, initialData?: Pick<RoomDetail, 'messages' | 'nextCursor'>) {
@@ -14,7 +15,8 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
   const [agentJobs, setAgentJobs] = useState<PrivateAgentJob[]>([]);
   const agentsRequested = useRef(false);
   const preparingAgent = useRef(false);
-  const agentOutbox = useRef(new Map<string, { agentId: string; instruction: string; knowledge?: HubOptions['knowledge']; reasoning?: HubOptions['reasoning'] }>());
+  const agentOutbox = useRef(new Map<string, { agentId: string; instruction: string; mode: AgentRunMode; knowledge?: HubOptions['knowledge']; reasoning?: HubOptions['reasoning'] }>());
+  const timings = useRef(new Map<string, ReturnType<typeof startAgentTiming>>());
   const [blocked, setBlocked] = useState(false);
   const [online, setOnline] = useState<ChatUser[]>([]);
   const [typing, setTyping] = useState<Record<string, { name: string; expiresAt: number }>>({});
@@ -30,6 +32,17 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
   const connection = useRef<WebSocket | null>(null);
   const ready = useRef(false);
   const outbox = useRef(new Map<string, string>());
+  // Effects run after the response has been committed to the client UI.
+  useEffect(() => {
+    for (const job of agentJobs) {
+      const timing = timings.current.get(job.id);
+      if (job.reply && timing) {
+        const metrics = timing.firstOutput();
+        if (metrics && connection.current?.readyState === WebSocket.OPEN) connection.current.send(JSON.stringify({ type: 'agent.observed', requestId: job.id, ...metrics }));
+        timings.current.delete(job.id);
+      } else if (job.status === 'failed') timings.current.delete(job.id);
+    }
+  }, [agentJobs]);
   const latest = useRef<string | undefined>(initialData?.messages.at(-1)?.id);
   useEffect(() => {
     if (!enabled) return;
@@ -99,10 +112,13 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
             markRead();
             if (agentOutbox.current.size) {
               const syncedSocket = socket;
-              void flushRoomDocuments(organizationId, roomId).then(() => {
-                if (disposed || socket !== syncedSocket || !ready.current) return;
-                for (const [requestId, input] of agentOutbox.current) send({ type: "agent.invoke", requestId, ...input });
-              }).catch((error) => { if (!disposed) setNotice(`Agent not started: ${errorMessage(error)}`); });
+              for (const [requestId, input] of agentOutbox.current) if (input.mode === 'read') send({ type: 'agent.invoke', requestId, ...input });
+              if ([...agentOutbox.current.values()].some((input) => input.mode === 'write')) {
+                void flushRoomDocuments(organizationId, roomId).then(() => {
+                  if (disposed || socket !== syncedSocket || !ready.current) return;
+                  for (const [requestId, input] of agentOutbox.current) if (input.mode === 'write') send({ type: "agent.invoke", requestId, ...input });
+                }).catch((error) => { if (!disposed) setNotice(`Agent not started: ${errorMessage(error)}`); });
+              }
             }
             for (const [clientMessageId, text] of outbox.current) send({ type: "send", requestId: clientMessageId, clientMessageId, text });
           } else if (event.type === "history") {
@@ -212,18 +228,22 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
     setAgentsLoading(true);
     connection.current.send(JSON.stringify({ type: "agent.list", requestId: "agent.list" }));
   }
-  async function invokeAgent(agent: RoomAgentOption, instruction: string, options?: Pick<HubOptions, 'knowledge' | 'reasoning'>) {
+  async function invokeAgent(agent: RoomAgentOption, instruction: string, mode: AgentRunMode = 'write', options?: Pick<HubOptions, 'knowledge' | 'reasoning'>) {
     if (!enabled || blocked || !instruction.trim() || preparingAgent.current) return false;
     if (agentJobs.filter((job) => job.status === "queued" || job.status === "running").length >= 20) { setNotice("Wait for some queued requests to finish."); return false; }
     preparingAgent.current = true;
+    const id = crypto.randomUUID(), timing = startAgentTiming(roomId, id);
+    timings.current.set(id, timing);
     try {
-      await flushRoomDocuments(organizationId, roomId);
-      const id = crypto.randomUUID(), now = new Date().toISOString();
-      agentOutbox.current.set(id, { agentId: agent.id, instruction: instruction.trim(), ...options });
-      setAgentJobs((previous) => [...previous, { id, agentId: agent.id, agentName: agent.name, instruction: instruction.trim(), reply: "", status: "queued", createdAt: now, updatedAt: now, revision: -1 }]);
-      if (ready.current && connection.current?.readyState === WebSocket.OPEN) connection.current.send(JSON.stringify({ type: "agent.invoke", requestId: id, agentId: agent.id, instruction: instruction.trim(), ...options }));
+      // Ask reads saved documents and must not trigger editor saves or writes.
+      if (mode === 'write') await flushRoomDocuments(organizationId, roomId);
+      timing.editorSaved();
+      const now = new Date().toISOString();
+      agentOutbox.current.set(id, { agentId: agent.id, instruction: instruction.trim(), mode, ...options });
+      setAgentJobs((previous) => [...previous, { id, agentId: agent.id, agentName: agent.name, instruction: instruction.trim(), reply: "", status: "queued", createdAt: now, updatedAt: now, revision: -1, mode }]);
+      if (ready.current && connection.current?.readyState === WebSocket.OPEN) connection.current.send(JSON.stringify({ type: "agent.invoke", requestId: id, agentId: agent.id, instruction: instruction.trim(), mode, ...options }));
       return true;
-    } catch (error) { setNotice(`Agent not started: ${errorMessage(error)}`); return false; }
+    } catch (error) { timings.current.delete(id); setNotice(`Agent not started: ${errorMessage(error)}`); return false; }
     finally { preparingAgent.current = false; }
   }
   function sendTyping() {

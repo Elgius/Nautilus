@@ -1,4 +1,5 @@
 import { agentHub } from './agent-hub/routes'
+import { agentActivity } from './agent-activity'
 import { runScheduler } from './scheduler'
 export { KnowledgeWorker } from './knowledge/worker'
 import { knowledgeRoutes } from './knowledge/routes'
@@ -9,6 +10,7 @@ import { HTTPException } from 'hono/http-exception'
 import { createMiddleware } from 'hono/factory'
 import { bodyLimit } from 'hono/body-limit'
 import { agentSelect, agentProfileData, parseAgentProfile } from './agents'
+import { hubHistory } from './hub-history'
 import { agentChat } from './agent-chat'
 import { agentCreator } from './agent-creator-route'
 import { avatarGeneration } from './avatar-generation-route'
@@ -46,7 +48,7 @@ app.use('/api/*', cors({
   origin: (origin, c) => origin === c.env.WEB_ORIGIN ? origin : undefined,
   credentials: true,
   allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'X-Invitation-Id'],
+  allowHeaders: ['Content-Type', 'X-Invitation-Id', 'X-Hub-User'],
 }))
 
 app.use('/api/*', async (c, next) => {
@@ -122,6 +124,10 @@ const organizationMember = createMiddleware<AppEnv>(async (c, next) => {
   await next()
 })
 
+const activityPath = '/api/organizations/:organizationId/activity'
+app.use(`${activityPath}/*`, authenticated, organizationMember)
+app.route(activityPath, agentActivity)
+
 const documentLibraryPath = '/api/organizations/:organizationId/documents'
 app.use(documentLibraryPath, authenticated, organizationMember)
 app.route(documentLibraryPath, documentLibrary)
@@ -175,6 +181,10 @@ app.patch(`${agentPath}/:agentId`, authenticated, organizationMember, async (c) 
 
 app.use(`${agentPath}/:agentId/chat`, authenticated, organizationMember)
 app.route(agentPath, agentChat)
+
+const historyPath = '/api/organizations/:organizationId/agent-hub-history'
+app.use(`${historyPath}/*`, authenticated, organizationMember)
+app.route(historyPath, hubHistory)
 
 const roomPath = '/api/organizations/:organizationId/rooms'
 app.use(`${roomPath}/*`, authenticated, organizationMember)

@@ -6,6 +6,7 @@ import "./workspace.css";
 import "./agent-naming.css";
 import "./workspace-theme.css";
 import "./theme.css";
+import "../components/knowledge/knowledge.css";
 import "./auth.css";
 
 const inter = Inter({

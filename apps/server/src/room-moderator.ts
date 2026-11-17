@@ -1,6 +1,7 @@
 import { createHubEvidence } from './agent-hub/evidence'
 import { completeHubSkills, withHubReadSources } from './agent-hub/runtime'
 import { createProgressSkill } from './progress/skill'
+import { createPlannerReadSkill } from './agent_interface/planner-read-skill'
 import { reviewDocumentCreation, type CreationReview } from './edit-review'
 import { parseCreation, type DocumentCreation, type CreationResult } from './documents/creation'
 import { createPlannerSkill } from './planner/skill'
@@ -228,6 +229,19 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
   const loggingContext = { roomId: identity.roomId, runId: run.id }
   const knowledgeEvidence = createHubEvidence(identity, withDatabase)
   const hubRun: AgentRunContext = { ...run, sources: async (sources) => { knowledgeEvidence.record(sources); await run.sources?.(sources) } }
+  if (run.mode === 'read') {
+    const backend = createRoomSkillBackend(env, identity, profile.id, withDatabase, '', undefined, { readOnly: true })
+    const skills = createOfficeSkills({ ...backend, read: async (id, operation, args, activeSignal) => {
+      await run.activity({ runId: run.id, agentId: profile.id, agentName: profile.name, color: profile.color,
+        documentId: id, phase: 'reading', target: targetLabel(operation, args) }, profile.id)
+      return backend.read(id, operation, args, activeSignal)
+    } }, signal, 'read')
+    skills.push(createPlannerReadSkill(identity, profile, run, withDatabase, signal))
+    return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, completeHubSkills(skills, hubRun, identity, withDatabase, signal), {
+      reasoning: run.options?.reasoning, tool: run.tool, steps: 16, timeout: 175_000, toolCallConcurrency: 3, stage: run.stage,
+      loggingContext: { ...loggingContext, kind: 'read-only' },
+    })
+  }
   const dependencies: Dependencies = {
     reviewCreation: async (creation, activeSignal) => reviewDocumentCreation(createAgentModel(env), messages, { ...creation, reads: [...creation.reads, ...await knowledgeEvidence.reads()] }, activeSignal, loggingContext),
     review: async (edit, activeSignal) => reviewDocumentEdit(createAgentModel(env), messages, { ...edit, reads: [...edit.reads, ...await knowledgeEvidence.reads()] }, activeSignal, loggingContext),
@@ -251,5 +265,5 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
   skills.push(createProgressSkill(identity, { agentId: profile.id, workToken: run.token, runId: run.id }, withDatabase, signal))
   skills.push(createPlannerSkill(identity, profile, run, withDatabase, signal, { ...dependencies, review: async (edit, active) => reviewPlannerEdit(createAgentModel(env), messages, { ...edit, reads: [...edit.reads, ...await knowledgeEvidence.reads()] }, active, loggingContext) }))
   if (!identity.scheduledDeliveryId) skills.push(createSchedulerSkill(identity, profile.id, withDatabase, signal))
-  return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, completeHubSkills(skills, hubRun, identity, withDatabase, signal), { reasoning: run.options?.reasoning, tool: run.tool, steps: 32, timeout: 175_000, preview: run.preview, loggingContext: { ...loggingContext, kind: 'moderator' } })
+  return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, completeHubSkills(skills, hubRun, identity, withDatabase, signal), { stage: run.stage, reasoning: run.options?.reasoning, tool: run.tool, steps: 32, timeout: 175_000, preview: run.preview, loggingContext: { ...loggingContext, kind: 'moderator' } })
 }

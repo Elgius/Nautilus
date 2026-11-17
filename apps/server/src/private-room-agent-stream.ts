@@ -3,12 +3,15 @@ import { createAgentModel } from './ai'
 import { createAgentInterface, type AgentSkill } from './agent_interface'
 import type { Bindings } from './env'
 import type { PrivateAgentMessage, PrivateAgentProfile } from './private-room-agents'
+import type { PipelineStage } from './agent-pipeline'
 import { parseDocumentPreview } from '../../../shared/document-preview'
 
-export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, resolveModel = createAgentModel, skills: AgentSkill[] = [], options: { reasoning?: 'low' | 'medium' | 'high'; tool?: (call: HubToolCall) => Promise<void>; steps?: number; timeout?: number; loggingContext?: Record<string, string>; preview?: (toolCallId: string, input: string | null) => Promise<void> } = {}) {
+export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, resolveModel = createAgentModel, skills: AgentSkill[] = [], options: { stage?: (stage: PipelineStage) => void; toolCallConcurrency?: number; reasoning?: 'low' | 'medium' | 'high'; tool?: (call: HubToolCall) => Promise<void>; steps?: number; timeout?: number; loggingContext?: Record<string, string>; preview?: (toolCallId: string, input: string | null) => Promise<void> } = {}) {
   const agent = createAgentInterface(profile, resolveModel(env), skills, options)
+  options.stage?.('model.started')
   const result = await agent.stream({ messages, abortSignal: signal })
   let finished = false
+  let firstDelta = true
   type Input = { text: string; sent: number; delivered?: string; delivery?: Promise<void>; failure?: { error: unknown } }
   const inputs = new Map<string, Input>()
   const failedPreviewDocuments = new Set<string>()
@@ -39,6 +42,9 @@ export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAge
       if (part.type === 'tool-call') await options.tool?.({ id: part.toolCallId, name: part.toolName, status: 'running' })
       if (part.type === 'tool-result') await options.tool?.({ id: part.toolCallId, name: part.toolName, status: 'complete', summary: 'Operation completed.' })
       if (part.type === 'tool-error') await options.tool?.({ id: part.toolCallId, name: part.toolName, status: 'failed', summary: 'Operation failed. Review the agent response before retrying.' })
+      if (firstDelta && (part.type === 'text-delta' || part.type === 'tool-input-delta' || part.type === 'reasoning-delta')) {
+        firstDelta = false; options.stage?.('model.first-delta')
+      }
       if (part.type === 'tool-input-start' && (part.toolName === 'applyDocumentEdits' || part.toolName === 'proposeDocumentEdits')) inputs.set(part.id, { text: '', sent: 0 })
       if (part.type === 'tool-input-delta') {
         const input = inputs.get(part.id)

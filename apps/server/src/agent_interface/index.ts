@@ -8,7 +8,7 @@ export { createRoomSkillBackend } from './room-skills'
 export type AgentProfile = { id: string; name: string; role: string; rules: string[] }
 
 /** One runtime for agent/model communication and dispatch to registered skills. */
-export function createAgentInterface(profile: AgentProfile, model: LanguageModel, skills: AgentSkill[] = [], options: { reasoning?: 'low' | 'medium' | 'high'; steps?: number; timeout?: number; loggingContext?: Record<string, string> } = {}) {
+export function createAgentInterface(profile: AgentProfile, model: LanguageModel, skills: AgentSkill[] = [], options: { toolCallConcurrency?: number; reasoning?: 'low' | 'medium' | 'high'; steps?: number; timeout?: number; loggingContext?: Record<string, string> } = {}) {
   assertSafeAgentProfile(profile)
   const tools: ToolSet = {}
   for (const skill of skills) for (const [name, definition] of Object.entries(skill.tools)) {
@@ -27,7 +27,7 @@ export function createAgentInterface(profile: AgentProfile, model: LanguageModel
       ...skills.map((skill) => `Skill ${skill.id}:\n${skill.instructions}`),
     ].join('\n'),
     ...(options.reasoning ? { providerOptions: { openai: { reasoningEffort: options.reasoning } } } : {}),
-    toolCallConcurrency: 1,
+    toolCallConcurrency: options.toolCallConcurrency ?? 1,
     stopWhen: isStepCount(options.steps ?? 8), maxOutputTokens: 4096, timeout: options.timeout ?? 60_000, maxRetries: 1,
     ...agentCallLogging({ ...options.loggingContext, kind: options.loggingContext?.kind ?? 'agent', agentId: profile.id, agentName: profile.name }),
   })

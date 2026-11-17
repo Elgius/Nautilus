@@ -1,9 +1,12 @@
 import { HTTPException } from 'hono/http-exception'
+import { queueSources } from './queue-sources'
 import { z } from 'zod'
 import type { Database } from '../db'
 import type { Prisma } from '../generated/prisma/client'
 
-export const REFRESH_MS = 6 * 60 * 60 * 1000
+import { DEFAULT_KNOWLEDGE_HOURS } from '../../../../shared/knowledge-schedule'
+
+export const REFRESH_MS = DEFAULT_KNOWLEDGE_HOURS * 60 * 60 * 1000
 export const scopeInput = z.enum(['PERSONAL', 'ORGANIZATION'])
 export const tagInput = z.strictObject({
   scope: scopeInput,
@@ -76,7 +79,18 @@ export function knowledgeService(db: Database, identity: KnowledgeIdentity) {
           run: allowed ? source.runs[0] ?? null : null,
           entry: allowed && entryIsCurrent(source, source.entry) ? source.entry : null })
       }
-      return { base: knowledgeBase, agent: { name: 'Knowledge', refreshHours: 6 }, sources, nextCursor: rows.length > 25 ? rows[24].id : null }
+      const roster = cursor ? [] : await db.agent.findMany({
+        where: { organizationId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, name: true, color: true, avatarIcon: true, avatarUrl: true, avatarDesign: true,
+          knowledgeSchedules: { where: { baseId: knowledgeBase.id }, select: { refreshHours: true, nextRefreshAt: true } },
+        },
+      })
+      const agents = roster.map(({ knowledgeSchedules, ...agent }) => ({
+        ...agent,
+        refreshHours: knowledgeSchedules[0]?.refreshHours ?? DEFAULT_KNOWLEDGE_HOURS,
+        nextRefreshAt: knowledgeSchedules[0]?.nextRefreshAt ?? knowledgeBase.nextRefreshAt,
+      }))
+      return { base: knowledgeBase, agents, agent: { name: 'Knowledge', refreshHours: DEFAULT_KNOWLEDGE_HOURS }, sources, nextCursor: rows.length > 25 ? rows[24].id : null }
     },
     async tag(raw: unknown) {
       const input = tagInput.safeParse(raw)
@@ -110,6 +124,50 @@ export function knowledgeService(db: Database, identity: KnowledgeIdentity) {
         if (!result.count) throw new HTTPException(404, { message: 'Source not found or you cannot remove this tag.' })
         // Cancel in-flight work and purge checkpoint findings immediately.
         await tx.knowledgeRun.updateMany({ where: { sourceId, status: { in: ['pending', 'running'] } }, data: { status: 'cancelled', findings: [], finishedAt: new Date(), leaseToken: null, leaseExpiresAt: null } })
+      })
+    },
+    async setAgentInterval(scope: KnowledgeScope, agentId: string, refreshHours: number) {
+      await manage(scope)
+      const knowledgeBase = await base(scope)
+      return db.$transaction(async tx => {
+        const baseId = knowledgeBase.id
+        await tx.$queryRaw`SELECT id FROM "knowledgeBase" WHERE id = ${baseId} FOR UPDATE`
+        const agent = await tx.agent.findFirst({ where: { id: agentId, organizationId }, select: { id: true } })
+        if (!agent) throw new HTTPException(404, { message: 'Agent not found.' })
+        const schedule = { refreshHours, nextRefreshAt: new Date(Date.now() + refreshHours * 3_600_000) }
+        return tx.knowledgeAgentSchedule.upsert({
+          where: { baseId_agentId: { baseId, agentId } },
+          create: { baseId, agentId, ...schedule }, update: schedule,
+        })
+      })
+    },
+    async controlAgent(scope: KnowledgeScope, agentId: string, command: 'pause' | 'resume' | 'refresh') {
+      if (command !== 'refresh') await manage(scope)
+      const knowledgeBase = await base(scope)
+      return db.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "knowledgeBase" WHERE id = ${knowledgeBase.id} FOR UPDATE`
+        const current = await tx.knowledgeBase.findUniqueOrThrow({ where: { id: knowledgeBase.id } })
+        const agents = await tx.agent.findMany({ where: { organizationId }, select: { id: true } })
+        if (!agents.some(agent => agent.id === agentId)) throw new HTTPException(404, { message: 'Agent not found.' })
+        const paused = new Set(current.enabled ? current.pausedAgentIds : agents.map(agent => agent.id))
+        if (command === 'refresh') {
+          if (paused.has(agentId)) throw new HTTPException(409, { message: 'Resume this agent before refreshing.' })
+          const queued = await queueSources(tx, current.id, new Date(), agentId)
+          return { queued }
+        }
+        if (command === 'pause') {
+          paused.add(agentId)
+          await tx.knowledgeRun.updateMany({
+            where: { trigger: `agent:${agentId}`, source: { knowledgeBaseId: current.id }, status: { in: ['pending', 'running'] } },
+            data: { status: 'cancelled', findings: [], leaseToken: null, leaseExpiresAt: null, finishedAt: new Date() },
+          })
+        } else {
+          paused.delete(agentId)
+        }
+        await tx.knowledgeBase.update({ where: { id: current.id }, data: {
+          enabled: current.enabled || command === 'resume', pausedAgentIds: Array.from(paused),
+        } })
+        return { enabled: !paused.has(agentId) }
       })
     },
     async configure(scope: KnowledgeScope, enabled: boolean) {

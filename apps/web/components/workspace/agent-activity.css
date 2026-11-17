@@ -1,0 +1,34 @@
+.agent-activity { --activity-border: var(--border, #deded9); }
+.agent-activity .section-heading p { margin-top: 6px; color: var(--muted-foreground); font-size: 14px; }
+.agent-activity-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 24px 0; }
+.agent-activity-filters label { display: grid; gap: 6px; font-size: 12px; color: var(--muted-foreground); }
+.agent-activity-filters [aria-haspopup="menu"], .agent-activity-filters input { height: 36px; max-width: 190px; border: 1px solid var(--activity-border); border-radius: 8px; padding: 0 10px; background: var(--background); color: var(--foreground); font: inherit; font-size: 13px; }
+.agent-activity-filters [aria-haspopup="menu"]:focus-visible, .agent-activity-filters input:focus-visible, .agent-run-toggle:focus-visible { outline: 2px solid var(--ring, #7e7e70); outline-offset: 3px; }
+.agent-activity-notice { margin: 16px 0; padding: 12px; border: 1px solid var(--activity-border); border-radius: 10px; font-size: 13px; }
+.agent-activity-notice button { margin-top: 8px; }
+.agent-activity-live { border: 1px solid var(--activity-border); border-radius: 12px; padding: 18px; margin-bottom: 24px; }
+.agent-activity-live h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+.agent-activity-live h3 > span { width: 7px; height: 7px; background: #45956c; border-radius: 50%; }
+.agent-activity-live ul { display: grid; gap: 12px; margin-top: 12px; }
+.agent-activity-live li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; font-size: 13px; }
+.agent-activity-live li > span { flex: 1; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.agent-activity-list { display: grid; gap: 12px; margin-bottom: 20px; }
+.agent-run-card { border: 1px solid var(--activity-border); border-radius: 12px; overflow: hidden; }
+.agent-run-toggle { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 20px; cursor: pointer; }
+.agent-run-toggle:hover { background: var(--muted); }
+.agent-run-marker { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 34px; height: 34px; border-radius: 10px; background: var(--muted); color: var(--muted-foreground); }
+.agent-run-marker.complete { color: #397653; background: #e9f3eb; }
+.agent-run-marker.running { color: #4b69a6; background: #edf1f9; }
+.agent-run-marker.failed { color: #ae4d46; background: #faeeeb; }
+.agent-run-heading { display: grid; gap: 6px; min-width: 0; flex: 1; }
+.agent-run-title { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.agent-run-meta, .agent-run-summary time { font-size: 12px; color: var(--muted-foreground); }
+.agent-run-summary { display: grid; justify-items: end; gap: 7px; flex-shrink: 0; }
+.agent-run-chevron { flex-shrink: 0; transition: transform .15s; }.agent-run-chevron.expanded { transform: rotate(180deg); }
+.agent-run-changes { padding: 0 20px 14px 68px; font-size: 12px; color: var(--muted-foreground); }
+.agent-run-details { padding: 20px; border-top: 1px solid var(--activity-border); display: grid; gap: 20px; font-size: 13px; }
+.agent-run-details h4 { font-weight: 600; margin-bottom: 8px; }.agent-run-details p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; max-height: 420px; overflow: auto; }
+.agent-run-details ul { display: grid; gap: 8px; }.agent-run-details li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }.agent-run-details li > span:last-child { color: var(--muted-foreground); }
+.agent-activity a { text-decoration: underline; text-underline-offset: 3px; }.agent-run-error { color: var(--destructive, #ae4d46); }
+.agent-activity-empty { display: grid; justify-items: center; text-align: center; gap: 12px; padding: 56px 20px; color: var(--muted-foreground); font-size: 14px; }.agent-activity-empty h3 { font-size: 18px; color: var(--foreground); }
+@media (max-width: 640px) { .agent-run-toggle { flex-wrap: wrap; gap: 10px; padding: 16px; }.agent-run-heading { flex-basis: calc(100% - 70px); }.agent-run-summary { display: flex; align-items: center; flex-wrap: wrap; padding-left: 44px; flex: 1; }.agent-run-changes { padding-left: 60px; }.agent-activity-filters label { flex: 1; min-width: 130px; }.agent-activity-filters [aria-haspopup="menu"], .agent-activity-filters input { width: 100%; max-width: none; } }

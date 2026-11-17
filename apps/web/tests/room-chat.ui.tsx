@@ -1,5 +1,6 @@
 // Isolate DOM and WebSocket globals from the Bun unit-test process.
 import assert from 'node:assert/strict';
+import type { RoomDocumentSaveRequest } from '../lib/room-document-save';
 import { GlobalWindow as Window } from 'happy-dom';
 
 const dom = new Window({ url: 'http://localhost:3000' });
@@ -61,6 +62,26 @@ try {
   assert.equal(receipts(), 1, 'a burst must not emit a receipt for every message');
   await act(async () => { chat!.sendMessage('My first message'); });
   assert.equal(socket.sent.filter((event) => event.type === 'send').length, 1);
+  let saves = 0;
+  const blockSave = (event: Event) => {
+    saves++;
+    (event as CustomEvent<RoomDocumentSaveRequest>).detail.waitUntil(Promise.reject(new Error('Unsaved editor is blocked')));
+  };
+  window.addEventListener('room-document-save', blockSave);
+  const agent = { id: 'scout', name: 'Scout', role: 'Research' };
+  await act(async () => { assert.equal(await chat!.invokeAgent(agent, 'Save a change'), false); });
+  assert.equal(saves, 1);
+  await act(async () => { assert.equal(await chat!.invokeAgent(agent, 'Read saved text', 'read'), true); });
+  assert.equal(saves, 1, 'Ask must not flush or save dirty editors');
+  const invocation = socket.sent.find((event) => event.type === 'agent.invoke') as unknown as { requestId: string; mode: string };
+  assert.equal(invocation.mode, 'read');
+  const answer = { id: invocation.requestId, agentId: agent.id, agentName: agent.name, instruction: 'Read saved text', reply: 'Answer', status: 'running', revision: 1, mode: 'read', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  await act(async () => { receive({ type: 'agent.update', job: answer }); });
+  await act(async () => { receive({ type: 'agent.update', job: { ...answer, status: 'complete', revision: 2 } }); });
+  const observations = socket.sent.filter((event) => event.type === 'agent.observed');
+  assert.equal(observations.length, 1, 'First output timing is sent once per request');
+  assert.equal(JSON.stringify(observations).includes('Answer'), false, 'Timings never include reply contents');
+  window.removeEventListener('room-document-save', blockSave);
   await act(async () => { await pause(1100); });
   assert.equal(receipts(), 2, 'send the final receipt even when no more messages arrive');
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });

@@ -18,6 +18,7 @@ const originalFetch = globalThis.fetch;
 Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (url: string, init?: RequestInit) => {
   const path = String(url), body = init?.body ? JSON.parse(String(init.body)) : undefined;
   requests.push({ path, body });
+  if (path.endsWith('/agent-hub-history')) return Response.json({ summaries: [], next: null });
   if (path.endsWith('/rooms')) return Response.json({ rooms: [{ id: 'room', name: 'Design', agents: [{ agent: { id: 'agent', name: 'Scout', role: 'Research', color: 'violet', avatarIcon: 'circle' } }] }] });
   if (path.endsWith('/capabilities')) return Response.json({ documents: true, execution: true, knowledge: true, kanban: true, calendar: true, scheduling: true });
   if (path.endsWith('/history')) return Response.json({ jobs });
@@ -87,7 +88,21 @@ try {
   rejection = null;
   await click('Send');
   assert.equal(instruction.value, '', 'An edited or retried request can be accepted after a rejection');
-  console.log('Agent Hub UI checks passed: discovery, exact retry, configured options, tool activity, citations, deliverable links, fresh chats, history and terminal-error recovery.');
+  const { AgentHub } = await import('../components/agents/agent-hub');
+  const noop = () => {};
+  await act(async () => root.render(createElement(SWRConfig, { value: { provider: () => new Map() } }, createElement(AgentHub, {
+    organizationId: 'org', userId: 'user', agents: [], rooms: [], onCreate: noop, onEdit: noop, onCreateRoom: noop, onOpenRoom: noop,
+  }))));
+  await settle();
+  const savedChats = host.querySelector('[aria-label="Agent hub"]');
+  assert.ok(savedChats, 'The saved conversation workspace remains available');
+  await click('Room tools');
+  assert.ok(host.querySelector('[aria-label="Agent Hub instruction"]'), 'Room tools expose the cited, tool-enabled conversation');
+  assert.equal(savedChats.parentElement?.hidden, true);
+  await click('Private conversations');
+  assert.equal(host.querySelector('[aria-label="Agent hub"]'), savedChats, 'Switching views must preserve the saved conversation component');
+  assert.equal(savedChats.parentElement?.hidden, false);
+  console.log('Agent Hub UI checks passed: discovery, exact retry, configured options, tools, citations, history, terminal-error recovery, and switching between saved chats and room tools.');
 } finally {
   await act(async () => root.unmount());
   Object.defineProperty(globalThis, 'fetch', { configurable: true, value: originalFetch });

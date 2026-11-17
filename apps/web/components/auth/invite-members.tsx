@@ -1,10 +1,10 @@
 "use client";
 
+import { ChoiceMenu } from "@/components/ui/choice-menu";
 import { useState, type FormEvent } from "react";
 import { authClient, checkAuthResult, errorMessage } from "@/lib/auth-client";
 import { canManageOrganization } from "@/lib/auth-types";
 import { useWorkspaceSession } from "./workspace-session";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 
 export function InviteMembers() {
@@ -13,6 +13,7 @@ export function InviteMembers() {
   const role = session.memberships.find(
     (membership) => membership.organizationId === organizationId,
   )?.role;
+  const [inviteRole, setInviteRole] = useState("member");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [sent, setSent] = useState("");
@@ -35,6 +36,7 @@ export function InviteMembers() {
       );
       setSent(`Invitation sent to ${email}. It expires in 48 hours.`);
       form.reset();
+      setInviteRole("member");
     } catch (error) {
       setError(errorMessage(error));
     } finally {
@@ -62,16 +64,9 @@ export function InviteMembers() {
       </label>
       <label className="auth-field" htmlFor="invite-role">
         Organisation role
-        <Select name="role" defaultValue="member" disabled={pending}
-          items={[{ value: "member", label: "Member" }, { value: "admin", label: "Admin" },
-            ...(role?.split(",").includes("owner") ? [{ value: "owner", label: "Owner" }] : [])]}>
-          <SelectTrigger id="invite-role" className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="member">Member</SelectItem>
-            <SelectItem value="admin">Admin</SelectItem>
-            {role?.split(",").includes("owner") && <SelectItem value="owner">Owner</SelectItem>}
-          </SelectContent>
-        </Select>
+        <ChoiceMenu id="invite-role" label="Organisation role" className="w-full" name="role" value={inviteRole} onValueChange={setInviteRole} disabled={pending}
+          options={[{ value: "member", label: "Member" }, { value: "admin", label: "Admin" },
+            ...(role?.split(",").includes("owner") ? [{ value: "owner", label: "Owner" }] : [])]} />
       </label>
       {error && (
         <p className="auth-error" role="alert">

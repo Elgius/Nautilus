@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState, useReducer, type CSSProperties } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { ArrowLeft, FileText, Link2, MessageSquare, Users, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { AgentPortrait } from "@/components/agents/agent-portrait";
 import { BrandMark } from "@/components/brand-mark";
@@ -37,8 +38,10 @@ export function RoomWorkspace({ initialData, initialDocumentId }: { initialData:
   const [joining, setJoining] = useState(false);
   const { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, cancelAgent, confirmAgent, canSend, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage } = useRoomChat(organizationId, room.id, session.user.id, joined, initialData);
   const suggestions = useRoomSuggestions(organizationId, room.id, session.user.id, joined, messages);
-  const [mobilePanel, setMobilePanel] = useState<"chat" | "document">(initialDocumentId ? "document" : "chat");
-  const [fileState, dispatchFiles] = useReducer(roomFileReducer, room.documents.find((document) => document.id === initialDocumentId)?.id ?? room.documents[0]?.id, initialRoomFileState);
+  const requestedDocument = useSearchParams().get("document") ?? initialDocumentId;
+  const initialDocument = room.documents.find((document) => document.id === requestedDocument)?.id ?? room.documents[0]?.id;
+  const [mobilePanel, setMobilePanel] = useState<"chat" | "document">(requestedDocument && initialDocument === requestedDocument ? "document" : "chat");
+  const [fileState, dispatchFiles] = useReducer(roomFileReducer, initialDocument, initialRoomFileState);
   const [documentNavigation, setDocumentNavigation] = useState<HTMLDivElement | null>(null);
   const [documentActions, setDocumentActions] = useState<HTMLDivElement | null>(null);
   const [dirtyDocumentIds, setDirtyDocumentIds] = useState<Set<string>>(new Set());

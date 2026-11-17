@@ -214,6 +214,25 @@ try {
   send(refreshed, { type: 'agent.history' })
   assert.equal((await receive(refreshed, 'agent.history')).jobs.find((job) => job.id === cancelledId).status, 'failed')
   assert.equal((await readExecution()).executionState, 'failed')
+  // Ask must bypass a running writer over real sockets and preserve its lease.
+  // Finish the previous blocker before isolating the lane test.
+  let prior
+  do { prior = await receive(alice, 'agent.update') } while (prior.job.id !== blockerId || prior.job.status !== 'complete')
+  const slowId = crypto.randomUUID(), askId = crypto.randomUUID()
+  send(alice, { type: 'agent.invoke', requestId: slowId, agentId: 'agent-1', instruction: 'Slow write' })
+  let slow
+  do { slow = await receive(alice, 'agent.update') } while (slow.job.id !== slowId || slow.job.status !== 'running')
+  send(bob, { type: 'agent.invoke', requestId: askId, agentId: 'agent-1', instruction: 'Read beside writer', mode: 'read' })
+  let answer
+  do { answer = await receive(bob, 'agent.update') } while (answer.job.id !== askId || answer.job.status !== 'complete')
+  assert.equal(answer.job.mode, 'read')
+  send(alice, { type: 'agent.history' })
+  const alongside = (await receive(alice, 'agent.history')).jobs
+  assert.equal(alongside.find((job) => job.id === slowId).status, 'running')
+  assert.equal(queues.get(alice).some((event) => event.type === 'agent.update' && event.job.id === askId), false)
+  assert.equal(queues.get(bob).some((event) => event.type === 'agent.document-preview' && event.runId === askId), false)
+  send(bob, { type: 'agent.observed', requestId: askId, elapsedMs: 500, editorSaveMs: 0 })
+  do { slow = await receive(alice, 'agent.update') } while (slow.job.id !== slowId || slow.job.status !== 'complete')
   await mf.dispatchFetch('https://api.test/revoke')
   const closed = new Promise((resolve) => bob.addEventListener('close', (event) => resolve(event.code), { once: true }))
   send(bob, { type: 'send', clientMessageId: crypto.randomUUID(), text: 'revoked' })

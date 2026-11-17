@@ -5,7 +5,7 @@ export async function* streamPrivateRoomAgent(_env: unknown, _profile: PrivateAg
   calls++
   await options?.preview?.('write', JSON.stringify({ documentId: 'doc', expectedVersionId: 'v1', edits: [{ type: 'insertText', index: 0, text: 'Partial ' + messages.at(-1)!.content }] }))
   yield 'Private reply: '
-  await new Promise((resolve) => setTimeout(resolve, 400))
+  await new Promise((resolve) => setTimeout(resolve, messages.at(-1)!.content === 'Slow write' ? 1200 : 400))
   signal.throwIfAborted()
   yield messages.at(-1)!.content
 }

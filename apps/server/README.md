@@ -238,11 +238,14 @@ uses AI SDK `generateText` with `Output.object` to generate validated JSON
 `{ purpose, rules }`. The purpose is saved as `agent.role` (up to 70 characters),
 and ordered rules are saved as `agent.rules` (up to 6,000 characters combined).
 The selected name and avatar remain user-controlled; tenant and status are server-owned.
-Both creation and profile updates accept an optional `avatarDesign` containing
-`bodyPath`, a hex `color`, and two `eyes` with `cx`, `cy`, `rx`, and `ry`. The shared
-validator rejects markup, external references, unsupported path commands, and
-out-of-bounds geometry. The validated design is stored in `agent.avatarDesign`
-(JSONB) and included in agent lists, room details, and WebSocket agent options.
+Both creation and profile updates accept an optional `avatarDesign` containing a
+hex `color` and an Open Bot Avatar v1 `definition` (`version`, `id`, `name`,
+`body.path`, and `eyes` with `x`, `y`, `spacing`, `scale`). New previews use the
+`open-bot-avatar` validator on both API boundaries and the shared renderer for
+inferred volume, gaze, blinking, and motion. The generation prompt follows the
+upstream face-first design guidance; color stays outside the geometry definition.
+The validated design is stored in the existing `agent.avatarDesign` JSON field.
+Older saved `bodyPath`/ellipse designs remain supported by the legacy renderer.
 Send `avatarDesign: null` to return to a preset. A custom design and an uploaded
 `avatarUrl` cannot be selected together. Generating a preview alone does not save it.
 
@@ -439,6 +442,8 @@ room scoped; writes require a version read during the current run and use the
 existing optimistic concurrency checks. Tool cancellation propagates to Office requests
 and is checked before storage writes and inside the version transaction. Range reads
 include only the workbook styles referenced by returned cells. Moderator tool execution is sequential; delegated specialists prepare work in parallel.
+The `readDocuments` tool batches up to three independent document/workbook reads
+in parallel without enabling concurrent commits.
 The limits and recovery behavior are described above. Storage/database error details are
 not returned to the model. Local uploads and unsaved browser changes are not tool
 inputs. Only saved Univer documents can be edited. Clean open editors refresh after the
@@ -447,6 +452,54 @@ room run ends; local drafts are preserved when the saved document has changed.
 Moderator/lease checks: `bun test apps/server/tests/room-moderator.test.ts
 apps/server/tests/room-write-lock.test.ts apps/server/tests/private-room-agents.test.ts`.
 Room activity UI checks: `bun run --filter @nautilus/web test:room-work`.
+
+
+### Room execution lanes and latency
+
+The private composer defaults to **Work** (`mode: "write"`), which preserves the
+durable FIFO and room write lease. **Ask** (`mode: "read"`) uses a separate lane:
+at most three runs per room and two per user, alongside the writer. Missing mode
+and scheduled deliveries use Work. A request ID cannot be reused with another
+mode. Ask never flushes browser editors; it reads saved room documents and planner data.
+
+Ask exposes an explicit allowlist of document discovery/search/read tools plus
+`listTasks`, `readTask`, and `listScheduledEvents`, with up to three concurrent tool
+calls. Planner reads are scoped to the current room; scheduled events are also
+scoped to the requesting user. Every call rechecks access and agent assignment.
+Tasks include due dates and assignments, and task reads include recent history.
+Planner reads reflect current saved state rather than pinned snapshots.
+No document creation/editing, planner writes,
+scheduling or specialist delegation is available. A request requiring changes
+must be submitted anew in Work mode; there is no automatic escalation. Snapshots
+are pinned on first read per document, with a ten-document/8 MB encoded-content
+budget. This prevents mixing versions of one document, but is not a transactional
+snapshot across multiple documents. Replies should identify source versions.
+
+Queued jobs in both lanes survive coordinator restart. Interrupted active runs
+hold their slots until the watchdog expires, then fail without replay. Only
+Work takes/releases a write lease. Cancellation and activity are scoped per run.
+All presence, retry and watchdog alarm scheduling preserves the earliest deadline.
+
+Acceptance starts execution without waiting for subscriber notifications. Reply
+delivery coalesces cumulative snapshots with one in-flight delivery and one pending
+snapshot per run. Socket updates are offered every 200 ms; durable reply checkpoints
+are written at most once per second during streaming. Commits and terminal states
+are persisted separately. Every private socket delivery rechecks access; same-session
+tabs share only that delivery's authorization check. Activity broadcasts coalesce.
+
+Filter browser console and Worker logs for `[agent-pipeline]` and join by `roomId`
+and `runId`. Server stages include `received`, `accepted`, `dequeued`,
+`model.started`, `model.first-delta` (text, reasoning or tool input),
+`reply.first-delta`, `output.sent`, `committed`, and `complete`/`failed`.
+Existing `[agent-call]` logs add per-model-step and tool durations. Browser stages
+include `browser.submit`, `browser.editor-saved`, and `browser.first-output`
+(first reply rendered by React). The browser sends that first-output duration to
+the authenticated socket as `agent.observed`; it contains no instruction/reply text.
+Browser durations use `performance.now()` and must not be subtracted from server
+timestamps. Compare queue wait, first-output and completion distributions separately
+for Ask and Work before claiming production improvements. Unsaved-editor flush time
+applies to Work only; Ask's editor preparation is a no-op. Document previews can
+appear before the first reply and are not counted by the reply-render measurement.
 
 
 ### Agent guardrails
@@ -549,7 +602,7 @@ into an explicitly selected joined room.
 Apply `20261112120000_knowledge_base` before running the updated API. The Worker
 adds a separate `KNOWLEDGE_WORKER` SQLite Durable Object (`knowledge-v1` migration).
 The existing minute cron dispatches due work; each enabled bucket is checked every
-**six hours**, with additional checks requested by tagging, manual refresh, saved
+**six hours** by default. Each workspace agent can have its own interval in each bucket, with additional checks requested by tagging, manual refresh, saved
 document head/title changes, and edits to explicitly tagged messages. Cron never
 calls the model. A durable alarm processes one source chunk at a time, checkpointing
 findings and resuming after interruptions. Provider requests use the existing
@@ -616,3 +669,33 @@ fixture data to an external model.
 ## Agent Hub
 
 See [the Agent Hub module](src/agent-hub/README.md) for its durable-run routes, document and planner tooling, knowledge permissions, and chat UI validation.
+
+## Personal agent activity
+
+The workspace Activity view reads `/api/organizations/:organizationId/activity`.
+It shows only the signed-in user's room-agent requests in rooms they currently
+belong to. Organization administrator roles do not grant access to other users'
+private requests. The endpoint supports `agentId`, `roomId`, `status`, inclusive
+ISO datetime `from`/`to`, and an opaque `cursor`. Request details are loaded from
+`/activity/:roomId/:runId` only when expanded.
+
+Apply migration `20261117120000_agent_activity` with the normal
+`bun run --filter @nautilus/server db:deploy` command before running the new
+server. The `agentActivityRun` archive survives rolling chat-history pruning;
+room or owner deletion removes it. The room coordinator writes a durable outbox
+with each job snapshot and retries database failures via its alarm. Database
+writes use monotonic revisions so delayed snapshots cannot replace newer work.
+
+On opening Activity, the client imports retained private history through the
+bounded `POST /activity/sync?after=...` endpoint (five rooms per page). Expired
+chat jobs cannot be recovered. Old jobs may have no execution start/finish times.
+The feed refreshes every ten seconds while visible; request details refresh during
+active work. Live phases are current state, not a retained tool-by-tool audit log.
+
+Validation:
+
+- `bun test apps/server/tests/agent-activity.test.ts apps/server/tests/private-room-agents.test.ts`
+- `bun run --filter @nautilus/web test:activity`
+- `ACTIVITY_TEST_DATABASE_URL=... bun test apps/server/tests/agent-activity.integration.test.ts`
+  against a migrated, dedicated test database. `ACTIVITY_TEST_WS_PROXY` optionally
+  supports a local WebSocket-to-Postgres proxy, as in the knowledge integration test.
