@@ -1,5 +1,7 @@
 # Nautilus workspace
 
+- When adding, changing, or removing a feature, update [FEATURE_MAP.md](FEATURE_MAP.md)
+  in the same change so its descriptions and implementation links stay current.
 - Use Bun 1.3.13 from the repository root; keep one root `bun.lock`.
 - `apps/web` is the Next.js frontend. Read its `AGENTS.md` and the installed
   Next.js documentation before changing framework code.

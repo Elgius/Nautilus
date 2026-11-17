@@ -2,6 +2,8 @@
 
 Bun workspace monorepo containing the Next.js frontend and Hono API.
 
+Browse the [feature map](FEATURE_MAP.md) for workspace features and their implementation paths.
+
 ```text
 apps/
   web/       Next.js frontend (@nautilus/web)
