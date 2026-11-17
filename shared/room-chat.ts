@@ -24,6 +24,19 @@ export type ChatServerEvent<Message> = PrivateAgentEvent
   | { type: 'error'; requestId?: string; error: string; errorCode?: AgentErrorCode };
 
 export type RoomAgentOption = AgentAppearance & { id: string; name: string; role: string };
+export type HubSource = {
+  id: string; kind?: 'knowledge' | 'document' | 'task'; taskId?: string; revision?: number; scope: 'PERSONAL' | 'ORGANIZATION' | 'ROOM'; title: string; body: string;
+  roomId: string; documentId: string | null; messageId: string | null; updatedAt: string;
+  citations: { locator: string; quote: string; documentVersionId: string | null }[];
+};
+export type HubCitation = {
+  id: string; number: number; sourceId: string; sourceType: 'knowledge' | 'document' | 'task';
+  title: string; url: string; scope: HubSource['scope']; quote: string; locator: string;
+  documentVersionId: string | null; revision?: number;
+};
+export type HubToolCall = { id: string; name: string; status: 'running' | 'complete' | 'failed'; summary?: string };
+export type HubConfirmation = { id: string; label: string; status: 'pending' | 'approved' | 'declined' };
+export type HubOptions = { conversationId?: string; knowledge: ('PERSONAL' | 'ORGANIZATION')[]; reasoning: 'low' | 'medium' | 'high' };
 export type AgentRunMode = 'read' | 'write';
 export type PrivateAgentJob = {
   id: string;
@@ -38,6 +51,13 @@ export type PrivateAgentJob = {
   createdAt: string;
   updatedAt: string;
   revision: number;
+  options?: HubOptions;
+  tools?: HubToolCall[];
+  sources?: HubSource[];
+  citations?: HubCitation[];
+  knowledgeUnavailable?: boolean;
+  knowledgeReferences?: { id: string; revision?: number }[];
+  confirmations?: HubConfirmation[];
   mode?: AgentRunMode;
   source?: "manual" | "scheduled";
   startedAt?: string;

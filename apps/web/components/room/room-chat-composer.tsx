@@ -11,7 +11,7 @@ import { InputGroup, InputGroupAddon, InputGroupButton } from "@/components/ui/i
 import { agentMention, selectAgentMention } from "@/lib/agent-mention";
 import { defaultRoomSuggestions } from "./use-room-suggestions";
 import { withDocumentSelection, type DocumentSelection } from '@/lib/document-selection';
-import type { AgentRunMode, RoomAgentOption } from "../../../../shared/room-chat";
+import type { HubOptions, AgentRunMode, RoomAgentOption } from "../../../../shared/room-chat";
 
 type Props = {
   selection?: DocumentSelection | null;
@@ -23,7 +23,7 @@ type Props = {
   agentBusy: boolean;
   loadAgents: () => void;
   sendMessage: (text: string) => boolean;
-  invokeAgent: (agent: RoomAgentOption, instruction: string, mode?: AgentRunMode) => boolean | Promise<boolean>;
+  invokeAgent: (agent: RoomAgentOption, instruction: string, mode?: AgentRunMode, options?: Pick<HubOptions, 'knowledge' | 'reasoning'>) => boolean | Promise<boolean>;
   sendTyping: () => void;
 };
 const reasoningLevels = ["Low", "Medium", "High"];
@@ -68,7 +68,7 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
       submitting.current = true; setPreparing(true);
       const sentInstruction = instruction;
       try {
-        if (await invokeAgent(selected, text, mode)) {
+        if (await invokeAgent(selected, text, mode, { knowledge: ['ORGANIZATION'], reasoning: reasoning.toLowerCase() as HubOptions['reasoning'] })) {
           setInstruction((current) => current === sentInstruction ? '' : current);
           if (sentSelection) onClearSelection?.(sentSelection);
         }
@@ -156,12 +156,12 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
           <Button type="button" size="xs" variant={mode === 'write' ? 'secondary' : 'ghost'} aria-pressed={mode === 'write'} disabled={preparing} onClick={() => setMode('write')}>Work</Button>
         </div>}
         <InputGroupButton variant="outline" size="icon-sm" className="rounded-full" aria-label="Attach files" title="Attach files · local preview only" onClick={() => fileInput.current?.click()}><Plus size={17} /></InputGroupButton>
-        <ChoiceMenu label="Reasoning effort" title="Reasoning effort · UI preview only" className="room-reasoning-trigger" icon={<Brain size={14} />} value={reasoning} onValueChange={setReasoning} options={reasoningLevels.map((value) => ({ value, label: value }))} />
+        <ChoiceMenu label="Reasoning effort" title="Reasoning effort" className="room-reasoning-trigger" icon={<Brain size={14} />} value={reasoning} onValueChange={setReasoning} options={reasoningLevels.map((value) => ({ value, label: value }))} />
         <InputGroupButton variant="default" size="icon-sm" className="ml-auto rounded-full" type="submit" disabled={preparing || !canSend || attachments.length > 0 || (selected ? agentBusy || !instruction.trim() : !draft.trim() || Boolean(mention))} aria-label={selected ? 'Send private instruction' : 'Send message'}><ArrowUp size={17} /></InputGroupButton>
       </InputGroupAddon>
     </InputGroup>
     {submitError && <p role="alert" className="room-local-note">{submitError}</p>}
-    <p className="room-local-note">Enter to send or continue a list · Enter on an empty item to end the list · Shift + Enter for a new line · Start lists with - / * / 1. / 1) and a space · Reasoning is a UI preview</p>
+    <p className="room-local-note">Enter to send or continue a list · Enter on an empty item to end the list · Shift + Enter for a new line · Start lists with - / * / 1. / 1) and a space</p>
     {attachments.length > 0 && <p id={attachmentNoteId} role="status" className="room-local-note">Files stay on this device. Remove attachments to send a text message.</p>}
     <p className="room-local-note">{selected ? mode === 'read' ? 'Ask reads saved documents and answers privately. It cannot make changes.' : 'Work can update shared documents. Instructions and replies are private.' : 'Room messages are shared with members. Use @ for private agent instructions.'}</p>
   </form>;

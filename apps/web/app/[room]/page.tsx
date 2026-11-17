@@ -11,7 +11,7 @@ import "./room.css";
 
 export const metadata = { title: "Room — Agents hub" };
 
-async function SavedRoom({ roomId }: { roomId: string }) {
+async function SavedRoom({ roomId, documentId }: { roomId: string; documentId?: string }) {
   const sessionResult = await requireSession(`/room-id=${encodeURIComponent(roomId)}`);
   if (sessionResult.status === "unavailable") return <ApiUnavailable />;
   const session = sessionResult.data;
@@ -27,10 +27,10 @@ async function SavedRoom({ roomId }: { roomId: string }) {
     throw new Error("Couldn’t load this room. Please try again.");
   }
   const data = result.data;
-  return <RoomWorkspace key={roomId} initialData={data} />;
+  return <RoomWorkspace key={`${roomId}:${documentId ?? ""}`} initialData={data} initialDocumentId={documentId} />;
 }
 
-async function RoomRoute({ params }: { params: Promise<{ room: string }> }) {
+async function RoomRoute({ params, searchParams }: { params: Promise<{ room: string }>; searchParams: Promise<{ document?: string }> }) {
   const { room: encodedRoom } = await params;
   let room: string;
   try {
@@ -41,18 +41,20 @@ async function RoomRoute({ params }: { params: Promise<{ room: string }> }) {
   if (!room.startsWith("room-id=") || room.length <= "room-id=".length) {
     notFound();
   }
+  const { document: documentId } = await searchParams;
   const roomId = room.slice("room-id=".length);
   return (
     <WorkspaceGate returnTo={`/room-id=${encodeURIComponent(roomId)}`}>
-      <SavedRoom roomId={roomId} />
+      <SavedRoom roomId={roomId} documentId={typeof documentId === "string" ? documentId : undefined} />
     </WorkspaceGate>
   );
 }
 
 export default function Page({
-  params,
+  params, searchParams,
 }: {
   params: Promise<{ room: string }>;
+  searchParams: Promise<{ document?: string }>;
 }) {
   return (
     <Suspense
@@ -62,7 +64,7 @@ export default function Page({
         </div>
       }
     >
-      <RoomRoute params={params} />
+      <RoomRoute params={params} searchParams={searchParams} />
     </Suspense>
   );
 }

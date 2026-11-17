@@ -174,7 +174,7 @@ Only user and assistant text messages are accepted, with up to 50 messages and
 are not persisted or automatically added to rooms. Client-supplied models,
 system instructions, and tools are ignored. Each call has a 60-second timeout,
 a 4,096 output-token limit, and at most one retry. Disconnects abort generation.
-No tools, file uploads, or background agent execution are enabled by this endpoint.
+This compatibility endpoint exposes document discovery and organization knowledge reads. Shared actions execute through the dedicated Agent Hub durable-run routes. File uploads remain unavailable here.
 
 Room conversations use `POST /api/organizations/:organizationId/rooms/:roomId/messages`
 to save the user message first, then `POST /api/organizations/:organizationId/rooms/:roomId/messages/:messageId/reply`
@@ -666,6 +666,10 @@ six-hour scheduling, idempotency, checkpoint recovery, unchanged-source skipping
 citations, and revocation during generation. AI calls are mocked; it never sends
 fixture data to an external model.
 
+## Agent Hub
+
+See [the Agent Hub module](src/agent-hub/README.md) for its durable-run routes, document and planner tooling, knowledge permissions, and chat UI validation.
+
 ## Personal agent activity
 
 The workspace Activity view reads `/api/organizations/:organizationId/activity`.
@@ -675,12 +679,16 @@ private requests. The endpoint supports `agentId`, `roomId`, `status`, inclusive
 ISO datetime `from`/`to`, and an opaque `cursor`. Request details are loaded from
 `/activity/:roomId/:runId` only when expanded.
 
-Apply migration `20261117120000_agent_activity` with the normal
+Apply migrations `20261117120000_agent_activity` and `20261117200000_agent_activity_evidence` with the normal
 `bun run --filter @nautilus/server db:deploy` command before running the new
 server. The `agentActivityRun` archive survives rolling chat-history pruning;
 room or owner deletion removes it. The room coordinator writes a durable outbox
 with each job snapshot and retries database failures via its alarm. Database
 writes use monotonic revisions so delayed snapshots cannot replace newer work.
+Answers retain their source evidence in the archive, including after rolling
+chat history is pruned. Detail reads recheck knowledge access and redact answers
+whose sources are withdrawn or changed. Retained jobs can repair older placeholder
+archives on history import; already-pruned answers cannot be recovered.
 
 On opening Activity, the client imports retained private history through the
 bounded `POST /activity/sync?after=...` endpoint (five rooms per page). Expired

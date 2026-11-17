@@ -9,7 +9,7 @@ const { createRoot } = await import('react-dom/client');
 const { SWRConfig } = await import('swr');
 const { AgentActivity } = await import('../components/workspace/agent-activity');
 const originalFetch = globalThis.fetch, requests: URL[] = [];
-let owner = 'alice', fail = false, reply = 'Launch plan saved.';
+let owner = 'alice', fail = false, reply = 'Launch plan saved. [Plan](#source-plan)';
 let resultError: string | null = null;
 let failHistory = false;
 const historyRequests: URL[] = [];
@@ -22,7 +22,9 @@ Object.assign(globalThis, { fetch: async (input: string, init?: RequestInit) => 
     return Response.json({ nextCursor: url.searchParams.has('after') ? null : 'room-5' });
   }
   if (fail) return Response.json({}, { status: 503 });
-  if (url.pathname.endsWith('/room/run')) return Response.json({ instruction: 'PRIVATE ALICE REQUEST', reply, error: resultError, documents: [{ documentId: 'doc', versionId: 'version', versionNumber: 1, title: 'Launch plan', available: true }], tasks: [{ taskId: 'task', revision: 2, title: 'Ship launch', available: true }] });
+  if (url.pathname.endsWith('/room/run')) return Response.json({ instruction: 'PRIVATE ALICE REQUEST', reply, error: resultError,
+    citations: [{ id: 'citation-plan', number: 1, sourceId: 'plan', sourceType: 'document', title: 'Launch plan', url: '/room-id=room?document=doc', scope: 'ROOM', quote: 'Approved for launch', locator: 'Body', documentVersionId: 'v1' }],
+    documents: [{ documentId: 'doc', versionId: 'version', versionNumber: 1, title: 'Launch plan', available: true }], tasks: [{ taskId: 'task', revision: 2, title: 'Ship launch', available: true }] });
   return Response.json({ runs: owner === 'bob' || url.searchParams.get('status') === 'failed' ? [] : url.searchParams.has('cursor') ? [{ ...run, id: 'older', title: 'Earlier request' }] : [run], active: [], rooms: [{ id: 'room', name: 'Launch' }], agents: [{ id: 'scout', name: 'Scout' }], nextCursor: !url.searchParams.has('cursor') && !url.searchParams.has('status') ? 'older-cursor' : null });
 } });
 const container = document.createElement('div'); document.body.append(container); const root = createRoot(container), cache = new Map();
@@ -58,6 +60,11 @@ try {
   assert.equal(requests.some((u) => u.pathname.endsWith('/room/run')), false, 'detail fetched before expansion');
   await click('Prepare launch plan');
   assert.match(container.textContent!, /PRIVATE ALICE REQUEST/); assert.match(container.textContent!, /Launch plan saved/); assert.match(container.textContent!, /Ship launch/);
+  const citation = container.querySelector<HTMLButtonElement>('[aria-label="Citation 1: Launch plan"]');
+  assert.ok(citation, 'Archived answers must render their structured citations');
+  await act(async () => { citation.click(); await new Promise((r) => setTimeout(r, 30)); });
+  assert.match(document.body.textContent!, /Approved for launch/);
+  await act(async () => citation.click());
   await click('Load more activity'); assert.match(container.textContent!, /Earlier request/);
   const status = container.querySelector<HTMLButtonElement>('[aria-label="Filter by status"]')!;
   await act(async () => { status.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });

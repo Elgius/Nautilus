@@ -47,6 +47,32 @@ async function receive(socket, type) {
 }
 const send = (socket, event) => socket.send(JSON.stringify(event))
 try {
+  // Hub HTTP dispatch uses the same room queue and preserves owner isolation.
+  const hubId = crypto.randomUUID(), hubConversation = crypto.randomUUID()
+  const hubIdentity = { organizationId: 'org', roomId: 'room', userId: 'hub-user', sessionId: 'session' }
+  const hubCall = (identity, action, input = {}, destination = 'room') => mf.dispatchFetch(`https://api.test/agent-hub?room=${destination}`, {
+    method: 'POST', body: JSON.stringify({ identity, action, input }),
+  })
+  const hubInput = { requestId: hubId, agentId: 'agent-hub', instruction: 'Hub private request', conversationId: hubConversation, knowledge: ['ORGANIZATION'], reasoning: 'high' }
+  assert.equal((await hubCall(hubIdentity, 'invoke', hubInput, 'other')).status, 403)
+  assert.equal((await hubCall({ ...hubIdentity, userId: 'outsider' }, 'invoke', hubInput)).status, 403)
+  assert.equal((await hubCall(hubIdentity, 'invoke', { ...hubInput, agentId: 'agent-1' })).status, 409, 'Hub cannot invoke another member’s personal agent')
+  assert.equal((await hubCall(hubIdentity, 'invoke', hubInput)).status, 202)
+  const hubDeadline = Date.now() + 5000
+  let hubJob
+  while (Date.now() < hubDeadline) {
+    hubJob = (await (await hubCall(hubIdentity, 'history')).json()).jobs.find((job) => job.id === hubId)
+    if (hubJob?.status === 'complete' || hubJob?.status === 'failed') break
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  assert.equal(hubJob?.status, 'complete')
+  assert.equal(hubJob.options.conversationId, hubConversation)
+  assert.equal(hubJob.options.reasoning, 'high')
+  assert.equal(hubJob.reply, 'Private reply: Hub private request')
+  assert.deepEqual((await (await hubCall({ ...hubIdentity, userId: 'bob' }, 'history')).json()).jobs, [])
+  const hubCallsBeforeRetry = (await (await mf.dispatchFetch('https://api.test/agent-calls')).json()).calls
+  assert.equal((await hubCall(hubIdentity, 'invoke', hubInput)).status, 202)
+  assert.equal((await (await mf.dispatchFetch('https://api.test/agent-calls')).json()).calls, hubCallsBeforeRetry)
   const lifecycle = await mf.dispatchFetch('https://api.test/lifecycle-regression')
   assert.equal(lifecycle.status, 200, await lifecycle.text())
   // A passive reader's automatic receipts cannot exhaust their send allowance.
@@ -136,7 +162,7 @@ try {
   assert.equal((await receive(aliceTab, 'agent.history')).jobs[0].instruction, secret)
   send(alice, { type: 'agent.invoke', requestId: privateId, agentId: 'agent-1', instruction: secret })
   assert.equal((await receive(alice, 'agent.update')).job.id, privateId)
-  assert.equal((await (await mf.dispatchFetch('https://api.test/agent-calls')).json()).calls, 1)
+  assert.equal((await (await mf.dispatchFetch('https://api.test/agent-calls')).json()).calls, hubCallsBeforeRetry + 1)
   send(other, { type: 'agent.invoke', requestId: crypto.randomUUID(), agentId: 'agent-1', instruction: 'not assigned' })
   assert.equal((await receive(other, 'error')).errorCode, 'AGENT_ACCESS_DENIED')
   send(bob, { type: 'agent.invoke', requestId: crypto.randomUUID(), agentId: 'agent-1', instruction: 'Try Alice agent' })

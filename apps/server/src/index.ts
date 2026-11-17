@@ -1,3 +1,4 @@
+import { agentHub } from './agent-hub/routes'
 import { personalAgentScope } from './personal-agents'
 import { agentActivity } from './agent-activity'
 import { runScheduler } from './scheduler'
@@ -135,6 +136,10 @@ app.route(documentLibraryPath, documentLibrary)
 const knowledgePath = '/api/organizations/:organizationId/knowledge'
 app.use(`${knowledgePath}/*`, authenticated, organizationMember)
 app.route(knowledgePath, knowledgeRoutes)
+
+const hubPath = '/api/organizations/:organizationId/agent-hub'
+app.use(`${hubPath}/*`, authenticated, organizationMember)
+app.route(hubPath, agentHub)
 
 const creatorPath = '/api/organizations/:organizationId/agent_creator_agent'
 app.use(creatorPath, authenticated, organizationMember)

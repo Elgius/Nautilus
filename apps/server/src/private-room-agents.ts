@@ -1,4 +1,7 @@
-import type { AgentRunMode, AgentWorkActivity, PrivateAgentEvent, PrivateAgentJob, RoomAgentOption } from '../../../shared/room-chat'
+import { assertHubJobSize, mergeHubProvenance } from './agent-hub/provenance'
+import { buildHubCitations } from '../../../shared/agent-citations'
+import { hubOptions } from './agent-hub/contracts'
+import type { AgentRunMode, AgentWorkActivity, PrivateAgentEvent, PrivateAgentJob, RoomAgentOption, HubToolCall, HubSource, HubOptions } from '../../../shared/room-chat'
 import { parseSend, type ChatIdentity } from './room-chat-service'
 import { logPipeline, type PipelineStage } from './agent-pipeline'
 import { scheduleEarlierAlarm, scheduleRoomAlarm } from './room-alarm'
@@ -10,6 +13,11 @@ export type PrivateAgentProfile = RoomAgentOption & { rules: string[] }
 export type PrivateAgentMessage = { role: 'user' | 'assistant'; content: string }
 export type AgentRunContext = {
   id: string; token: string
+  options?: HubOptions
+  agentId?: string
+  tool?: (call: HubToolCall) => Promise<void>
+  sources?: (sources: HubSource[]) => Promise<void>
+  confirm?: (label: string) => Promise<boolean>
   mode?: AgentRunMode
   stage?: (stage: PipelineStage) => void
   activity: (activity: AgentWorkActivity | null, agentId: string) => Promise<void>
@@ -29,6 +37,7 @@ type Dependencies = {
   stream: (profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, identity: ChatIdentity, run: AgentRunContext) => AsyncIterable<string>
   send: (identity: ChatIdentity, event: PrivateAgentEvent) => Promise<void>
   waitUntil: (task: Promise<void>) => void
+  filterHistory?: (identity: ChatIdentity, jobs: PrivateAgentJob[]) => Promise<PrivateAgentJob[]>
   changed?: (identity: ChatIdentity) => Promise<void>
   archive?: (identity: ChatIdentity, job: PrivateAgentJob) => Promise<void>
 }
@@ -43,6 +52,12 @@ const RUN_MS = 180_000
  * blindly replayed because they may already have committed document changes.
  */
 export class PrivateRoomAgents {
+  private confirmations = new Map<string, { key: string; resolve: (approved: boolean) => void }>()
+  async confirm(identity: ChatIdentity, jobId: string, confirmationId: string, approved: boolean) {
+    const pending = this.confirmations.get(confirmationId)
+    if (!pending || pending.key !== this.key(identity, jobId) || !await this.deps.canAccess(identity)) throw new Error('Confirmation is no longer available.')
+    pending.resolve(approved)
+  }
   private draining = false
   private pumpingReads = false
   private readsRequested = false
@@ -53,6 +68,7 @@ export class PrivateRoomAgents {
   private active = new Map<string, AbortController>()
   private archiving = false
   private lastArchived = new Map<string, { at: number; signature: string }>()
+  private knowledgeUnavailable = new Set<string>()
   constructor(private deps: Dependencies) {}
   private prefix(identity: ChatIdentity) { return `private-agent:${encodeURIComponent(identity.userId)}:` }
   private key(identity: ChatIdentity, id: string) { return `${this.prefix(identity)}job:${id}` }
@@ -82,7 +98,9 @@ export class PrivateRoomAgents {
     return success
   }
   async archiveHistory(identity: ChatIdentity) {
-    const jobs = await this.history(identity)
+    // Persist original answers and their dependencies. Authorization belongs at
+    // read time; an import while knowledge is withdrawn must not destroy them.
+    const jobs = await this.retainedHistory(identity)
     await this.deps.storage.transaction(async (tx) => {
       for (const job of jobs) {
         const key = `${OUTBOX}${this.key(identity, job.id)}`
@@ -105,7 +123,7 @@ export class PrivateRoomAgents {
       .map((entry) => this.deps.storage.get<AgentWorkActivity[]>(ACTIVITIES + this.key(entry.identity, entry.id))))
     return { queued: queue.filter((entry) => !entry.token).length, activities: activities.flatMap((items) => items ?? []) }
   }
-  async history(identity: ChatIdentity) {
+  private async retainedHistory(identity: ChatIdentity) {
     const ids = await this.deps.storage.get<string[]>(`${this.prefix(identity)}index`) ?? []
     const queue = await this.deps.storage.get<Entry[]>(QUEUE) ?? []
     const jobs: PrivateAgentJob[] = []
@@ -122,10 +140,18 @@ export class PrivateRoomAgents {
     }
     return jobs
   }
+  async history(identity: ChatIdentity) {
+    const jobs = await this.retainedHistory(identity)
+    const visible = this.deps.filterHistory ? await this.deps.filterHistory(identity, jobs) : jobs
+    return visible.map((job) => ({ ...job, citations: buildHubCitations(job.reply, job.sources ?? []) }))
+  }
   async invoke(identity: ChatIdentity, input: Record<string, unknown>, scheduled = false, receivedAt = Date.now()) {
     const { clientMessageId: id, text: instruction } = parseSend({ clientMessageId: input.requestId, text: input.instruction })
     logPipeline(identity.roomId, id, 'received', { receivedAtMs: receivedAt, ingressMs: Date.now() - receivedAt })
     if (typeof input.agentId !== 'string' || !input.agentId || input.agentId.length > 100) throw new Error('Invalid agent selection.')
+    const parsedOptions = hubOptions.safeParse({ conversationId: input.conversationId, knowledge: input.knowledge, reasoning: input.reasoning })
+    if (!parsedOptions.success) throw new Error('Invalid conversation options.')
+    const options = parsedOptions.data
     if (input.mode !== undefined && input.mode !== 'read' && input.mode !== 'write') throw new Error('Invalid request mode.')
     // Old clients and scheduled work retain the serialized writer path.
     const mode: AgentRunMode = scheduled ? 'write' : input.mode === 'read' ? 'read' : 'write'
@@ -142,13 +168,13 @@ export class PrivateRoomAgents {
       if (scheduled && await tx.get(receiptKey)) return null
       const existing = await tx.get<PrivateAgentJob>(key)
       if (existing) {
-        if (existing.agentId !== profile.id || existing.instruction !== instruction || (existing.mode ?? 'write') !== mode) throw new Error('Invalid reuse of an instruction ID.')
+        if (existing.agentId !== profile.id || existing.instruction !== instruction || (existing.mode ?? 'write') !== mode || JSON.stringify(existing.options ?? hubOptions.parse({})) !== JSON.stringify(options)) throw new Error('Invalid reuse of an instruction ID.')
         if (scheduled) await tx.put(receiptKey, true)
         return existing
       }
       const queue = await tx.get<Entry[]>(QUEUE) ?? []
       if (queue.length >= 100 || queue.filter((entry) => entry.identity.userId === identity.userId).length >= 20) throw new Error('Too many queued requests. Wait for some work to finish.')
-      const job: PrivateAgentJob = { id, agentId: profile.id, agentName: profile.name, instruction, reply: '', status: 'queued', createdAt: now, updatedAt: now, revision: 0, mode, commits: [], source: scheduled ? 'scheduled' : 'manual' }
+      const job: PrivateAgentJob = { id, agentId: profile.id, agentName: profile.name, instruction, reply: '', status: 'queued', createdAt: now, updatedAt: now, revision: 0, mode, source: scheduled ? 'scheduled' : 'manual', commits: [], options, tools: [], sources: [], citations: [], confirmations: [] }
       const indexKey = `${this.prefix(identity)}index`
       const ids = await tx.get<string[]>(indexKey) ?? []
       const retained: string[] = []
@@ -233,6 +259,13 @@ export class PrivateRoomAgents {
     if (job) await this.safeSend(owner ?? identity, job)
     if (owner) await this.changed(owner)
   }
+  private async visibleJob(identity: ChatIdentity, job: PrivateAgentJob) {
+    // Filtering awaits database I/O: never expose a job that keeps mutating meanwhile.
+    const snapshot = structuredClone(job)
+    const visible = this.deps.filterHistory ? (await this.deps.filterHistory(identity, [snapshot]))[0] : snapshot
+    if (!visible) throw new Error('Response is unavailable.')
+    return { ...visible, citations: buildHubCitations(visible.reply, visible.sources ?? []) }
+  }
   async observed(identity: ChatIdentity, input: Record<string, unknown>) {
     if (typeof input.requestId !== 'string' || input.requestId.length > 100 ||
       typeof input.elapsedMs !== 'number' || !Number.isFinite(input.elapsedMs) || input.elapsedMs < 0 || input.elapsedMs > 86_400_000 ||
@@ -301,7 +334,14 @@ export class PrivateRoomAgents {
     // Preserve revisions across acceptance, streaming and terminal notifications.
     // A disconnected subscriber must not change execution/commit state.
     const delivery = (this.deliveries.get(key) ?? Promise.resolve()).then(async () => {
-      try { await this.deps.send(identity, { type: 'agent.update', job: snapshot }) } catch { /* replay via history */ }
+      try {
+        const visible = await this.visibleJob(identity, snapshot)
+        if (visible.knowledgeUnavailable && this.active.has(key)) {
+          this.knowledgeUnavailable.add(key)
+          this.active.get(key)!.abort()
+        }
+        if (await this.deps.canAccess(identity)) await this.deps.send(identity, { type: 'agent.update', job: visible })
+      } catch { /* No unfiltered fallback; replay via authorized history. */ }
     })
     this.deliveries.set(key, delivery)
     await delivery
@@ -393,6 +433,8 @@ export class PrivateRoomAgents {
     let deliveryError: unknown
     let lastPersisted = 0
     const snapshot = () => {
+      job.citations = buildHubCitations(job.reply, job.sources ?? [])
+      assertHubJobSize(job)
       job.updatedAt = new Date().toISOString(); job.revision++
       return structuredClone(job)
     }
@@ -434,17 +476,47 @@ export class PrivateRoomAgents {
       let budget = 32_000 - job.instruction.length
       const history = entry.identity.scheduledDeliveryId ? [] : await this.history(entry.identity)
       const preceding = history.slice(0, Math.max(0, history.findIndex((item) => item.id === job.id)))
-      for (const old of preceding.filter((item) => item.agentId === profile.id && (item.status === 'complete' || item.status === 'failed' && !!item.commits?.length)).slice(-10).reverse()) {
+      for (const old of preceding.filter((item) => item.agentId === profile.id && (item.status === 'complete' || item.status === 'failed' && !!item.commits?.length) && !item.knowledgeUnavailable && item.options?.conversationId === job.options?.conversationId && JSON.stringify(item.options?.knowledge ?? ['ORGANIZATION']) === JSON.stringify(job.options?.knowledge ?? ['ORGANIZATION'])).slice(-10).reverse()) {
         const reply = [old.reply, old.status === 'failed' ? `The previous attempt stopped after saving these versions. Re-read them before continuing: ${JSON.stringify(old.commits)}` : ''].filter(Boolean).join('\n')
         if (old.instruction.length + reply.length > budget) break
+        try { Object.assign(job, mergeHubProvenance(job, old.sources ?? [], old.knowledgeReferences ?? [])) }
+        catch { break }
         messages.unshift({ role: 'user', content: old.instruction }, { role: 'assistant', content: reply })
         budget -= old.instruction.length + reply.length
       }
+      await save(false)
       const signal = AbortSignal.any([controller.signal, deadline])
+      signal.throwIfAborted()
       const context: AgentRunContext = {
-        id: job.id, token: entry.mode === 'read' ? '' : entry.token!, mode: entry.mode ?? 'write', stage,
-        issue: (issue) => {
-          job.issues = [...(job.issues ?? []), issue].slice(-32)
+        id: job.id, token: entry.mode === 'read' ? '' : entry.token!, mode: entry.mode ?? 'write', stage, agentId: profile.id, options: job.options,
+        issue: (issue) => { job.issues = [...(job.issues ?? []), issue].slice(-32) },
+        tool: async (call) => {
+          job.tools = [...(job.tools ?? []).filter((old) => old.id !== call.id), call].slice(-64)
+          await save()
+        },
+        sources: async (sources) => {
+          signal.throwIfAborted()
+          Object.assign(job, mergeHubProvenance(job, sources))
+          await save()
+          signal.throwIfAborted()
+        },
+        confirm: async (label) => {
+          signal.throwIfAborted()
+          const id = crypto.randomUUID(), confirmation = { id, label: label.slice(0, 300), status: 'pending' as 'pending' | 'approved' | 'declined' }
+          job.confirmations = [...(job.confirmations ?? []), confirmation].slice(-10)
+          let resolve!: (approved: boolean) => void
+          const answer = new Promise<boolean>((done) => { resolve = done })
+          this.confirmations.set(id, { key, resolve })
+          const abort = () => resolve(false)
+          signal.addEventListener('abort', abort, { once: true })
+          const timer = setTimeout(abort, 60_000)
+          try {
+            await save()
+            const approved = await answer
+            confirmation.status = approved ? 'approved' : 'declined'
+            await save()
+            return approved && !signal.aborted
+          } finally { clearTimeout(timer); signal.removeEventListener('abort', abort); this.confirmations.delete(id) }
         },
         activity: async (activity, agentId) => {
           signal.throwIfAborted()
@@ -470,7 +542,10 @@ export class PrivateRoomAgents {
         preview: async (toolCallId, input) => {
           signal.throwIfAborted()
           // Ephemeral, owner-only drafts; never persist them as document versions.
-          try { await this.deps.send(entry.identity, { type: 'agent.document-preview', runId: job.id, toolCallId, input, author: { agentId: profile.id, agentName: profile.name, color: colors.get(profile.id) ?? profile.color, requestedBy: { id: entry.identity.userId, name: entry.identity.name || 'Room member' } } }) } catch { /* final content is recovered via work/history */ }
+          try {
+            const visible = await this.visibleJob(entry.identity, job)
+            if (visible.knowledgeUnavailable) { this.knowledgeUnavailable.add(key); controller.abort(); return }
+            await this.deps.send(entry.identity, { type: 'agent.document-preview', runId: job.id, toolCallId, input, author: { agentId: profile.id, agentName: profile.name, color: colors.get(profile.id) ?? profile.color, requestedBy: { id: entry.identity.userId, name: entry.identity.name || 'Room member' } } }) } catch { /* final content is recovered via work/history */ }
         },
         checkpoint: async (id, value) => { signal.throwIfAborted(); await this.deps.storage.put(`room-work:checkpoint:${encodeURIComponent(key)}:${id}`, value) },
       }
@@ -483,17 +558,19 @@ export class PrivateRoomAgents {
         const reply = job.reply + delta
         // DO values have a byte limit; Unicode prompts/replies can exceed it
         // well before reaching the character limit. Keep the last safe reply.
-        if (reply.length > 32_000 || new TextEncoder().encode(JSON.stringify({ ...job, reply })).byteLength > 110_000) throw new AgentRunError('RESPONSE_TOO_LARGE')
+        if (reply.length > 32_000 || new TextEncoder().encode(JSON.stringify({ ...job, reply, citations: buildHubCitations(reply, job.sources ?? []) })).byteLength > 110_000) throw new AgentRunError('RESPONSE_TOO_LARGE')
         job.reply = reply
         if (Date.now() - lastSent >= 200) {
           publish(); lastSent = Date.now()
         }
       }
+      signal.throwIfAborted()
       if (!job.reply.trim()) throw new AgentRunError('EMPTY_RESPONSE')
       if (!await this.deps.canAccess(entry.identity)) throw new AgentRunError('ACCESS_DENIED')
-      job.status = 'complete'; job.finishedAt = new Date().toISOString(); job.activities = []; await save(); stage('complete')
+      job.status = 'complete'; job.finishedAt = new Date().toISOString(); job.activities = []; await save(); controller.signal.throwIfAborted(); stage('complete')
     } catch (error) {
-      job.errorCode = controller.signal.aborted ? 'RUN_CANCELLED' : deadline.aborted ? 'RUN_TIMEOUT'
+      for (const call of job.tools ?? []) if (call.status === 'running') { call.status = 'failed'; call.summary = 'Execution interrupted. Review saved results before retrying.' }
+      job.errorCode = this.knowledgeUnavailable.has(key) ? 'ACCESS_DENIED' : controller.signal.aborted ? 'RUN_CANCELLED' : deadline.aborted ? 'RUN_TIMEOUT'
         : error instanceof AgentRunError || error instanceof SkillOperationError ? error.code
         : 'INTERNAL_ERROR'
       job.status = 'failed'; job.error = agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0)
@@ -503,6 +580,6 @@ export class PrivateRoomAgents {
         savedVersions: job.commits ?? [], issueCount: job.issues?.length ?? 0, ...errorDiagnostics(error) }))
       job.finishedAt = new Date().toISOString(); job.activities = []
       await save(); stage('failed')
-    } finally { controller.abort(); this.active.delete(key) }
+    } finally { controller.abort(); this.active.delete(key); this.knowledgeUnavailable.delete(key) }
   }
 }

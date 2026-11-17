@@ -55,6 +55,16 @@ test.skipIf(!connection)('activity database and API preserve private history, mo
     expect(page.runs).toHaveLength(1); expect(page.runs[0]).toMatchObject({ title: 'ALICE PRIVATE REQUEST', roomName: 'Launch room', documentCount: 1, taskCount: 1 })
     const detail = await (await app.request(`/activity/${room.id}/${id}`)).json() as ActivityDetail
     expect(detail).toMatchObject({ instruction: 'ALICE PRIVATE REQUEST', reply: 'Saved plan', documents: [{ title: 'Launch plan', available: true }], tasks: [{ title: 'Launch task', available: true }] })
+    // Retained jobs can repair a pre-migration placeholder at the same revision.
+    await client.agentActivityRun.updateMany({ where: { organizationId, userId: alice, id }, data: { reply: 'Old placeholder', evidence: {} } })
+    const sourced: PrivateAgentJob = { ...job, reply: 'Saved plan [Plan](#source-plan)', sources: [{ id: 'plan', kind: 'document', scope: 'ROOM', title: 'Launch plan', body: 'Approved', roomId: room.id,
+      documentId: document.id, messageId: null, updatedAt: job.updatedAt, citations: [{ quote: 'Approved', locator: 'Body', documentVersionId: 'version' }] }] }
+    await archiveAgentRun(db, identity, sourced)
+    await archiveAgentRun(db, identity, { ...sourced, revision: 2, reply: 'stale' })
+    await archiveAgentRun(db, identity, { ...sourced, reply: 'duplicate must not overwrite' })
+    const reopened = await (await app.request(`/activity/${room.id}/${id}`)).json() as ActivityDetail
+    expect(reopened).toMatchObject({ reply: sourced.reply, citations: [{ sourceId: 'plan', quote: 'Approved', number: 1 }] })
+    expect((await client.agentActivityRun.findFirstOrThrow({ where: { organizationId, userId: alice, id } })).evidence).toMatchObject({ sources: sourced.sources })
     const filtered = await (await app.request('/activity?status=failed')).json() as ActivityPage
     expect(filtered.runs).toHaveLength(0)
     const dateFiltered = await (await app.request('/activity?from=2026-11-18T00:00:00Z')).json() as ActivityPage

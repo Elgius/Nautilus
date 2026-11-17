@@ -1,3 +1,4 @@
+import { authorizedHubHistory } from './agent-hub/knowledge'
 import { personalAgentScope, registerPersonalRoomAgent } from './personal-agents'
 import { SkillOperationError, errorDiagnostics } from './skill-operation-error'
 import { agentErrorMessages } from '../../../shared/agent-errors'
@@ -43,6 +44,7 @@ export class RoomChat extends DurableObject<Bindings> {
   private get agentService() {
     return this.privateAgents ??= new PrivateRoomAgents({
       storage: this.ctx.storage,
+      filterHistory: (identity, jobs) => this.withDatabase((db) => authorizedHubHistory(db, identity, jobs)),
       archive: (identity, job) => this.withDatabase((db) => archiveAgentRun(db, identity, job)),
       profile: (identity, agentId) => this.withDatabase(async (db) => {
         return registerPersonalRoomAgent(db, identity, agentId)
@@ -129,6 +131,20 @@ export class RoomChat extends DurableObject<Bindings> {
         return Response.json({ cancelled: true })
       })
     }
+    // Internal binding only. Public HTTP routes derive identity from the live session.
+    if (url.pathname === '/agent-hub' && request.method === 'POST') {
+      const { identity, action, input } = await request.json<{ identity: ChatIdentity; action: string; input: Record<string, unknown> }>()
+      const expectedId = this.env.ROOM_CHAT?.idFromName(JSON.stringify([identity.organizationId, identity.roomId]))
+      if (!expectedId || !this.ctx.id.equals(expectedId) || !await this.withDatabase((db) => canChat(db, identity))) return Response.json({ error: 'Room access expired.' }, { status: 403 })
+      try {
+        if (action === 'history') return Response.json({ jobs: await this.agentService.history(identity) })
+        if (action === 'invoke') await this.agentService.invoke(identity, input)
+        else if (action === 'cancel' && typeof input.jobId === 'string') await this.agentService.cancel(identity, input.jobId)
+        else if (action === 'confirm' && typeof input.jobId === 'string' && typeof input.confirmationId === 'string' && typeof input.approved === 'boolean') await this.agentService.confirm(identity, input.jobId, input.confirmationId, input.approved)
+        else return Response.json({ error: 'Invalid agent action.' }, { status: 400 })
+        return Response.json({ accepted: true }, { status: 202 })
+      } catch { return Response.json({ error: 'Agent action could not be accepted. Check the request or reload its current state.' }, { status: 409 }) }
+    }
     if (url.pathname === '/activity-history' && request.method === 'POST') {
       const identity = await request.json<ChatIdentity>()
       const expectedId = this.env.ROOM_CHAT?.idFromName(JSON.stringify([identity.organizationId, identity.roomId]))
@@ -212,6 +228,9 @@ export class RoomChat extends DurableObject<Bindings> {
         await this.agentService.invoke(state.identity, input, false, receivedAt)
       } else if (input.type === 'agent.observed') {
         await this.agentService.observed(state.identity, input)
+      } else if (input.type === 'agent.confirm') {
+        if (typeof input.jobId !== 'string' || typeof input.confirmationId !== 'string' || typeof input.approved !== 'boolean') throw new Error('Invalid confirmation.')
+        await this.agentService.confirm(state.identity, input.jobId, input.confirmationId, input.approved)
       } else if (input.type === 'agent.cancel') {
         if (typeof input.jobId !== 'string' || input.jobId.length > 100) throw new Error('Invalid job ID.')
         await this.agentService.cancel(state.identity, input.jobId)

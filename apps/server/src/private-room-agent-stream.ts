@@ -1,3 +1,4 @@
+import type { HubToolCall } from '../../../shared/room-chat'
 import { createAgentModel } from './ai'
 import { createAgentInterface, type AgentSkill } from './agent_interface'
 import type { Bindings } from './env'
@@ -7,7 +8,7 @@ import { parseDocumentPreview } from '../../../shared/document-preview'
 import type { AgentOperationIssue } from '../../../shared/agent-errors'
 import { AgentRunError } from './skill-operation-error'
 
-export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, resolveModel = createAgentModel, skills: AgentSkill[] = [], options: { stage?: (stage: PipelineStage) => void; toolCallConcurrency?: number; steps?: number; timeout?: number; loggingContext?: Record<string, string>; onIssue?: (issue: AgentOperationIssue) => void; preview?: (toolCallId: string, input: string | null) => Promise<void> } = {}) {
+export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, resolveModel = createAgentModel, skills: AgentSkill[] = [], options: { stage?: (stage: PipelineStage) => void; toolCallConcurrency?: number; reasoning?: 'low' | 'medium' | 'high'; tool?: (call: HubToolCall) => Promise<void>; steps?: number; timeout?: number; loggingContext?: Record<string, string>; onIssue?: (issue: AgentOperationIssue) => void; preview?: (toolCallId: string, input: string | null) => Promise<void> } = {}) {
   // Use one authoritative deadline so an SDK timer cannot race our error code.
   const agent = createAgentInterface(profile, resolveModel(env), skills, { ...options, externalDeadline: true })
   options.stage?.('model.started')
@@ -47,6 +48,9 @@ export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAge
   }
   try {
     for await (const part of result.stream) {
+      if (part.type === 'tool-call') await options.tool?.({ id: part.toolCallId, name: part.toolName, status: 'running' })
+      if (part.type === 'tool-result') await options.tool?.({ id: part.toolCallId, name: part.toolName, status: 'complete', summary: 'Operation completed.' })
+      if (part.type === 'tool-error') await options.tool?.({ id: part.toolCallId, name: part.toolName, status: 'failed', summary: 'Operation failed. Review the agent response before retrying.' })
       if (firstDelta && (part.type === 'text-delta' || part.type === 'tool-input-delta' || part.type === 'reasoning-delta')) {
         firstDelta = false; options.stage?.('model.first-delta')
       }

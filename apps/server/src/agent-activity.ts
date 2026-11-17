@@ -7,6 +7,7 @@ import type { ChatIdentity } from './room-chat-service'
 import type { PrivateAgentJob, AgentWorkActivity } from '../../../shared/room-chat'
 import type { ActivityStatus } from '../../../shared/agent-activity'
 import type { Prisma } from './generated/prisma/client'
+import { authorizedHubHistory } from './agent-hub/knowledge'
 
 export function activityStatus(job: PrivateAgentJob): ActivityStatus {
   return job.status === 'failed' && /^Cancelled\b/.test(job.error ?? '') ? 'cancelled' : job.status
@@ -18,24 +19,26 @@ export async function archiveAgentRun(db: Database, identity: ChatIdentity, job:
   const status = activityStatus(job)
   const activities = JSON.stringify(job.status === 'running' ? job.activities ?? [] : [])
   const commits = JSON.stringify(job.commits ?? []), taskCommits = JSON.stringify(job.taskCommits ?? [])
+  const evidence = JSON.stringify({ sources: job.sources ?? [], knowledgeReferences: job.knowledgeReferences })
   await db.$executeRaw`INSERT INTO "agentActivityRun"
     ("organizationId", "roomId", "userId", id, "agentId", "agentName", title, status, source, revision,
-     instruction, reply, error, "errorCode", issues, activities, commits, "taskCommits", "createdAt", "updatedAt", "startedAt", "finishedAt")
+     instruction, reply, error, "errorCode", issues, activities, commits, "taskCommits", evidence, "createdAt", "updatedAt", "startedAt", "finishedAt")
     SELECT ${identity.organizationId}, ${identity.roomId}, ${identity.userId}, ${job.id}, ${job.agentId}, ${job.agentName},
       ${Array.from(job.instruction).slice(0, 200).join('')}, ${status}, COALESCE(${job.source ?? null}, CASE WHEN EXISTS (
         SELECT 1 FROM "schedulerDelivery" d JOIN "schedulerSchedule" s ON s.id = d."scheduleId"
         JOIN "schedulerEvent" e ON e.id = s."eventId"
         WHERE d.id = ${job.id} AND e."organizationId" = ${identity.organizationId} AND e."roomId" = ${identity.roomId} AND e."ownerUserId" = ${identity.userId}
       ) THEN 'scheduled' ELSE 'manual' END), ${job.revision}, ${job.instruction}, ${job.reply}, ${job.error ?? null}, ${job.errorCode ?? null}, ${JSON.stringify(job.issues ?? [])}::jsonb,
-      ${activities}::jsonb, ${commits}::jsonb, ${taskCommits}::jsonb, ${new Date(job.createdAt)}, ${new Date(job.updatedAt)},
+      ${activities}::jsonb, ${commits}::jsonb, ${taskCommits}::jsonb, ${evidence}::jsonb, ${new Date(job.createdAt)}, ${new Date(job.updatedAt)},
       ${job.startedAt ? new Date(job.startedAt) : null}, ${job.finishedAt ? new Date(job.finishedAt) : null}
     WHERE EXISTS (SELECT 1 FROM room WHERE "organizationId" = ${identity.organizationId} AND id = ${identity.roomId})
       AND EXISTS (SELECT 1 FROM "user" WHERE id = ${identity.userId})
     ON CONFLICT ("organizationId", "roomId", "userId", id) DO UPDATE SET
       status = EXCLUDED.status, revision = EXCLUDED.revision, reply = EXCLUDED.reply, error = EXCLUDED.error, "errorCode" = EXCLUDED."errorCode", issues = EXCLUDED.issues,
-      activities = EXCLUDED.activities, commits = EXCLUDED.commits, "taskCommits" = EXCLUDED."taskCommits",
+      activities = EXCLUDED.activities, commits = EXCLUDED.commits, "taskCommits" = EXCLUDED."taskCommits", evidence = EXCLUDED.evidence,
       "updatedAt" = EXCLUDED."updatedAt", "startedAt" = EXCLUDED."startedAt", "finishedAt" = EXCLUDED."finishedAt"
-    WHERE "agentActivityRun".revision < EXCLUDED.revision`
+    WHERE "agentActivityRun".revision < EXCLUDED.revision
+      OR ("agentActivityRun".revision = EXCLUDED.revision AND "agentActivityRun".evidence = '{}'::jsonb)`
 }
 
 const identifier = z.string().min(1).max(100)
@@ -108,15 +111,17 @@ agentActivity.post('/sync', async (c) => {
 agentActivity.get('/:roomId/:runId', async (c) => {
   const db = c.get('db'), scope = activityScope(c.get('organizationId'), c.get('session').user.id)
   const roomId = c.req.param('roomId'), run = await db.agentActivityRun.findFirst({
-    where: { ...scope, roomId, id: c.req.param('runId') }, select: { instruction: true, reply: true, error: true, errorCode: true, issues: true, commits: true, taskCommits: true },
+    where: { ...scope, roomId, id: c.req.param('runId') }, select: { instruction: true, reply: true, error: true, errorCode: true, issues: true, commits: true, taskCommits: true, evidence: true },
   })
   if (!run) throw new HTTPException(404, { message: 'Activity not found.' })
+  const evidence = run.evidence as Pick<PrivateAgentJob, 'sources' | 'knowledgeReferences'>
+  const [answer] = await authorizedHubHistory(db, { organizationId: c.get('organizationId'), userId: c.get('session').user.id }, [{ ...evidence, reply: run.reply }])
   const commits = run.commits as unknown as NonNullable<PrivateAgentJob['commits']>, tasks = run.taskCommits as unknown as NonNullable<PrivateAgentJob['taskCommits']>
   const [documents, taskRows] = await Promise.all([
     db.document.findMany({ where: { organizationId: c.get('organizationId'), roomId, id: { in: commits.map((d) => d.documentId) } }, select: { id: true, title: true } }),
     db.plannerTask.findMany({ where: { organizationId: c.get('organizationId'), roomId, id: { in: tasks.map((t) => t.taskId) } }, select: { id: true, title: true, deletedAt: true } }),
   ])
-  return c.json({ instruction: run.instruction, reply: run.reply, error: run.error, errorCode: run.errorCode, issues: run.issues,
+  return c.json({ instruction: run.instruction, reply: answer.reply, citations: answer.citations, knowledgeUnavailable: answer.knowledgeUnavailable ?? false, error: run.error, errorCode: run.errorCode, issues: run.issues,
     documents: commits.map((d) => ({ ...d, title: documents.find((r) => r.id === d.documentId)?.title ?? 'Deleted document', available: documents.some((r) => r.id === d.documentId) })),
     tasks: tasks.map((t) => ({ ...t, title: taskRows.find((r) => r.id === t.taskId)?.title ?? 'Deleted task', available: taskRows.some((r) => r.id === t.taskId && !r.deletedAt) })),
   })
