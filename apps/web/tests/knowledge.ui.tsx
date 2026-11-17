@@ -44,13 +44,20 @@ Object.assign(globalThis, { fetch: async (input: string, init?: RequestInit) => 
 const session = { user: { id: 'user', name: 'User' }, activeOrganization: { id: 'org', name: 'Org' }, memberships: [{ organizationId: 'org', role: 'owner' }] } as WorkspaceSession;
 const container = document.createElement('div'); document.body.append(container);
 const root = createRoot(container);
+let renderKey = 0;
+async function renderKnowledge(initialSession = session) {
+  await act(async () => {
+    root.render(createElement(SWRConfig, { key: ++renderKey, value: { provider: () => new Map(), dedupingInterval: 0 } }, createElement(WorkspaceSessionProvider, { initialSession, children: createElement(KnowledgeBase, { organizationId: 'org' }) })));
+    await new Promise((r) => setTimeout(r, 20));
+  });
+}
 async function click(text: string) {
   const button = [...document.querySelectorAll('button')].find((b) => b.textContent === text || b.getAttribute('aria-label') === text);
   assert.ok(button, `Missing button ${text}`);
   await act(async () => { button.click(); await new Promise((resolve) => setTimeout(resolve, 20)); });
 }
 try {
-  await act(async () => { root.render(createElement(SWRConfig, { value: { provider: () => new Map(), dedupingInterval: 0 } }, createElement(WorkspaceSessionProvider, { initialSession: session, children: createElement(KnowledgeBase, { organizationId: 'org' }) }))); await new Promise((r) => setTimeout(r, 20)); });
+  await renderKnowledge();
   assert.doesNotMatch(container.textContent!, /Refresh now/);
   assert.match(container.textContent!, /PRIVATE FINDING/);
   await click('Organization');
@@ -83,12 +90,38 @@ try {
   await act(async () => { remove.click(); await new Promise((r) => setTimeout(r, 20)); });
   assert.doesNotMatch(container.textContent!, /TEAM FINDING/);
   assert.match(container.textContent!, /Good work starts with good context/);
+
+  // Existing paused buckets remain recoverable without creating a workspace agent.
+  for (const state of states.values()) { state.agents = []; state.base.enabled = false; }
+  await renderKnowledge();
+  assert.match(container.textContent!, /Knowledge checks are paused/);
+  assert.equal([...container.querySelectorAll('button')].find(b => b.textContent === 'Refresh now')!.disabled, true);
+  await click('Resume knowledge checks');
+  assert.ok(requests.some(r => r.method === 'PATCH' && r.path.endsWith('/knowledge') && r.body?.scope === 'PERSONAL' && r.body.enabled === true));
+  assert.match(container.textContent!, /Knowledge checks resumed/);
+  assert.equal(states.get('ORGANIZATION')!.base.enabled, false);
+  await click('Refresh now');
+  assert.ok(requests.some(r => r.method === 'POST' && r.path.endsWith('/refresh') && r.body?.scope === 'PERSONAL'));
+  assert.match(container.textContent!, /Refresh queued/);
+  await click('Pause knowledge checks');
+  assert.equal(states.get('PERSONAL')!.base.enabled, false);
+  assert.match(container.textContent!, /Knowledge checks paused/);
+
+  await renderKnowledge({ ...session, memberships: [{ organizationId: 'org', role: 'member' }] } as WorkspaceSession);
+  assert.ok([...container.querySelectorAll('button')].some(b => b.textContent === 'Resume knowledge checks'));
+  await click('Organization');
+  assert.ok(![...container.querySelectorAll('button')].some(b => b.textContent === 'Resume knowledge checks'));
+  await renderKnowledge();
+  await click('Organization');
+  await click('Resume knowledge checks');
+  assert.ok(requests.some(r => r.method === 'PATCH' && r.path.endsWith('/knowledge') && r.body?.scope === 'ORGANIZATION' && r.body.enabled === true));
+
   await act(async () => { root.render(createElement(KnowledgeSourceTag, { organizationId: 'org', roomId: 'room', messageId: 'message' })); });
   await click('Knowledge');
   assert.match(document.body.textContent!, /Other messages and linked documents are excluded/);
   await click('Tag for Personal Knowledge');
   assert.ok(requests.some((r) => r.path.endsWith('/sources') && r.body?.messageId === 'message' && r.body.scope === 'PERSONAL' && !('documentId' in r.body)));
-  console.log('Knowledge UI passed: separate buckets, six-hour schedule, refresh/pause, evidence, removal, and explicit message tagging.');
+  console.log('Knowledge UI passed: separate buckets, schedules, agent and empty-roster controls, permissions, evidence, removal, and explicit message tagging.');
 } finally {
   await act(async () => { root.unmount(); });
   globalThis.fetch = originalFetch;
