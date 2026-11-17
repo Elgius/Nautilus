@@ -74,8 +74,9 @@ const loadPlanner = () => import("./planner");
 const RoomDocumentLibrary = dynamic(() => loadDocuments().then((module) => module.RoomDocumentLibrary), { loading: ViewLoading });
 const Planner = dynamic(() => loadPlanner().then((module) => module.Planner), { loading: ViewLoading });
 const AgentHub = dynamic(() => import("@/components/agents/agent-hub").then((module) => module.AgentHub), { loading: ViewLoading });
-const AgentProfileDialog = dynamic(() => import("@/components/agents/agent-profile-dialog").then((module) => module.AgentProfileDialog));
-const CreateAgentDialog = dynamic(() => import("@/components/agents/create-agent-dialog").then((module) => module.CreateAgentDialog));
+// A local loading boundary keeps a cold dialog import from suspending the workspace shell.
+const AgentProfileDialog = dynamic(() => import("@/components/agents/agent-profile-dialog").then((module) => module.AgentProfileDialog), { loading: () => null });
+const CreateAgentDialog = dynamic(() => import("@/components/agents/create-agent-dialog").then((module) => module.CreateAgentDialog), { loading: () => null });
 function prefetchView(view: WorkspaceView) {
   if (view === "Documents") void loadDocuments().catch(() => {});
   if (view === "Kanban" || view === "Calendar") void loadPlanner().catch(() => {});
@@ -597,62 +598,6 @@ export function Workspace({ children }: { children?: ReactNode }) {
                   )}
                 </section>
               </>
-            )}
-            {view === "Overview" && (
-              <div className="bottom-grid">
-                <section className="activity-panel">
-                  <div className="section-heading">
-                    <h2>Recent activity</h2>
-                    <Button variant="ghost" size="sm"
-                      className="text-link"
-                      onClick={() => navigate("Activity")}
-                    >
-                      View all <ArrowRight size={14} />
-                    </Button>
-                  </div>
-                  <ActivityFeed
-                    events={events.slice(0, 3)}
-                    onOpen={(name) => {
-                      const room = rooms.find((item) => item.name === name);
-                      if (room) openRoom(room);
-                      else navigate("Agents");
-                    }}
-                  />
-                </section>
-                <section className="team-panel">
-                  <div className="section-heading">
-                    <h2>
-                      Your agent team <span>{agents.length}</span>
-                    </h2>
-                    <Button variant="ghost" size="sm"
-                      className="text-link"
-                      onClick={() => navigate("Agents")}
-                    >
-                      Manage <ArrowRight size={14} />
-                    </Button>
-                  </div>
-                  <div className="agent-mini-grid">
-                    {agents.slice(0, 4).map((agent) => (
-                      <Button variant="ghost" size="sm"
-                        type="button"
-                        className="agent-mini h-auto justify-start whitespace-normal text-left"
-                        key={agent.id}
-                        onClick={() => setEditingAgentId(agent.id)}
-                      >
-                        <AgentAvatar name={agent.name} agents={agents} />
-                        <div>
-                          <strong>{agent.name}</strong>
-                          <small>{agent.role}</small>
-                        </div>
-                        <span
-                          className={`availability ${agent.status.toLowerCase()}`}
-                          title={agent.status}
-                        />
-                      </Button>
-                    ))}
-                  </div>
-                </section>
-              </div>
             )}
             {view === "Agents" && <AgentHub userId={session.user.id} key={`${session.user.id}:${session.activeOrganization!.id}`} organizationId={session.activeOrganization!.id}
               agents={agents} rooms={rooms} onEdit={setEditingAgentId} onOpenRoom={openRoom}

@@ -195,9 +195,9 @@ function HubWorkspace({ userId, organizationId, agents, rooms, onCreate, onEdit,
           {summaries.map((item) => {
             const owner = agents.find((owner) => owner.id === item.agentId);
             if (!owner) return null;
-            return <Button key={item.id} variant="ghost" className="hub-recent-item" aria-current={conversationId === item.id ? "true" : undefined}
+            return <Button key={item.id} variant="ghost" className="hub-recent-item" title={item.title} aria-label={`${owner.name} · ${item.title}`} aria-current={conversationId === item.id ? "true" : undefined}
               onClick={() => { setSelected(owner.id); setChoices((previous) => ({ ...previous, [owner.id]: item.id })); }}>
-              <AgentPortrait agent={owner} small /><span><strong>{item.title}</strong><small>{owner.name} · {item.preview}</small></span>
+              <AgentPortrait agent={owner} /><span><strong>{owner.name}</strong><small>{item.preview}</small></span>
             </Button>;
           })}
           {!summaries.some((item) => agents.some((owner) => owner.id === item.agentId)) && (historyReady ? <div className="hub-empty-history" role="img" aria-label="No conversation history"><Ghost size={30} strokeWidth={1.4} aria-hidden="true" /></div> : !storageError && <p>Loading conversations…</p>)}

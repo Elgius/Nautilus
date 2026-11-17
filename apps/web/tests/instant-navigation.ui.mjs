@@ -60,6 +60,20 @@ try {
       await page.getByRole('link', { name: 'Knowledge', exact: true }).click();
       await page.getByRole('heading', { name: 'Good work starts with good context.' }).waitFor();
       assert.ok(await shell.evaluate((node) => node === document.querySelector('.workspace-shell')), 'shell remounted during navigation');
+      await page.getByRole('link', { name: 'Agent hub', exact: true }).click();
+      await page.getByRole('heading', { name: 'Agent hub', exact: true }).waitFor();
+      // Keep the first dialog import pending long enough to detect a workspace-wide fallback.
+      await page.route('**/_next/static/chunks/**', async (route) => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+        await route.continue();
+      });
+      await page.getByRole('button', { name: 'Create agent', exact: true }).first().click();
+      await page.waitForTimeout(200);
+      assert.ok(await page.locator('.workspace-shell').isVisible(), 'opening a cold dialog hid the workspace');
+      await page.getByRole('dialog', { name: 'Create agent', exact: true }).waitFor({ timeout: 30000 });
+      assert.ok(await shell.evaluate((node) => node === document.querySelector('.workspace-shell')), 'opening a dialog remounted the workspace');
+      await page.getByRole('button', { name: 'Close', exact: true }).click();
+      await page.unroute('**/_next/static/chunks/**');
     } else {
       await page.waitForURL(/\/login\?next=/, { timeout: 30000 });
       assert.equal(new URL(page.url()).searchParams.get('next'), '/?view=Knowledge');

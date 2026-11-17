@@ -68,16 +68,16 @@
 .hub-recent-heading button { font-size: 12px; gap: 4px; }
 .hub-recent-list { overflow-y: auto; min-height: 0; padding: 3px; }
 .hub-recent-list p, .hub-recent > p { padding: 6px 0; font-size: 12px; color: var(--muted-foreground); }
-.hub-recent-item { width: 100%; height: auto; padding: 8px; justify-content: start; text-align: left; }
+.hub-recent-item { display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 10px; width: 100%; height: auto; min-height: 55px; padding: 8px 6px; text-align: left; }
+.hub-recent-item .agent-portrait { width: 34px; height: 34px; }
 .hub-recent-item[aria-current=true] { background: var(--workspace-tint); }
 .hub-recent-item > span:last-child { min-width: 0; }
 .hub-recent-item strong, .hub-recent-item small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hub-recent-item strong { font-size: 13px; font-weight: 550; }
-.hub-recent-item small { color: var(--muted-foreground); font-size: 12px; }
+.hub-recent-item strong { font-size: 14px; line-height: 20px; font-weight: 550; }
+.hub-recent-item small { color: var(--muted-foreground); font-size: 13px; line-height: 19px; font-weight: 400; }
 @media (max-width: 850px) {
   .hub-recent { margin-top: 6px; padding-top: 4px; }
-  .hub-recent-list { display: flex; overflow-x: auto; }
-  .hub-recent-item { width: min(210px, 62vw); }
+  .hub-recent-list { max-height: min(23dvh, 168px); }
   .hub-roster { max-height: none; }
 }
 
