@@ -49,6 +49,11 @@ test.skipIf(!connection)('knowledge database: tenant isolation, citations, six-h
     expect(await own.base('PERSONAL')).toMatchObject({ id: ownBase.id })
     await expect(knowledgeService(db, { organizationId: otherOrg, userId: owner }).base('PERSONAL')).rejects.toThrow('Organisation not found')
     await expect(peer.tag({ scope: 'ORGANIZATION', roomId: room, documentId })).rejects.toThrow('approve sharing')
+    // A custom interval configured before the first cron must not delay a new tag.
+    const assigned = await client.agent.create({ data: { organizationId: org, name: 'Atlas', nameKey: 'atlas', role: 'Research' } })
+    await client.roomAgent.create({ data: { organizationId: org, roomId: room, agentId: assigned.id, addedByUserId: owner } })
+    const initialSchedule = await own.setAgentInterval('PERSONAL', assigned.id, 24)
+    expect((await own.base('PERSONAL')).lastCheckedAt).toBeNull()
     const { source: personal } = await own.tag({ scope: 'PERSONAL', roomId: room, documentId })
     expect((await own.tag({ scope: 'PERSONAL', roomId: room, documentId })).source.id).toBe(personal.id)
     const { source: shared } = await own.tag({ scope: 'ORGANIZATION', roomId: room, messageId: taggedMessageId })
@@ -62,6 +67,9 @@ test.skipIf(!connection)('knowledge database: tenant isolation, citations, six-h
     expect((await client.knowledgeBase.findUniqueOrThrow({ where: { id: ownBase.id } })).nextRefreshAt.getTime()).toBe(now.getTime() + REFRESH_MS)
     const runs = await client.knowledgeRun.findMany({ where: { sourceId: { in: [personal.id, shared.id] }, status: 'pending' } })
     expect(runs).toHaveLength(2)
+    expect(runs.some(run => run.sourceId === personal.id)).toBe(true)
+    expect(initialSchedule.nextRefreshAt.getTime()).toBeGreaterThan(now.getTime())
+    expect((await own.list('PERSONAL')).agents.find(agent => agent.id === assigned.id)?.nextRefreshAt.getTime()).toBe(initialSchedule.nextRefreshAt.getTime())
     await enqueueKnowledge(db, now)
     expect(await client.knowledgeRun.count({ where: { sourceId: personal.id } })).toBe(1)
     let readCount = 0, generated: string[] = []
@@ -134,9 +142,7 @@ test.skipIf(!connection)('knowledge database: tenant isolation, citations, six-h
     expect((await client.knowledgeRun.findUniqueOrThrow({ where: { id: edited.id } })).status).toBe('cancelled')
     await expect(own.history('ORGANIZATION', shared.id)).rejects.toThrow('unavailable')
 
-    const assigned = await client.agent.create({ data: { organizationId: org, name: 'Atlas', nameKey: 'atlas', role: 'Research' } })
     const idle = await client.agent.create({ data: { organizationId: org, name: 'Fin', nameKey: 'fin', role: 'Research' } })
-    await client.roomAgent.create({ data: { organizationId: org, roomId: room, agentId: assigned.id, addedByUserId: owner } })
     expect((await own.list('PERSONAL')).agents.map(a => a.id).sort()).toEqual([assigned.id, idle.id].sort())
     await expect(peer.controlAgent('ORGANIZATION', assigned.id, 'pause')).rejects.toThrow('admin')
     expect(await own.controlAgent('PERSONAL', idle.id, 'refresh')).toEqual({ queued: 0 })

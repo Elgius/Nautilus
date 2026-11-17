@@ -53,9 +53,9 @@ function KnowledgeBucket({ organizationId, userId, scope, canManage }: { organiz
     ([url]: readonly [string, string]) => workspaceFetch<KnowledgePage>(url), { refreshInterval: 15_000, revalidateOnFocus: true },
   );
   const base = data?.[0].base, sources = data?.flatMap((page) => page.sources) ?? [];
-  async function action(path: string, method: string, body?: unknown) {
+  async function action(path: string, method: string, body?: unknown, success = 'Tag removed. Its findings are no longer available.') {
     setBusy(true); setActionError(''); setNotice('');
-    try { await knowledgeRequest(organizationId, path, method, body); await mutate(); setNotice('Tag removed. Its findings are no longer available.'); }
+    try { await knowledgeRequest(organizationId, path, method, body); await mutate(); setNotice(success); }
     catch (error) { setActionError(errorMessage(error)); }
     finally { setBusy(false); }
   }
@@ -90,7 +90,14 @@ function KnowledgeBucket({ organizationId, userId, scope, canManage }: { organiz
         <KnowledgeAgentDrawer key={agent.id} agent={agent} active={base.enabled && !base.pausedAgentIds.includes(agent.id)}
           scope={scope} organizationId={organizationId} canManage={canManage} refreshHours={agent.refreshHours}
           nextRefreshAt={agent.nextRefreshAt} onChange={() => mutate()} />
-      )}</div> : <p className="text-sm text-muted-foreground">No agents in this workspace yet.</p>}
+      )}</div> : <div className="grid gap-3">
+        <p className="text-sm text-muted-foreground">No agents in this workspace yet. Knowledge checks tagged sources automatically.</p>
+        <p className="text-sm">{base.enabled ? 'Knowledge checks are active.' : 'Knowledge checks are paused.'}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={busy || !base.enabled} onClick={() => void action('/refresh', 'POST', { scope }, 'Refresh queued. Tagged sources will be checked shortly.')}>Refresh now</Button>
+          {canManage && <Button variant="outline" disabled={busy} onClick={() => void action('', 'PATCH', { scope, enabled: !base.enabled }, base.enabled ? 'Knowledge checks paused.' : 'Knowledge checks resumed.')}>{base.enabled ? 'Pause knowledge checks' : 'Resume knowledge checks'}</Button>}
+        </div>
+      </div>}
     </section>}
   </>;
 }

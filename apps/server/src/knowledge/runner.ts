@@ -20,8 +20,9 @@ export async function enqueueKnowledge(db: Database, now = new Date()) {
       ORDER BY "nextRefreshAt", id LIMIT 4 FOR UPDATE SKIP LOCKED`
     for (const base of due) {
       // One active run per source, enforced by a partial unique index. Replays do not duplicate work.
-      // Tagging, edits and explicit bucket refreshes can wake the base before its periodic check.
-      const requestedEarly = base.lastCheckedAt && base.nextRefreshAt.getTime() < base.lastCheckedAt.getTime() + REFRESH_MS
+      // The first check includes custom schedules so newly tagged sources do not wait
+      // for their agent's interval. Later early wakes include them for source changes.
+      const requestedEarly = !base.lastCheckedAt || base.nextRefreshAt.getTime() < base.lastCheckedAt.getTime() + REFRESH_MS
       await queueSources(tx, base.id, now, null, !requestedEarly)
       await tx.knowledgeBase.update({ where: { id: base.id }, data: { lastCheckedAt: now, nextRefreshAt: new Date(now.getTime() + REFRESH_MS) } })
     }
