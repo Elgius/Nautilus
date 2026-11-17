@@ -4,6 +4,7 @@ import { ChoiceMenu } from "@/components/ui/choice-menu";
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { ArrowUp, Brain, FileText, LockKeyhole, Plus, X } from "lucide-react";
 import { RoomChatEditor, type RoomChatEditorHandle } from "./room-chat-editor";
+import { InputBox } from "./input-box";
 import { RoomAgentAvatar } from "./room-agent-avatar";
 import { Button } from "@/components/ui/button";
 import { Attachment, AttachmentAction, AttachmentContent, AttachmentDescription, AttachmentMedia, AttachmentTitle } from "@/components/ui/attachment";
@@ -11,12 +12,13 @@ import { InputGroup, InputGroupAddon, InputGroupButton } from "@/components/ui/i
 import { agentMention, selectAgentMention } from "@/lib/agent-mention";
 import { defaultRoomSuggestions } from "./use-room-suggestions";
 import { withDocumentSelection, type DocumentSelection } from '@/lib/document-selection';
-import type { HubOptions, AgentRunMode, RoomAgentOption } from "../../../../shared/room-chat";
+import type { AgentQuestion, HubOptions, AgentRunMode, RoomAgentOption } from "../../../../shared/room-chat";
 
 type Props = {
   selection?: DocumentSelection | null;
   onClearSelection?: (expected?: DocumentSelection) => void;
   suggestions?: string[];
+  pendingQuestion?: { question: AgentQuestion; agentName: string; ready: boolean; sending: boolean; onAnswer: (answer: string) => void };
   canSend: boolean;
   agents: RoomAgentOption[];
   agentsLoading: boolean;
@@ -28,7 +30,7 @@ type Props = {
 };
 const reasoningLevels = ["Low", "Medium", "High"];
 
-export function RoomChatComposer({ selection, onClearSelection, suggestions = defaultRoomSuggestions, canSend, agents, agentsLoading, agentBusy, loadAgents, sendMessage, invokeAgent, sendTyping }: Props) {
+export function RoomChatComposer({ selection, onClearSelection, suggestions = defaultRoomSuggestions, pendingQuestion, canSend, agents, agentsLoading, agentBusy, loadAgents, sendMessage, invokeAgent, sendTyping }: Props) {
   const [submitError, setSubmitError] = useState("");
   const [preparing, setPreparing] = useState(false);
   const submitting = useRef(false);
@@ -39,8 +41,10 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
   const [dismissed, setDismissed] = useState(false);
   const [reasoning, setReasoning] = useState("Medium");
   const [mode, setMode] = useState<AgentRunMode>('write');
+  const [deferredQuestionId, setDeferredQuestionId] = useState<string | null>(null);
+  const questionOpen = Boolean(pendingQuestion && pendingQuestion.question.id !== deferredQuestionId);
   const editor = useRef<RoomChatEditorHandle>(null);
-  useEffect(() => { editor.current?.focus(); }, [selected]);
+  useEffect(() => { if (!questionOpen) editor.current?.focus(); }, [selected, questionOpen]);
   const fileInput = useRef<HTMLInputElement>(null);
   // Original Files stay in memory, separate from room documents and message payloads.
   const [attachments, setAttachments] = useState<{ id: string; file: File }[]>([]);
@@ -57,7 +61,7 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
   }
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!canSend || attachments.length || submitting.current) return;
+    if (questionOpen || !canSend || attachments.length || submitting.current) return;
     if (selected && !instruction.trim()) return;
     const sentSelection = selection;
     const text = withDocumentSelection(selected ? instruction : draft, sentSelection, Boolean(selected));
@@ -94,7 +98,15 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
     }
   }
 
-  return <form onSubmit={submit} className="room-prompt-form">
+  return <>
+    {pendingQuestion && <div hidden={!questionOpen}>
+      <InputBox key={pendingQuestion.question.id} question={pendingQuestion.question} agentName={pendingQuestion.agentName}
+        pending={pendingQuestion.sending} disabled={!canSend || agentBusy || !pendingQuestion.ready || pendingQuestion.sending}
+        onAnswer={pendingQuestion.onAnswer} onLater={() => setDeferredQuestionId(pendingQuestion.question.id)} />
+    </div>}
+    {pendingQuestion && !questionOpen && <Button type="button" size="sm" variant="outline" onClick={() => setDeferredQuestionId(null)}>Answer agent question</Button>}
+    <div hidden={questionOpen}>
+    <form onSubmit={submit} className="room-prompt-form">
     <div role="group" aria-label="Suggested prompts" className="room-chat-suggestions scroll-fade-x">
       {suggestions.map((suggestion) => <Button key={suggestion} type="button" variant="outline" size="sm" className="shrink-0" onClick={() => {
         // UI preview only: suggestions edit the current draft without sending or typing events.
@@ -164,5 +176,7 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
     <p className="room-local-note">Enter to send or continue a list · Enter on an empty item to end the list · Shift + Enter for a new line · Start lists with - / * / 1. / 1) and a space</p>
     {attachments.length > 0 && <p id={attachmentNoteId} role="status" className="room-local-note">Files stay on this device. Remove attachments to send a text message.</p>}
     <p className="room-local-note">{selected ? mode === 'read' ? 'Ask reads saved documents and answers privately. It cannot make changes.' : 'Work can update shared documents. Instructions and replies are private.' : 'Room messages are shared with members. Use @ for private agent instructions.'}</p>
-  </form>;
+    </form>
+    </div>
+  </>;
 }

@@ -14,7 +14,6 @@ import { RoomConnectionStatus } from "./room-connection-status";
 import { RoomChatComposer } from "./room-chat-composer";
 import { RoomMessageText } from "./room-message-text";
 import { useRoomMessageTime } from "./use-room-message-time";
-import { InputBox } from "./input-box";
 import { PrivateAgentConversation } from "./private-agent-conversation";
 import { useWorkspaceSession } from "@/components/auth/workspace-session";
 import { initials } from "@/lib/auth-types";
@@ -131,10 +130,8 @@ export function RoomWorkspace({ initialData, initialDocumentId }: { initialData:
         <div className="room-composer-area">
           {!joined && <Button variant="outline" size="sm" disabled={joining} onClick={joinRoom}>{joining ? 'Joining…' : 'Join room chat'}</Button>}
           {typingNames && <p role="status">{typingNames} typing…</p>}
-          {activeQuestion?.question && <InputBox key={activeQuestion.question.id} question={activeQuestion.question} agentName={activeQuestion.agentName} pending={answeringQuestions.includes(activeQuestion.id)} disabled={!canSend || agentBusy || activeQuestion.status !== 'complete' || answeringQuestions.includes(activeQuestion.id)} onAnswer={(answer) => { void answerQuestion(activeQuestion, answer); }} />}
-          <div hidden={Boolean(activeQuestion)}>
-          <RoomChatComposer selection={selection} onClearSelection={(expected) => setSelection((current) => !expected || current === expected ? null : current)} suggestions={suggestions} canSend={canSend} agents={agents} agentsLoading={agentsLoading} agentBusy={agentBusy} loadAgents={loadAgents} sendMessage={sendMessage} invokeAgent={invokeAgent} sendTyping={sendTyping} />
-          </div>
+          <RoomChatComposer selection={selection} onClearSelection={(expected) => setSelection((current) => !expected || current === expected ? null : current)} suggestions={suggestions} canSend={canSend} agents={agents} agentsLoading={agentsLoading} agentBusy={agentBusy} loadAgents={loadAgents} sendMessage={sendMessage} invokeAgent={invokeAgent} sendTyping={sendTyping}
+            pendingQuestion={activeQuestion?.question ? { question: activeQuestion.question, agentName: activeQuestion.agentName, ready: activeQuestion.status === 'complete', sending: answeringQuestions.includes(activeQuestion.id), onAnswer: (answer) => { void answerQuestion(activeQuestion, answer); } } : undefined} />
         </div>
       </section>
       <div className="room-panel-resizer" role="separator" tabIndex={chatLayout.collapsed ? -1 : 0} aria-label="Resize room chat" aria-orientation="vertical" aria-valuemin={18} aria-valuemax={45} aria-valuenow={Math.round(dragWidth ?? chatLayout.width)}

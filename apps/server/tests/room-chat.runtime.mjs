@@ -53,7 +53,7 @@ try {
   const hubCall = (identity, action, input = {}, destination = 'room') => mf.dispatchFetch(`https://api.test/agent-hub?room=${destination}`, {
     method: 'POST', body: JSON.stringify({ identity, action, input }),
   })
-  const hubInput = { requestId: hubId, agentId: 'agent-hub', instruction: 'Hub private request', conversationId: hubConversation, knowledge: ['ORGANIZATION'], reasoning: 'high' }
+  const hubInput = { requestId: hubId, agentId: 'agent-hub', instruction: 'Check clarification availability', conversationId: hubConversation, knowledge: ['ORGANIZATION'], reasoning: 'high', canAskUser: true }
   assert.equal((await hubCall(hubIdentity, 'invoke', hubInput, 'other')).status, 403)
   assert.equal((await hubCall({ ...hubIdentity, userId: 'outsider' }, 'invoke', hubInput)).status, 403)
   assert.equal((await hubCall(hubIdentity, 'invoke', { ...hubInput, agentId: 'agent-1' })).status, 409, 'Hub cannot invoke another member’s personal agent')
@@ -68,7 +68,8 @@ try {
   assert.equal(hubJob?.status, 'complete')
   assert.equal(hubJob.options.conversationId, hubConversation)
   assert.equal(hubJob.options.reasoning, 'high')
-  assert.equal(hubJob.reply, 'Private reply: Hub private request')
+  assert.equal(hubJob.reply, 'Clarification is unavailable.', 'Hub invocations cannot pause on a question the Hub cannot answer')
+  assert.equal(hubJob.question, undefined)
   assert.deepEqual((await (await hubCall({ ...hubIdentity, userId: 'bob' }, 'history')).json()).jobs, [])
   const hubCallsBeforeRetry = (await (await mf.dispatchFetch('https://api.test/agent-calls')).json()).calls
   assert.equal((await hubCall(hubIdentity, 'invoke', hubInput)).status, 202)
@@ -236,6 +237,15 @@ try {
   assert.equal(queues.get(bob).some((event) => event.type === 'agent.document-preview' && event.runId === askId), false)
   send(bob, { type: 'agent.observed', requestId: askId, elapsedMs: 500, editorSaveMs: 0 })
   do { slow = await receive(alice, 'agent.update') } while (slow.job.id !== slowId || slow.job.status !== 'complete')
+  const questionRunId = crypto.randomUUID()
+  send(alice, { type: 'agent.invoke', requestId: questionRunId, agentId: 'agent-1', instruction: 'Check clarification availability', mode: 'read' })
+  let question
+  do { question = (await receive(alice, 'agent.update')).job } while (question.id !== questionRunId || question.status !== 'complete')
+  assert.equal(question.question?.question, 'Which document?', 'The room socket supports interactive clarifications')
+  send(alice, { type: 'agent.answer', requestId: question.question.id, questionId: question.question.id, jobId: question.id, answer: 'Launch plan' })
+  let continuation
+  do { continuation = (await receive(alice, 'agent.update')).job } while (continuation.id !== question.question.id || continuation.status !== 'complete')
+  assert.match(continuation.reply, /My answer: Launch plan/)
   await mf.dispatchFetch('https://api.test/revoke')
   const closed = new Promise((resolve) => bob.addEventListener('close', (event) => resolve(event.code), { once: true }))
   send(bob, { type: 'send', clientMessageId: crypto.randomUUID(), text: 'revoked' })

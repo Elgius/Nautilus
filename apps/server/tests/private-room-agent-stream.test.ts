@@ -200,3 +200,24 @@ test('askUser persists its question and ends the model loop without an empty-res
   expect(reply).toEqual([])
   expect(model.doStreamCalls).toHaveLength(1)
 })
+
+test.each([false, true])('askUser prevents same-step writes, with the question listed first=%s', async (questionFirst) => {
+  const { createAgentQuestionSkill } = await import('../src/agent-question')
+  const usage = { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 1, text: 1, reasoning: undefined } }
+  const question = { type: 'tool-call' as const, toolCallId: 'question', toolName: 'askUser', input: JSON.stringify({ question: 'Which document?' }) }
+  const edit = { type: 'tool-call' as const, toolCallId: 'edit', toolName: 'applyDocumentEdits', input: '{}' }
+  const model = new MockLanguageModelV4({ doStream: { stream: simulateReadableStream({ initialDelayInMs: null, chunkDelayInMs: null, chunks: [
+    ...(questionFirst ? [question, edit] : [edit, question]),
+    { type: 'finish', finishReason: { unified: 'tool-calls', raw: undefined }, usage },
+  ] }) } })
+  const signal = new AbortController().signal
+  const writes: string[] = [], questions: unknown[] = []
+  const questionSkill = createAgentQuestionSkill({ id: 'run', token: '', activity: async () => {}, committed: async () => {}, checkpoint: async () => {}, askUser: async (input) => { questions.push(input) } }, signal)
+  const editSkill = { id: 'edit', instructions: 'Edit the document.', tools: {
+    applyDocumentEdits: tool({ inputSchema: z.object({}), execute: async () => { writes.push('saved'); return { saved: true } } }),
+  } }
+  for await (const _ of streamPrivateRoomAgent({} as Bindings, profile, [{ role: 'user', content: 'Change the document.' }], signal, () => model, [questionSkill, editSkill], { toolCallConcurrency: 3 })) { /* consume */ }
+  expect(writes).toEqual([])
+  expect(questions).toEqual([{ question: 'Which document?' }])
+  expect(model.doStreamCalls).toHaveLength(1)
+})

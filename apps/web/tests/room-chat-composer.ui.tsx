@@ -180,6 +180,40 @@ try {
   assert.equal(typing, typingBeforePrivateList, 'private list edits do not broadcast typing');
   await key('Enter'); await click('button[type="submit"]');
   assert.match(privateSends.at(-1)!.instruction, /^- Private item/);
+  await click('button[aria-label="Return to room chat"]');
+  await type('Keep this shared draft');
+  const answers: string[] = [];
+  const pendingQuestion = {
+    question: { id: 'clarification', question: 'Which document?', options: ['Launch plan', 'Roadmap'] },
+    agentName: 'Scout', ready: true, sending: false,
+    onAnswer: (answer: string) => { answers.push(answer); },
+  };
+  const renderQuestion = async (sending: boolean) => {
+    await act(async () => root.render(createElement(RoomChatComposer, { ...props, pendingQuestion: { ...pendingQuestion, sending } })));
+  };
+  const clickNamed = async (label: string) => {
+    const button = [...container.querySelectorAll('button')].find((item) => item.textContent === label);
+    assert.ok(button, `Expected a "${label}" button`);
+    await act(async () => button.click());
+  };
+  const questionForm = () => container.querySelector('form[aria-label="Agent question"]') as HTMLFormElement;
+  await renderQuestion(false);
+  assert.ok(editable().closest('[hidden]'));
+  await clickNamed('Launch plan');
+  await clickNamed('Send answer');
+  assert.deepEqual(answers, ['Launch plan']);
+  await renderQuestion(true);
+  await renderQuestion(false); // A failed save returns the unanswered question to a retryable state.
+  await clickNamed('Answer later');
+  assert.ok(questionForm().closest('[hidden]'));
+  assert.equal(editable().closest('[hidden]'), null);
+  assert.equal(value(), 'Keep this shared draft');
+  await key('Enter');
+  assert.equal(publicSends.at(-1), 'Keep this shared draft');
+  await clickNamed('Answer agent question');
+  assert.equal(questionForm().closest('[hidden]'), null);
+  assert.equal(questionForm().querySelector('textarea')?.value, 'Launch plan');
+  assert.deepEqual(answers, ['Launch plan'], 'Deferring and reopening does not submit an answer');
   console.log('Composer interaction checks passed: list shortcuts, continuation, numbering, exit, caret placement, send behavior, character limits, local attachments, suggestions, and private agent routing.');
 } finally {
   await act(async () => { root.unmount(); });

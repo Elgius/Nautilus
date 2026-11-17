@@ -71,7 +71,7 @@ function harness(options: { questionCount?: number; question?: boolean; archive?
   }
   const service = new PrivateRoomAgents(deps)
   const invoke = async (identity = alice, instruction = 'Alice secret', id = crypto.randomUUID(), mode: AgentRunMode = 'write') => {
-    await service.invoke(identity, { requestId: id, agentId: profile.id, instruction, mode, userId: 'attacker' })
+    await service.invoke(identity, { requestId: id, agentId: profile.id, instruction, mode, userId: 'attacker' }, { canAskUser: true })
     // Let nonblocking acceptance and mocked I/O settle without awaiting a gated run.
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
@@ -194,7 +194,7 @@ test('browser cancellation preserves a queued scheduled job’s delivery identit
   const gate = deferred(), h = harness({ gate: gate.promise })
   const id = crypto.randomUUID()
   await h.invoke(bob, 'Blocking work')
-  await h.service.invoke({ ...alice, sessionId: '', scheduledDeliveryId: id }, { requestId: id, agentId: profile.id, instruction: 'Scheduled work' }, true)
+  await h.service.invoke({ ...alice, sessionId: '', scheduledDeliveryId: id }, { requestId: id, agentId: profile.id, instruction: 'Scheduled work' }, { scheduled: true })
   await h.service.cancel(bob, id)
   expect((await h.service.history(alice))[0].status).toBe('queued')
   await h.service.cancel(alice, id)
@@ -259,12 +259,12 @@ test('scheduled delivery receipts survive history pruning and coordinator restar
   const id = crypto.randomUUID()
   const identity = { ...alice, scheduledDeliveryId: id, sessionId: '' }
   const input = { requestId: id, agentId: profile.id, instruction: 'Scheduled task' }
-  await h.service.invoke(identity, input, true)
+  await h.service.invoke(identity, input, { scheduled: true })
   await Promise.all(h.tasks)
   const count = h.calls.length
   // Simulate normal history pruning while preserving the durable receipt.
   for (const key of h.values.keys()) if (key.includes(`job:${id}`)) h.values.delete(key)
-  await h.restart().invoke(identity, input, true)
+  await h.restart().invoke(identity, input, { scheduled: true })
   await Promise.all(h.tasks)
   expect(h.calls).toHaveLength(count)
   expect(h.values.get(`scheduler:receipt:${id}`)).toBe(true)
@@ -274,7 +274,7 @@ test('scheduled execution excludes earlier unrelated private conversation', asyn
   const h = harness()
   await h.invoke(); await Promise.all(h.tasks)
   const id = crypto.randomUUID()
-  await h.service.invoke({ ...alice, scheduledDeliveryId: id }, { requestId: id, agentId: profile.id, instruction: 'Future authorized task' }, true)
+  await h.service.invoke({ ...alice, scheduledDeliveryId: id }, { requestId: id, agentId: profile.id, instruction: 'Future authorized task' }, { scheduled: true })
   await Promise.all(h.tasks)
   expect(h.calls[1]).toEqual([{ role: 'user', content: 'Future authorized task' }])
 })
@@ -475,7 +475,7 @@ test('changing a deduplicated request mode is rejected and scheduled requests re
   await expect(h.invoke(alice, 'Question', id, 'write')).rejects.toThrow('Invalid reuse')
   await expect(h.service.invoke(alice, { requestId: crypto.randomUUID(), agentId: profile.id, instruction: 'Question', mode: 'auto' })).rejects.toThrow('Invalid request mode')
   const scheduled = crypto.randomUUID()
-  await h.service.invoke({ ...alice, scheduledDeliveryId: scheduled }, { requestId: scheduled, agentId: profile.id, instruction: 'Work', mode: 'read' }, true)
+  await h.service.invoke({ ...alice, scheduledDeliveryId: scheduled }, { requestId: scheduled, agentId: profile.id, instruction: 'Work', mode: 'read' }, { scheduled: true })
   await settle(h.tasks)
   expect((await h.service.history(alice)).find((job) => job.id === scheduled)?.mode).toBe('write')
 })
@@ -581,7 +581,7 @@ test('archive history imports only the requested owner and preserves scheduled p
   const h = harness({ gate: gate.promise, archive: async (identity, job) => { archived.push({ userId: identity.userId, job: structuredClone(job) }) } })
   await h.invoke(bob, 'Bob private request'); await waitFor(() => h.calls.length === 1)
   const id = crypto.randomUUID()
-  await h.service.invoke({ ...alice, sessionId: '', scheduledDeliveryId: id }, { requestId: id, agentId: profile.id, instruction: 'Scheduled' }, true)
+  await h.service.invoke({ ...alice, sessionId: '', scheduledDeliveryId: id }, { requestId: id, agentId: profile.id, instruction: 'Scheduled' }, { scheduled: true })
   await h.service.cancel(alice, id)
   gate.resolve(); await settle(h.tasks)
   expect(archived.findLast((entry) => entry.job.id === id)).toMatchObject({ userId: 'alice', job: { source: 'scheduled', status: 'failed', errorCode: 'RUN_CANCELLED' } })
@@ -703,12 +703,13 @@ test('agent input is private, durable, releases the run, and continues exactly o
 })
 
 
-test('successive clarifications preserve the root request explicitly in the latest user message', async () => {
-  const h = harness({ question: true, questionCount: 2 })
+test('successive clarifications retain the root request and every previous answer in order', async () => {
+  const h = harness({ question: true, questionCount: 3 })
   const original = 'Only acknowledge my answer; do not resume older spreadsheet requests.'
   await h.invoke(alice, original, crypto.randomUUID(), 'read'); await Promise.all(h.tasks)
   let job = (await h.service.history(alice)).at(-1)!
-  for (const answer of ['first answer', 'second answer']) {
+  const answers = ['first answer', 'second answer', 'third answer']
+  for (const answer of answers) {
     await h.service.answer(alice, { jobId: job.id, questionId: job.question!.id, answer })
     await new Promise((resolve) => setTimeout(resolve, 0)); await Promise.all(h.tasks)
     job = (await h.service.history(alice)).at(-1)!
@@ -716,7 +717,8 @@ test('successive clarifications preserve the root request explicitly in the late
     expect(h.calls.at(-1)!.at(-1)!.content).toContain(`Original request to continue:\n${original}`)
     expect(h.calls.at(-1)!.at(-1)!.content).toContain(`My answer: ${answer}`)
   }
-  expect(h.calls).toHaveLength(3)
+  expect(h.calls).toHaveLength(4)
+  expect(h.calls.at(-1)!.flatMap(({ content }) => [...content.matchAll(/My answer: (.+)/g)].map((match) => match[1]))).toEqual(answers)
   expect(job.status).toBe('complete')
 })
 
@@ -725,7 +727,7 @@ test('question continuations retain Hub options and reject withdrawn knowledge',
   let withdrawn = false
   const h = harness({ question: true, filterHistory: async (_identity, jobs) => jobs.map((job) => ({ ...job, knowledgeUnavailable: withdrawn })) })
   const options: HubOptions = { conversationId: crypto.randomUUID(), knowledge: ['PERSONAL'], reasoning: 'high' }
-  await h.service.invoke(alice, { requestId: crypto.randomUUID(), agentId: profile.id, instruction: 'Discuss my selected source', mode: 'read', ...options })
+  await h.service.invoke(alice, { requestId: crypto.randomUUID(), agentId: profile.id, instruction: 'Discuss my selected source', mode: 'read', ...options }, { canAskUser: true })
   await new Promise((resolve) => setTimeout(resolve, 0)); await Promise.all(h.tasks)
   const questionJob = (await h.service.history(alice))[0]
   const input = { jobId: questionJob.id, questionId: questionJob.question!.id, answer: 'test' }

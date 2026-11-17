@@ -28,7 +28,13 @@ export type AgentRunContext = {
   issue?: (issue: AgentOperationIssue) => void
   askUser?: (input: Pick<AgentQuestion, 'question' | 'options'>) => Promise<void>
 }
-type Entry = { identity: ChatIdentity; id: string; mode?: AgentRunMode; token?: string; deadline?: number; cancelRequested?: boolean }
+type Entry = { identity: ChatIdentity; id: string; mode?: AgentRunMode; token?: string; deadline?: number; cancelRequested?: boolean; canAskUser?: boolean }
+type InvocationOptions = {
+  scheduled?: boolean
+  receivedAt?: number
+  canAskUser?: boolean
+  response?: { jobId: string; questionId: string; answer: string }
+}
 type Dependencies = {
   storage: DurableObjectStorage
   profile: (identity: ChatIdentity, agentId: string) => Promise<PrivateAgentProfile | null>
@@ -155,11 +161,11 @@ export class PrivateRoomAgents {
     const answer = input.answer.trim()
     await this.invoke(identity, { requestId: job.question.id, agentId: job.agentId, mode: job.mode ?? 'write', ...job.options,
       instruction: `Continue my request after this clarification.\nQuestion: ${job.question.question}\nMy answer: ${answer}`,
-    }, false, Date.now(), { jobId: job.id, questionId: job.question.id, answer })
+    }, { canAskUser: true, response: { jobId: job.id, questionId: job.question.id, answer } })
     const updated = await this.deps.storage.get<PrivateAgentJob>(this.key(identity, job.id))
     if (updated) await this.safeSend(identity, updated)
   }
-  async invoke(identity: ChatIdentity, input: Record<string, unknown>, scheduled = false, receivedAt = Date.now(), response?: { jobId: string; questionId: string; answer: string }) {
+  async invoke(identity: ChatIdentity, input: Record<string, unknown>, { scheduled = false, receivedAt = Date.now(), canAskUser = false, response }: InvocationOptions = {}) {
     const { clientMessageId: id, text: instruction } = parseSend({ clientMessageId: input.requestId, text: input.instruction })
     logPipeline(identity.roomId, id, 'received', { receivedAtMs: receivedAt, ingressMs: Date.now() - receivedAt })
     if (typeof input.agentId !== 'string' || !input.agentId || input.agentId.length > 100) throw new Error('Invalid agent selection.')
@@ -215,7 +221,7 @@ export class PrivateRoomAgents {
       await tx.put(indexKey, [...ids.filter((oldId) => !retained.includes(oldId)), id])
       await this.putJob(tx, identity, job)
       if (scheduled) await tx.put(receiptKey, true)
-      await tx.put(QUEUE, [...queue, { identity, id, mode }])
+      await tx.put(QUEUE, [...queue, { identity, id, mode, canAskUser: canAskUser && !scheduled }])
       // Persist a wakeup with acceptance, before relying on waitUntil.
       await scheduleEarlierAlarm(tx, Date.now() + 1000)
       newlyAccepted = true
@@ -510,29 +516,43 @@ export class PrivateRoomAgents {
       let budget = 32_000 - currentInstruction.length
       const history = entry.identity.scheduledDeliveryId ? [] : await this.history(entry.identity)
       const preceding = history.slice(0, Math.max(0, history.findIndex((item) => item.id === job.id)))
-      const prior = preceding.filter((item) => item.agentId === profile.id && (item.status === 'complete' || item.status === 'failed' && !!item.commits?.length) && !item.knowledgeUnavailable && item.options?.conversationId === job.options?.conversationId && JSON.stringify(item.options?.knowledge ?? ['ORGANIZATION']) === JSON.stringify(job.options?.knowledge ?? ['ORGANIZATION'])).slice(-10)
-      // The latest user message explicitly carries the original request, so old
-      // agent history cannot make a clarification resume an unrelated task.
-      for (const old of prior.filter((item) => item.id !== job.continuationOf).reverse()) {
+      const prior = preceding.filter((item) => item.agentId === profile.id && (item.status === 'complete' || item.status === 'failed' && !!item.commits?.length) && !item.knowledgeUnavailable && item.options?.conversationId === job.options?.conversationId && JSON.stringify(item.options?.knowledge ?? ['ORGANIZATION']) === JSON.stringify(job.options?.knowledge ?? ['ORGANIZATION']))
+      const priorById = new Map(prior.map((item) => [item.id, item]))
+      const ancestors = new Set<string>()
+      const include = (old: PrivateAgentJob, instruction: string) => {
         const reply = [old.reply, old.status === 'failed' ? `The previous attempt stopped after saving these versions. Re-read them before continuing: ${JSON.stringify(old.commits)}` : ''].filter(Boolean).join('\n')
-        if (old.instruction.length + reply.length > budget) break
+        if (instruction.length + reply.length > budget) return false
         try { Object.assign(job, mergeHubProvenance(job, old.sources ?? [], old.knowledgeReferences ?? [])) }
-        catch { break }
-        messages.unshift({ role: 'user', content: old.instruction }, { role: 'assistant', content: reply })
-        budget -= old.instruction.length + reply.length
+        catch { return false }
+        if (reply) messages.unshift({ role: 'assistant', content: reply })
+        if (instruction) messages.unshift({ role: 'user', content: instruction })
+        budget -= instruction.length + reply.length
+        return true
+      }
+      // Earlier answers are stored in the continuation instructions. Include
+      // the current chain before spending any history budget on other requests.
+      for (let id = job.continuationOf; id && !ancestors.has(id);) {
+        const parent = priorById.get(id)
+        if (!parent) break
+        ancestors.add(parent.id)
+        if (!include(parent, parent.continuationOf ? parent.instruction : '')) break
+        id = parent.continuationOf
+      }
+      for (const old of prior.filter((item) => !ancestors.has(item.id)).slice(-10).reverse()) {
+        if (!include(old, old.instruction)) break
       }
       await save(false)
       const signal = AbortSignal.any([controller.signal, deadline])
       signal.throwIfAborted()
       const context: AgentRunContext = {
         id: job.id, token: entry.mode === 'read' ? '' : entry.token!, mode: entry.mode ?? 'write', stage, agentId: profile.id, options: job.options,
-        askUser: entry.identity.scheduledDeliveryId ? undefined : async (input) => {
+        askUser: entry.canAskUser && !entry.identity.scheduledDeliveryId ? async (input) => {
           signal.throwIfAborted()
           if (!await this.deps.canAccess(entry.identity)) throw new AgentRunError('ACCESS_DENIED')
           if (job.question) throw new Error('Only one question is allowed per request.')
           job.question = { id: crypto.randomUUID(), ...input }
           await save()
-        },
+        } : undefined,
         issue: (issue) => { job.issues = [...(job.issues ?? []), issue].slice(-32) },
         tool: async (call) => {
           job.tools = [...(job.tools ?? []).filter((old) => old.id !== call.id), call].slice(-64)

@@ -1,4 +1,4 @@
-import { hasToolCall, isStepCount, ToolLoopAgent, type LanguageModel, type ToolSet } from 'ai'
+import { isStepCount, ToolLoopAgent, type LanguageModel, type ToolSet } from 'ai'
 import type { AgentSkill } from './skills'
 import { assertSafeAgentProfile } from '../agent-policy'
 import { agentCallLogging } from '../agent-call-logging'
@@ -16,6 +16,16 @@ export function createAgentInterface(profile: AgentProfile, model: LanguageModel
     if (Object.hasOwn(tools, name)) throw new Error(`Duplicate agent tool: ${name}`)
     tools[name] = definition
   }
+  const canAskUser = Object.hasOwn(tools, 'askUser')
+  let questionCallId: string | undefined
+  if (canAskUser) for (const [name, definition] of Object.entries(tools)) {
+    const { execute } = definition
+    if (!execute) continue
+    tools[name] = { ...definition, execute: (input, context) => {
+      if (questionCallId && (name !== 'askUser' || context.toolCallId !== questionCallId)) throw new Error('Other tools cannot run in the same step as a user question.')
+      return execute(input, context)
+    } }
+  }
   return new ToolLoopAgent({
     id: profile.id, model, tools,
     instructions: [
@@ -29,7 +39,14 @@ export function createAgentInterface(profile: AgentProfile, model: LanguageModel
     ].join('\n'),
     ...(options.reasoning ? { providerOptions: { openai: { reasoningEffort: options.reasoning } } } : {}),
     toolCallConcurrency: options.toolCallConcurrency ?? 1,
-    stopWhen: [isStepCount(options.steps ?? 8), hasToolCall('askUser')], maxOutputTokens: 4096,
+    onLanguageModelCallEnd: canAskUser ? ({ content }) => {
+      // The SDK evaluates stop conditions after tool execution. Inspect the
+      // entire response before any of its tools can run, regardless of order.
+      const question = content.find((part) => part.type === 'tool-call' && part.toolName === 'askUser' && !part.invalid)
+      questionCallId = question?.type === 'tool-call' ? question.toolCallId : undefined
+    } : undefined,
+    stopWhen: [isStepCount(options.steps ?? 8), ({ steps }) => steps.at(-1)?.toolResults.some((result) => result.toolName === 'askUser') ?? false],
+    maxOutputTokens: 4096,
     ...(options.externalDeadline ? {} : { timeout: options.timeout ?? 60_000 }), maxRetries: 1,
     ...agentCallLogging({ ...options.loggingContext, kind: options.loggingContext?.kind ?? 'agent', agentId: profile.id, agentName: profile.name }, options.onIssue),
   })

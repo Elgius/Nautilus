@@ -115,7 +115,7 @@ export class RoomChat extends DurableObject<Bindings> {
         if (!await canChat(db, identity) || !await db.roomAgent.findFirst({ where: { organizationId: event.organizationId, roomId: event.roomId, agentId: delivery.agentId } })) return new Response('Access expired', { status: 403 })
         try {
           await this.agentService.invoke(identity, { requestId: delivery.id, agentId: delivery.agentId,
-            instruction: `${event.taskId ? `Linked task ID: ${event.taskId}. Read its current state before acting.\n` : ''}Scheduled event: ${event.title}\nScheduled for: ${delivery.schedule.scheduledAt.toISOString()}\n\n${event.instruction}` }, true)
+            instruction: `${event.taskId ? `Linked task ID: ${event.taskId}. Read its current state before acting.\n` : ''}Scheduled event: ${event.title}\nScheduled for: ${delivery.schedule.scheduledAt.toISOString()}\n\n${event.instruction}` }, { scheduled: true })
           return new Response(null, { status: 202 })
         } catch { return new Response('Queue unavailable', { status: 503 }) }
       })
@@ -225,7 +225,7 @@ export class RoomChat extends DurableObject<Bindings> {
         const jobs = await this.agentService.history(state.identity)
         this.send(socket, { type: 'agent.history', jobs })
       } else if (input.type === 'agent.invoke') {
-        await this.agentService.invoke(state.identity, input, false, receivedAt)
+        await this.agentService.invoke(state.identity, input, { receivedAt, canAskUser: true })
       } else if (input.type === 'agent.answer') {
         await this.agentService.answer(state.identity, input)
       } else if (input.type === 'agent.observed') {
