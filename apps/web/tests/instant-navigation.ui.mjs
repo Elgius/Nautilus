@@ -19,6 +19,7 @@ const api = http.createServer((req, res) => {
     : send({ error: 'Unauthorized' }, 401);
   if (url.pathname.endsWith('/rooms')) return send({ rooms: [] });
   if (url.pathname.endsWith('/agents')) return send({ agents: [] });
+  if (url.pathname.endsWith('/agent-hub-history')) return send({ summaries: [], next: null });
   if (url.pathname.endsWith('/tasks')) return send({ tasks: [], nextCursor: null });
   if (url.pathname.endsWith('/documents')) return send({ documents: [], nextCursor: null });
   send({ error: 'Unexpected fixture request' }, 404);
