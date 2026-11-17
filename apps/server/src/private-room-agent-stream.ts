@@ -2,12 +2,15 @@ import { createAgentModel } from './ai'
 import { createAgentInterface, type AgentSkill } from './agent_interface'
 import type { Bindings } from './env'
 import type { PrivateAgentMessage, PrivateAgentProfile } from './private-room-agents'
+import type { PipelineStage } from './agent-pipeline'
 import { parseDocumentPreview } from '../../../shared/document-preview'
 
-export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, resolveModel = createAgentModel, skills: AgentSkill[] = [], options: { steps?: number; timeout?: number; loggingContext?: Record<string, string>; preview?: (toolCallId: string, input: string | null) => Promise<void> } = {}) {
+export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, resolveModel = createAgentModel, skills: AgentSkill[] = [], options: { stage?: (stage: PipelineStage) => void; toolCallConcurrency?: number; steps?: number; timeout?: number; loggingContext?: Record<string, string>; preview?: (toolCallId: string, input: string | null) => Promise<void> } = {}) {
   const agent = createAgentInterface(profile, resolveModel(env), skills, options)
+  options.stage?.('model.started')
   const result = await agent.stream({ messages, abortSignal: signal })
   let finished = false
+  let firstDelta = true
   type Input = { text: string; sent: number; delivered?: string; delivery?: Promise<void>; failure?: { error: unknown } }
   const inputs = new Map<string, Input>()
   const failedPreviewDocuments = new Set<string>()
@@ -35,6 +38,9 @@ export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAge
   }
   try {
     for await (const part of result.stream) {
+      if (firstDelta && (part.type === 'text-delta' || part.type === 'tool-input-delta' || part.type === 'reasoning-delta')) {
+        firstDelta = false; options.stage?.('model.first-delta')
+      }
       if (part.type === 'tool-input-start' && (part.toolName === 'applyDocumentEdits' || part.toolName === 'proposeDocumentEdits')) inputs.set(part.id, { text: '', sent: 0 })
       if (part.type === 'tool-input-delta') {
         const input = inputs.get(part.id)

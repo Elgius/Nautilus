@@ -1,4 +1,5 @@
 import { createProgressSkill } from './progress/skill'
+import { createPlannerReadSkill } from './agent_interface/planner-read-skill'
 import { reviewDocumentCreation, type CreationReview } from './edit-review'
 import { parseCreation, type DocumentCreation, type CreationResult } from './documents/creation'
 import { createPlannerSkill } from './planner/skill'
@@ -224,6 +225,19 @@ function targetLabel(operation: string, args: Record<string, unknown>) {
 export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, run: AgentRunContext,
   withDatabase: <T>(action: (db: Database) => Promise<T>) => Promise<T>) {
   const loggingContext = { roomId: identity.roomId, runId: run.id }
+  if (run.mode === 'read') {
+    const backend = createRoomSkillBackend(env, identity, profile.id, withDatabase, '', undefined, { readOnly: true })
+    const skills = createOfficeSkills({ ...backend, read: async (id, operation, args, activeSignal) => {
+      await run.activity({ runId: run.id, agentId: profile.id, agentName: profile.name, color: profile.color,
+        documentId: id, phase: 'reading', target: targetLabel(operation, args) }, profile.id)
+      return backend.read(id, operation, args, activeSignal)
+    } }, signal, 'read')
+    skills.push(createPlannerReadSkill(identity, profile, run, withDatabase, signal))
+    return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, skills, {
+      steps: 16, timeout: 175_000, toolCallConcurrency: 3, stage: run.stage,
+      loggingContext: { ...loggingContext, kind: 'read-only' },
+    })
+  }
   const dependencies: Dependencies = {
     reviewCreation: (creation, activeSignal) => reviewDocumentCreation(createAgentModel(env), messages, creation, activeSignal, loggingContext),
     review: (edit, activeSignal) => reviewDocumentEdit(createAgentModel(env), messages, edit, activeSignal, loggingContext),
@@ -247,5 +261,5 @@ export function streamRoomModerator(env: Bindings, identity: ChatIdentity, profi
   skills.push(createProgressSkill(identity, { agentId: profile.id, workToken: run.token, runId: run.id }, withDatabase, signal))
   skills.push(createPlannerSkill(identity, profile, run, withDatabase, signal, { ...dependencies, review: (edit, active) => reviewPlannerEdit(createAgentModel(env), messages, edit, active, loggingContext) }))
   if (!identity.scheduledDeliveryId) skills.push(createSchedulerSkill(identity, profile.id, withDatabase, signal))
-  return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, skills, { steps: 32, timeout: 175_000, preview: run.preview, loggingContext: { ...loggingContext, kind: 'moderator' } })
+  return streamPrivateRoomAgent(env, profile, messages, signal, createAgentModel, skills, { stage: run.stage, steps: 32, timeout: 175_000, preview: run.preview, loggingContext: { ...loggingContext, kind: 'moderator' } })
 }

@@ -8,16 +8,10 @@ import { roomRequest, toRoom, type RoomRecord } from "@/lib/room-client";
 import { type Agent, type AgentProfile, type AgentCreationInput } from "@/lib/agent-data";
 import { createAgentFromDescription, persistAgent } from "@/lib/agent-client";
 import { AgentPortrait } from "@/components/agents/agent-portrait";
-import {
-  Accordion,
-  AccordionItem,
-  AccordionTrigger,
-  AccordionContent,
-} from "@/components/ui/accordion";
+
 
 import "@/app/documents.css";
 import { ThemeSettings } from "@/components/theme-settings";
-import { BrandMark } from "@/components/brand-mark";
 import { useWorkspaceSession } from "@/components/auth/workspace-session";
 import { InviteMembers } from "@/components/auth/invite-members";
 import { authClient, checkAuthResult, errorMessage } from "@/lib/auth-client";
@@ -51,7 +45,6 @@ import {
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -80,6 +73,7 @@ const loadDocuments = () => import("./room-document-library");
 const loadPlanner = () => import("./planner");
 const RoomDocumentLibrary = dynamic(() => loadDocuments().then((module) => module.RoomDocumentLibrary), { loading: ViewLoading });
 const Planner = dynamic(() => loadPlanner().then((module) => module.Planner), { loading: ViewLoading });
+const AgentHub = dynamic(() => import("@/components/agents/agent-hub").then((module) => module.AgentHub), { loading: ViewLoading });
 const AgentProfileDialog = dynamic(() => import("@/components/agents/agent-profile-dialog").then((module) => module.AgentProfileDialog));
 const CreateAgentDialog = dynamic(() => import("@/components/agents/create-agent-dialog").then((module) => module.CreateAgentDialog));
 function prefetchView(view: WorkspaceView) {
@@ -161,7 +155,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
   const agents = agentData.data ?? [];
   const setRooms = (change: (current: Room[]) => Room[]) => { void roomData.mutate((current) => change(current ?? []), { revalidate: true }); };
   const setAgents = (change: (current: Agent[]) => Agent[]) => { void agentData.mutate((current) => change(current ?? []), { revalidate: true }); };
-  const needsRooms = view === "Overview" || view === "Rooms";
+  const needsRooms = view === "Overview" || view === "Rooms" || view === "Agents";
   const dataError = (needsRooms && roomData.error) || (viewNeedsAgents && agentData.error);
   const waitingForData = (needsRooms && !roomData.data) || (viewNeedsAgents && !agentData.data);
   const editingAgent = agents.find((agent) => agent.id === editingAgentId);
@@ -344,7 +338,6 @@ export function Workspace({ children }: { children?: ReactNode }) {
               <strong>{view}</strong>
             </div>
             <div className="topbar-actions">
-              {view !== "Activity" && <span className="demo-label">Sample content</span>}
               <Button variant="ghost" size="sm"
                 className="notification-button"
                 aria-label="View notifications"
@@ -361,54 +354,24 @@ export function Workspace({ children }: { children?: ReactNode }) {
               </span>
             </div>
           </header>
-          <main className="main-content">
+          <main className={view === "Agents" ? "main-content agent-hub-main" : "main-content"}>
             {children}
             <ViewBoundary key={view}>
             <Suspense fallback={<ViewLoading />}>
             {dataError && <div role="alert" className="mb-4 rounded-xl border p-4"><p>{dataError.message}</p><Button variant="outline" className="mt-2" onClick={() => { if (needsRooms) void roomData.mutate(); if (needsAgents) void agentData.mutate(); }}>Retry loading</Button></div>}
             {waitingForData ? (!dataError && <ViewLoading />) : <>
-            {view !== "Documents" && view !== "Kanban" && view !== "Calendar" && (
+            {view !== "Agents" && view !== "Documents" && view !== "Kanban" && view !== "Calendar" && (
               <div className="page-heading">
-                <div>
-                  <div className="eyebrow">
-                    <span /> YOUR TEAM, IN SYNC
-                  </div>
-                  <h1>
-                    {view === "Overview"
-                      ? "A little teamwork. A lot of possibility."
-                      : view === "Rooms"
-                        ? "Where good work comes together."
-                        : view === "Agents"
-                          ? "Meet your unfair advantage."
-                          : view === "Knowledge"
-                            ? "Shared context. Smarter teamwork."
-                            : view === "Activity"
-                              ? "Your agents’ work, in one place."
-                              : "Make this space your own."}
-                  </h1>
-                  <p>
-                    {view === "Overview"
-                      ? "Your people and agents, moving work forward. Here’s what’s happening."
-                      : view === "Rooms"
-                        ? "Bring people, agents, and context together around a shared goal."
-                        : view === "Agents"
-                          ? "Specialized collaborators, ready to join your team."
-                          : view === "Knowledge"
-                            ? "Give your agents the context they need to do their best work."
-                            : view === "Activity"
-                              ? "Follow your requests from start to finish, across every room."
-                              : "Manage the basics for your team’s home in Agents hub."}
-                  </p>
-                </div>
+                <h1>{view}{view === "Rooms" && <span className="ml-2 text-muted-foreground">{rooms.length}</span>}</h1>
                 <Button
                   className="primary-action"
                   onClick={() => {
                     setNotice("");
-                    setModal(view === "Agents" ? "agent" : "room");
+                    setModal("room");
                   }}
                 >
                   <Plus size={16} />
-                  {view === "Agents" ? "Create agent" : "Create room"}
+                  Create room
                 </Button>
               </div>
             )}
@@ -427,7 +390,6 @@ export function Workspace({ children }: { children?: ReactNode }) {
                           label: "Active rooms",
                           value: rooms.length,
                           icon: MessageSquare,
-                          detail: "Ideas in motion",
                           color: "green",
                         },
                         {
@@ -451,7 +413,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
                           label: "Team members",
                           value: 5,
                           icon: Users,
-                          detail: "People behind the progress",
+                          detail: "Sample count",
                           color: "blue",
                         },
                       ].map(({ label, value, icon: Icon, detail, color }) => (
@@ -463,29 +425,21 @@ export function Workspace({ children }: { children?: ReactNode }) {
                             </span>
                           </div>
                           <strong>{value.toString().padStart(2, "0")}</strong>
-                          <small>{detail}</small>
+                          {detail && <small>{detail}</small>}
                         </div>
                       ))}
                     </section>
                   </>
                 )}
                 <section className="rooms-section">
-                  <div className="section-heading">
-                    <div>
-                      <h2>
-                        Your rooms <span>{rooms.length}</span>
-                      </h2>
-                      <p>Shared spaces. Collective progress.</p>
-                    </div>
-                    {view === "Overview" && (
-                      <Button variant="ghost" size="sm"
-                        className="text-link"
-                        onClick={() => navigate("Rooms")}
-                      >
+                  {view === "Overview" && (
+                    <div className="section-heading">
+                      <h2>Your rooms <span>{rooms.length}</span></h2>
+                      <Button variant="ghost" size="sm" className="text-link" onClick={() => navigate("Rooms")}>
                         View all rooms <ArrowRight size={14} />
                       </Button>
-                    )}
-                  </div>
+                    </div>
+                  )}
                   <div className="room-toolbar">
                     <div className="room-filters" aria-label="Filter rooms">
                       {["All rooms", "Starred", "Needs review"].map((item) => (
@@ -697,127 +651,13 @@ export function Workspace({ children }: { children?: ReactNode }) {
                       </Button>
                     ))}
                   </div>
-                  <div className="team-panel-footer">
-                    <span className="status-dot" /> A little more bandwidth. A
-                    lot more potential.
-                  </div>
                 </section>
               </div>
             )}
-            {view === "Agents" && (
-              <section
-                className="agent-directory"
-                aria-labelledby="agent-directory-title"
-              >
-                <div className="section-heading">
-                  <div>
-                    <h2 id="agent-directory-title">
-                      Your agent team <span>{agents.length}</span>
-                    </h2>
-                    <p className="agent-directory-description">
-                      Explore each agent’s role, customize their identity, and
-                      set the rules they work by.
-                    </p>
-                  </div>
-                  <Badge variant="outline">
-                    {workingAgents} working · {agents.length - workingAgents}{" "}
-                    available
-                  </Badge>
-                </div>
-                <Accordion className="agent-accordion" multiple>
-                  {agents.map((agent) => {
-                    const assignedRooms = rooms.filter((room) =>
-                      room.agents.includes(agent.name),
-                    );
-                    return (
-                      <AccordionItem
-                        key={agent.id}
-                        value={agent.id}
-                        className="agent-accordion-item"
-                      >
-                        <div className="agent-accordion-header">
-                          <div className="agent-profile-button">
-                            <AgentPortrait agent={agent} />
-                            <span>
-                              <strong>{agent.name}</strong>
-                              <small>{agent.role}</small>
-                            </span>
-                          </div>
-                          <span
-                            className={`agent-state ${agent.status.toLowerCase()}`}
-                          >
-                            <i />
-                            {agent.status}
-                          </span>
-                          <AccordionTrigger
-                            className="agent-expand"
-                            aria-label={`Toggle ${agent.name} details`}
-                          >
-                            <span className="sr-only">
-                              {agent.name} details
-                            </span>
-                          </AccordionTrigger>
-                        </div>
-                        <AccordionContent>
-                          <div className="agent-accordion-details">
-                            <div>
-                              <h3>Agent rules</h3>
-                              <p className="agent-rules-summary">
-                                {agent.rules.join("\n") ||
-                                  "No rules yet. Add instructions to guide this agent."}
-                              </p>
-                            </div>
-                            <div>
-                              <h3>
-                                Assigned rooms{" "}
-                                <span>{assignedRooms.length}</span>
-                              </h3>
-                              <div className="agent-assigned-rooms">
-                                {assignedRooms.length ? (
-                                  assignedRooms.map((room) => (
-                                    <Button variant="ghost" size="sm"
-                                      key={room.id}
-                                      onClick={() => openRoom(room)}
-                                    >
-                                      <MessageSquare size={14} />
-                                      {room.name}
-                                      <ArrowUpRight size={12} />
-                                    </Button>
-                                  ))
-                                ) : (
-                                  <p>No rooms assigned yet.</p>
-                                )}
-                              </div>
-                            </div>
-                            <div className="agent-detail-actions">
-                              <Button
-                                variant="outline"
-                                onClick={() => setEditingAgentId(agent.id)}
-                              >
-                                Customize agent
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                onClick={() => {
-                                  setSelectedAgents([agent.id]);
-                                  setModal("room");
-                                }}
-                              >
-                                <Plus size={14} />
-                                Start a room
-                              </Button>
-                            </div>
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
-                    );
-                  })}
-                </Accordion>
-                <p className="form-note">
-                  Agent profiles are saved to your organisation.
-                </p>
-              </section>
-            )}
+            {view === "Agents" && <AgentHub userId={session.user.id} key={`${session.user.id}:${session.activeOrganization!.id}`} organizationId={session.activeOrganization!.id}
+              agents={agents} rooms={rooms} onEdit={setEditingAgentId} onOpenRoom={openRoom}
+              onCreate={() => { setNotice(""); setModal("agent"); }}
+              onCreateRoom={(id) => { setSelectedAgents([id]); setNotice(""); setModal("room"); }} />}
             {view === "Activity" && <ViewBoundary><AgentActivity key={`${session.activeOrganization!.id}:${session.user.id}`} organizationId={session.activeOrganization!.id} userId={session.user.id} /></ViewBoundary>}
             {view === "Knowledge" && <ViewBoundary><KnowledgeBase key={session.activeOrganization!.id} organizationId={session.activeOrganization!.id} /></ViewBoundary>}
             {view === "Settings" && (
@@ -842,7 +682,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
                     <ShieldCheck size={20} />
                     <div>
                       <strong>Team workspace</strong>
-                      <small>Frontend preview · sample data</small>
+                      <small>Sample plan</small>
                     </div>
                   </div>
                   <Button type="submit" disabled={!canManage || savingSettings}>
@@ -855,15 +695,6 @@ export function Workspace({ children }: { children?: ReactNode }) {
             </>}
             </Suspense>
             </ViewBoundary>
-            <footer className="page-footer">
-              <span>
-                <BrandMark className="nautilus-mark small" /> Room to think.
-                Power to do.
-              </span>
-              <span>
-                <span className="status-dot" /> {view === "Activity" ? "Personal activity" : "Frontend preview"}
-              </span>
-            </footer>
           </main>
         </SidebarInset>
         <Dialog
@@ -879,22 +710,20 @@ export function Workspace({ children }: { children?: ReactNode }) {
             <DialogHeader>
               <DialogTitle>
                 {modal === "room"
-                  ? "Make room for something great."
+                  ? "Create room"
                   : modal === "invite"
                     ? "Bring your team together."
                     : modal === "notifications"
                       ? "You’re all caught up."
                       : "Welcome to Agents hub."}
               </DialogTitle>
-              <DialogDescription>
-                {modal === "room"
-                  ? "Give your team and agents a shared goal and a place to work."
-                  : modal === "invite"
+              {modal !== "room" && <DialogDescription>
+                {modal === "invite"
                     ? "Invite a teammate to this organisation. They’ll verify their email before joining."
                     : modal === "notifications"
-                      ? "Recent workspace updates appear below. These are sample notifications."
+                      ? "Workspace updates from this session."
                       : "Your shared workspace for people and AI agents."}
-              </DialogDescription>
+              </DialogDescription>}
             </DialogHeader>
             {modal === "room" && agentData.error && <div role="alert"><p>{agentData.error.message}</p><Button variant="outline" onClick={() => void agentData.mutate()}>Retry agents</Button></div>}
             {modal === "room" && (

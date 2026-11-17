@@ -26,6 +26,7 @@
     "workerd"
   ],
   "patchedDependencies": {
-    "@univerjs/ui@1.2.0": "patches/@univerjs%2Fui@1.2.0.patch"
+    "@univerjs/ui@1.2.0": "patches/@univerjs%2Fui@1.2.0.patch",
+    "@univerjs/engine-render@1.2.0": "patches/@univerjs%2Fengine-render@1.2.0.patch"
   }
 }

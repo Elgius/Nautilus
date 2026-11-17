@@ -439,6 +439,8 @@ room scoped; writes require a version read during the current run and use the
 existing optimistic concurrency checks. Tool cancellation propagates to Office requests
 and is checked before storage writes and inside the version transaction. Range reads
 include only the workbook styles referenced by returned cells. Moderator tool execution is sequential; delegated specialists prepare work in parallel.
+The `readDocuments` tool batches up to three independent document/workbook reads
+in parallel without enabling concurrent commits.
 The limits and recovery behavior are described above. Storage/database error details are
 not returned to the model. Local uploads and unsaved browser changes are not tool
 inputs. Only saved Univer documents can be edited. Clean open editors refresh after the
@@ -447,6 +449,54 @@ room run ends; local drafts are preserved when the saved document has changed.
 Moderator/lease checks: `bun test apps/server/tests/room-moderator.test.ts
 apps/server/tests/room-write-lock.test.ts apps/server/tests/private-room-agents.test.ts`.
 Room activity UI checks: `bun run --filter @nautilus/web test:room-work`.
+
+
+### Room execution lanes and latency
+
+The private composer defaults to **Work** (`mode: "write"`), which preserves the
+durable FIFO and room write lease. **Ask** (`mode: "read"`) uses a separate lane:
+at most three runs per room and two per user, alongside the writer. Missing mode
+and scheduled deliveries use Work. A request ID cannot be reused with another
+mode. Ask never flushes browser editors; it reads saved room documents and planner data.
+
+Ask exposes an explicit allowlist of document discovery/search/read tools plus
+`listTasks`, `readTask`, and `listScheduledEvents`, with up to three concurrent tool
+calls. Planner reads are scoped to the current room; scheduled events are also
+scoped to the requesting user. Every call rechecks access and agent assignment.
+Tasks include due dates and assignments, and task reads include recent history.
+Planner reads reflect current saved state rather than pinned snapshots.
+No document creation/editing, planner writes,
+scheduling or specialist delegation is available. A request requiring changes
+must be submitted anew in Work mode; there is no automatic escalation. Snapshots
+are pinned on first read per document, with a ten-document/8 MB encoded-content
+budget. This prevents mixing versions of one document, but is not a transactional
+snapshot across multiple documents. Replies should identify source versions.
+
+Queued jobs in both lanes survive coordinator restart. Interrupted active runs
+hold their slots until the watchdog expires, then fail without replay. Only
+Work takes/releases a write lease. Cancellation and activity are scoped per run.
+All presence, retry and watchdog alarm scheduling preserves the earliest deadline.
+
+Acceptance starts execution without waiting for subscriber notifications. Reply
+delivery coalesces cumulative snapshots with one in-flight delivery and one pending
+snapshot per run. Socket updates are offered every 200 ms; durable reply checkpoints
+are written at most once per second during streaming. Commits and terminal states
+are persisted separately. Every private socket delivery rechecks access; same-session
+tabs share only that delivery's authorization check. Activity broadcasts coalesce.
+
+Filter browser console and Worker logs for `[agent-pipeline]` and join by `roomId`
+and `runId`. Server stages include `received`, `accepted`, `dequeued`,
+`model.started`, `model.first-delta` (text, reasoning or tool input),
+`reply.first-delta`, `output.sent`, `committed`, and `complete`/`failed`.
+Existing `[agent-call]` logs add per-model-step and tool durations. Browser stages
+include `browser.submit`, `browser.editor-saved`, and `browser.first-output`
+(first reply rendered by React). The browser sends that first-output duration to
+the authenticated socket as `agent.observed`; it contains no instruction/reply text.
+Browser durations use `performance.now()` and must not be subtracted from server
+timestamps. Compare queue wait, first-output and completion distributions separately
+for Ask and Work before claiming production improvements. Unsaved-editor flush time
+applies to Work only; Ask's editor preparation is a no-op. Document previews can
+appear before the first reply and are not counted by the reply-render measurement.
 
 
 ### Agent guardrails

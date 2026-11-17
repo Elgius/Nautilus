@@ -109,6 +109,7 @@ model Organization {
 }
 
 model Member {
+  hubConversations HubConversation[]
   id             String       @id
   organizationId String
   userId         String
@@ -179,6 +180,7 @@ enum AgentStatus {
 }
 
 model Agent {
+  hubConversations HubConversation[]
   agentProgress AgentProgress[]
   scheduledDeliveries SchedulerDelivery[]
   id             String       @id @default(uuid())
@@ -705,6 +707,36 @@ model KnowledgeRun {
   @@index([status, nextAttemptAt])
   @@index([sourceId, createdAt])
   @@map("knowledgeRun")
+}
+
+model HubConversation {
+  organizationId String
+  userId         String
+  id             String @db.Uuid
+  agentId        String
+  member         Member @relation(fields: [organizationId, userId], references: [organizationId, userId], onDelete: Cascade)
+  agent          Agent  @relation(fields: [organizationId, agentId], references: [organizationId, id], onDelete: Cascade)
+  turns          HubTurn[]
+
+  @@id([organizationId, userId, id])
+  @@index([organizationId, agentId])
+  @@map("hubConversation")
+}
+
+model HubTurn {
+  organizationId String
+  userId         String
+  id             String @db.Uuid
+  conversationId String @db.Uuid
+  claimToken     String? @db.Uuid
+  prompt         String
+  reply          String
+  createdAt      DateTime @default(now())
+  conversation   HubConversation @relation(fields: [organizationId, userId, conversationId], references: [organizationId, userId, id], onDelete: Cascade)
+
+  @@id([organizationId, userId, id])
+  @@index([organizationId, userId, conversationId, createdAt])
+  @@map("hubTurn")
 }
 
 // Owner-private run archive, independent of the room chat's rolling history.

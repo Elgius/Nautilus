@@ -10,6 +10,7 @@ import type { PrivateAgentEvent } from '../../../shared/room-chat'
 import { agentAppearanceSelect } from './agents'
 import { createAgentModel } from './ai'
 import { acquireRoomWork, releaseRoomWork } from './documents/room-write-lock'
+import { scheduleRoomAlarm } from './room-alarm'
 import { generateRoomSuggestions, RoomSuggestions, suggestionHistory } from './room-suggestions'
 
 type Attachment = { identity: ChatIdentity; window: number; count: number; readCount?: number }
@@ -63,7 +64,7 @@ export class RoomChat extends DurableObject<Bindings> {
           select: { agentWorkToken: true, agentWorkExpiresAt: true, documents: { select: { id: true, currentVersionId: true } } } })
         const locked = !!room?.agentWorkToken && !!room.agentWorkExpiresAt && room.agentWorkExpiresAt > new Date()
         const activity = await this.agentService.activity()
-        await this.broadcast(db, { type: 'work.update', work: { ...activity, activities: locked ? activity.activities : [],
+        await this.broadcast(db, { type: 'work.update', work: { ...activity, activities: activity.activities,
           locked, expiresAt: locked ? room!.agentWorkExpiresAt!.toISOString() : null,
           versions: Object.fromEntries((room?.documents ?? []).map((document) => [document.id, document.currentVersionId])) } })
       }),
@@ -72,12 +73,22 @@ export class RoomChat extends DurableObject<Bindings> {
   }
   // Filter BEFORE doing any send. Private payloads never enter broadcast().
   private async sendPrivate(owner: ChatIdentity, event: PrivateAgentEvent) {
+    const peers = this.ctx.getWebSockets().filter((peer) => {
+      if (peer.readyState !== WebSocket.OPEN) return false
+      const { identity } = peer.deserializeAttachment() as Attachment
+      return identity.userId === owner.userId && identity.organizationId === owner.organizationId && identity.roomId === owner.roomId
+    })
+    if (!peers.length) return
     await this.withDatabase(async (db) => {
-      await Promise.all(this.ctx.getWebSockets().filter((peer) => peer.readyState === WebSocket.OPEN).map(async (peer) => {
+      // Same-session tabs share this delivery's check. Different sessions are
+      // checked separately, and authorization is never cached across deliveries.
+      const checks = new Map<string, ReturnType<typeof canChat>>()
+      await Promise.all(peers.map(async (peer) => {
         const { identity } = peer.deserializeAttachment() as Attachment
-        if (identity.userId !== owner.userId || identity.organizationId !== owner.organizationId || identity.roomId !== owner.roomId) return
         try {
-          if (!await canChat(db, identity)) { this.closeSocket(peer, 4003, 'Room access expired'); return }
+          let allowed = checks.get(identity.sessionId)
+          if (!allowed) { allowed = canChat(db, identity); checks.set(identity.sessionId, allowed) }
+          if (!await allowed) { this.closeSocket(peer, 4003, 'Room access expired'); return }
           this.send(peer, event)
         } catch { this.closeSocket(peer, 1011, 'Reconnect') }
       }))
@@ -160,16 +171,17 @@ export class RoomChat extends DurableObject<Bindings> {
     const pair = new WebSocketPair()
     this.ctx.acceptWebSocket(pair[1])
     pair[1].serializeAttachment({ identity: ticket.identity, window: Date.now(), count: 0 } satisfies Attachment)
-    await this.ctx.storage.setAlarm(Date.now() + 30_000)
+    await scheduleRoomAlarm(this.ctx.storage, Date.now() + 30_000)
     this.send(pair[1], { type: 'ready' })
     return new Response(null, { status: 101, webSocket: pair[0] })
   }
   webSocketMessage(socket: WebSocket, raw: string | ArrayBuffer) {
-    const task = this.queue.then(() => this.handle(socket, raw))
+    const receivedAt = Date.now()
+    const task = this.queue.then(() => this.handle(socket, raw, receivedAt))
     this.queue = task.catch(() => {})
     return task
   }
-  private async handle(socket: WebSocket, raw: string | ArrayBuffer) {
+  private async handle(socket: WebSocket, raw: string | ArrayBuffer, receivedAt: number) {
     // A queued event can outlive its connection while earlier requests await I/O.
     if (socket.readyState !== WebSocket.OPEN) return
     const db = createDatabase(this.env.DATABASE_URL)
@@ -196,7 +208,9 @@ export class RoomChat extends DurableObject<Bindings> {
         const jobs = await this.agentService.history(state.identity)
         this.send(socket, { type: 'agent.history', jobs })
       } else if (input.type === 'agent.invoke') {
-        await this.agentService.invoke(state.identity, input)
+        await this.agentService.invoke(state.identity, input, false, receivedAt)
+      } else if (input.type === 'agent.observed') {
+        await this.agentService.observed(state.identity, input)
       } else if (input.type === 'agent.cancel') {
         if (typeof input.jobId !== 'string' || input.jobId.length > 100) throw new Error('Invalid job ID.')
         await this.agentService.cancel(state.identity, input.jobId)
@@ -258,7 +272,7 @@ export class RoomChat extends DurableObject<Bindings> {
       }
       await this.presence(db)
     } finally { await db.$disconnect() }
-    if (this.ctx.getWebSockets().some((socket) => socket.readyState === WebSocket.OPEN)) await this.ctx.storage.setAlarm(Date.now() + 30_000)
+    if (this.ctx.getWebSockets().some((socket) => socket.readyState === WebSocket.OPEN)) await scheduleRoomAlarm(this.ctx.storage, Date.now() + 30_000)
   }
   async webSocketClose(socket: WebSocket, code: number) {
     this.closeSocket(socket, [1005, 1006, 1015].includes(code) ? 1000 : code)

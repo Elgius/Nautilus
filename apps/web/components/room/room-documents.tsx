@@ -185,9 +185,9 @@ export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsCo
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       </DialogContent>
     </Dialog>
-    {(work.readOnly || work.queued > 0) && <div className="room-agent-work" role="status">
-      <p><LockKeyhole size={14} />{!work.available ? 'Checking room activity. Documents are read-only.' : work.locked ? 'Agents are working. Room documents are read-only until they finish.' : 'Requests are queued.'}{work.queued > 0 ? ` ${work.queued} queued.` : ''}</p>
-      {work.activities.map((activity) => <button type="button" key={activity.agentId} className="room-agent-work-target" disabled={!activity.documentId}
+    {(work.readOnly || work.queued > 0 || work.activities.length > 0) && <div className="room-agent-work" role="status">
+      <p>{work.readOnly ? <LockKeyhole size={14} /> : <FileText size={14} />}{!work.available ? 'Checking room activity. Documents are read-only.' : work.locked ? 'Agents are working. Room documents are read-only until they finish.' : work.activities.length ? 'Agents are reading saved documents. Editing is available.' : 'Requests are queued.'}{work.queued > 0 ? ` ${work.queued} queued.` : ''}</p>
+      {work.activities.map((activity) => <button type="button" key={`${activity.runId}:${activity.agentId}`} className="room-agent-work-target" disabled={!activity.documentId}
         onClick={() => { if (activity.documentId) onSelect(activity.documentId); }}>
         <MousePointer2 size={15} fill="currentColor" style={{ color: avatarColorValues[activity.color ?? 'violet'] }} />
         <strong>{activity.agentName}</strong><span>{activity.phase} · {documents.find((document) => document.id === activity.documentId)?.title ?? 'Planning'}{activity.target ? ` · ${activity.target}` : ''}</span>

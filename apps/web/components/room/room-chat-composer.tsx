@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { agentMention, selectAgentMention } from "@/lib/agent-mention";
 import { defaultRoomSuggestions } from "./use-room-suggestions";
 import { withDocumentSelection, type DocumentSelection } from '@/lib/document-selection';
-import type { RoomAgentOption } from "../../../../shared/room-chat";
+import type { AgentRunMode, RoomAgentOption } from "../../../../shared/room-chat";
 
 type Props = {
   selection?: DocumentSelection | null;
@@ -22,7 +22,7 @@ type Props = {
   agentBusy: boolean;
   loadAgents: () => void;
   sendMessage: (text: string) => boolean;
-  invokeAgent: (agent: RoomAgentOption, instruction: string) => boolean | Promise<boolean>;
+  invokeAgent: (agent: RoomAgentOption, instruction: string, mode?: AgentRunMode) => boolean | Promise<boolean>;
   sendTyping: () => void;
 };
 const reasoningLevels = ["Low", "Medium", "High"];
@@ -37,6 +37,7 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const [reasoning, setReasoning] = useState("Medium");
+  const [mode, setMode] = useState<AgentRunMode>('write');
   const textarea = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   // Original Files stay in memory, separate from room documents and message payloads.
@@ -65,7 +66,7 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
       submitting.current = true; setPreparing(true);
       const sentInstruction = instruction;
       try {
-        if (await invokeAgent(selected, text)) {
+        if (await invokeAgent(selected, text, mode)) {
           setInstruction((current) => current === sentInstruction ? '' : current);
           if (sentSelection) onClearSelection?.(sentSelection);
         }
@@ -138,7 +139,11 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
           if (agentMention(next)) { if (!mention) loadAgents(); }
           else sendTyping();
         }} rows={3} maxLength={20000} onKeyDown={keyDown} />
-      <InputGroupAddon align="block-end" className="room-composer-footer">
+      <InputGroupAddon align="block-end" className="room-composer-footer flex-wrap">
+        {selected && <div role="group" aria-label="Agent request mode" className="flex shrink-0">
+          <Button type="button" size="xs" variant={mode === 'read' ? 'secondary' : 'ghost'} aria-pressed={mode === 'read'} disabled={preparing} onClick={() => setMode('read')}>Ask</Button>
+          <Button type="button" size="xs" variant={mode === 'write' ? 'secondary' : 'ghost'} aria-pressed={mode === 'write'} disabled={preparing} onClick={() => setMode('write')}>Work</Button>
+        </div>}
         <InputGroupButton variant="outline" size="icon-sm" className="rounded-full" aria-label="Attach files" title="Attach files · local preview only" onClick={() => fileInput.current?.click()}><Plus size={17} /></InputGroupButton>
         <Select value={reasoning} onValueChange={(value) => { if (value) setReasoning(value); }}>
           <SelectTrigger aria-label="Reasoning effort" title="Reasoning effort · UI preview only" className="room-reasoning-trigger"><Brain size={14} /><SelectValue /></SelectTrigger>
@@ -152,6 +157,6 @@ export function RoomChatComposer({ selection, onClearSelection, suggestions = de
     {submitError && <p role="alert" className="room-local-note">{submitError}</p>}
     <p className="room-local-note">Enter to send · Shift + Enter for a new line · Reasoning is a UI preview</p>
     {attachments.length > 0 && <p id={attachmentNoteId} role="status" className="room-local-note">Files stay on this device. Remove attachments to send a text message.</p>}
-    <p className="room-local-note">{selected ? 'Only you can see this instruction and the agent’s reply.' : 'Room messages are shared with members. Use @ for private agent instructions.'}</p>
+    <p className="room-local-note">{selected ? mode === 'read' ? 'Ask reads saved documents and answers privately. It cannot make changes.' : 'Work can update shared documents. Instructions and replies are private.' : 'Room messages are shared with members. Use @ for private agent instructions.'}</p>
   </form>;
 }

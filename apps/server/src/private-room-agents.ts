@@ -1,18 +1,22 @@
-import type { AgentWorkActivity, PrivateAgentEvent, PrivateAgentJob, RoomAgentOption } from '../../../shared/room-chat'
+import type { AgentRunMode, AgentWorkActivity, PrivateAgentEvent, PrivateAgentJob, RoomAgentOption } from '../../../shared/room-chat'
 import { parseSend, type ChatIdentity } from './room-chat-service'
+import { logPipeline, type PipelineStage } from './agent-pipeline'
+import { scheduleEarlierAlarm, scheduleRoomAlarm } from './room-alarm'
 import { avatarColors, type AvatarColor } from '../../../shared/agent-appearance'
 
 export type PrivateAgentProfile = RoomAgentOption & { rules: string[] }
 export type PrivateAgentMessage = { role: 'user' | 'assistant'; content: string }
 export type AgentRunContext = {
   id: string; token: string
+  mode?: AgentRunMode
+  stage?: (stage: PipelineStage) => void
   activity: (activity: AgentWorkActivity | null, agentId: string) => Promise<void>
   committed: (commit: NonNullable<PrivateAgentJob['commits']>[number]) => Promise<void>
   taskCommitted?: (commit: { taskId: string; revision: number }) => Promise<void>
   checkpoint: (id: string, value: unknown) => Promise<void>
   preview?: (toolCallId: string, input: string | null) => Promise<void>
 }
-type Entry = { identity: ChatIdentity; id: string; token?: string; deadline?: number; cancelRequested?: boolean }
+type Entry = { identity: ChatIdentity; id: string; mode?: AgentRunMode; token?: string; deadline?: number; cancelRequested?: boolean }
 type Dependencies = {
   storage: DurableObjectStorage
   profile: (identity: ChatIdentity, agentId: string) => Promise<PrivateAgentProfile | null>
@@ -26,7 +30,7 @@ type Dependencies = {
   archive?: (identity: ChatIdentity, job: PrivateAgentJob) => Promise<void>
 }
 const QUEUE = 'room-work:queue'
-const ACTIVITIES = 'room-work:activities'
+const ACTIVITIES = 'room-work:activities:'
 const OUTBOX = 'activity-archive:'
 type ArchiveEntry = { identity: ChatIdentity; job: PrivateAgentJob }
 const RUN_MS = 180_000
@@ -37,9 +41,15 @@ const RUN_MS = 180_000
  */
 export class PrivateRoomAgents {
   private draining = false
+  private pumpingReads = false
+  private readsRequested = false
+  private writesRequested = false
+  private notification?: Promise<void>
+  private notificationRequested = false
+  private deliveries = new Map<string, Promise<void>>()
+  private active = new Map<string, AbortController>()
   private archiving = false
   private lastArchived = new Map<string, { at: number; signature: string }>()
-  private active?: { key: string; controller: AbortController }
   constructor(private deps: Dependencies) {}
   private prefix(identity: ChatIdentity) { return `private-agent:${encodeURIComponent(identity.userId)}:` }
   private key(identity: ChatIdentity, id: string) { return `${this.prefix(identity)}job:${id}` }
@@ -83,15 +93,14 @@ export class PrivateRoomAgents {
     // Concurrent imports can enqueue more than one batch, or both flush the
     // same batch. Successful writes still need an alarm for anything left over.
     const pending = (await this.deps.storage.list({ prefix: OUTBOX, limit: 1 })).size > 0
-    if (!success || pending) await this.deps.storage.setAlarm(Date.now() + 30_000)
+    if (!success || pending) await scheduleRoomAlarm(this.deps.storage, Date.now() + 30_000)
     return success
   }
   async activity() {
     const queue = await this.deps.storage.get<Entry[]>(QUEUE) ?? []
-    const first = queue[0]
-    return { queued: queue.filter((entry) => !entry.token).length,
-      activities: first?.deadline && first.deadline > Date.now()
-        ? await this.deps.storage.get<AgentWorkActivity[]>(ACTIVITIES) ?? [] : [] }
+    const activities = await Promise.all(queue.filter((entry) => entry.deadline && entry.deadline > Date.now())
+      .map((entry) => this.deps.storage.get<AgentWorkActivity[]>(ACTIVITIES + this.key(entry.identity, entry.id))))
+    return { queued: queue.filter((entry) => !entry.token).length, activities: activities.flatMap((items) => items ?? []) }
   }
   async history(identity: ChatIdentity) {
     const ids = await this.deps.storage.get<string[]>(`${this.prefix(identity)}index`) ?? []
@@ -110,27 +119,33 @@ export class PrivateRoomAgents {
     }
     return jobs
   }
-  async invoke(identity: ChatIdentity, input: Record<string, unknown>, scheduled = false) {
+  async invoke(identity: ChatIdentity, input: Record<string, unknown>, scheduled = false, receivedAt = Date.now()) {
     const { clientMessageId: id, text: instruction } = parseSend({ clientMessageId: input.requestId, text: input.instruction })
+    logPipeline(identity.roomId, id, 'received', { receivedAtMs: receivedAt, ingressMs: Date.now() - receivedAt })
     if (typeof input.agentId !== 'string' || !input.agentId || input.agentId.length > 100) throw new Error('Invalid agent selection.')
+    if (input.mode !== undefined && input.mode !== 'read' && input.mode !== 'write') throw new Error('Invalid request mode.')
+    // Old clients and scheduled work retain the serialized writer path.
+    const mode: AgentRunMode = scheduled ? 'write' : input.mode === 'read' ? 'read' : 'write'
     const profile = await this.deps.profile(identity, input.agentId)
     if (!profile) throw new Error('Invalid agent selection. Choose an agent assigned to this room.')
     const key = this.key(identity, id)
     const now = new Date().toISOString()
+    let newlyAccepted = false
     const job = await this.deps.storage.transaction(async (tx) => {
+      newlyAccepted = false
       // Receipts outlive the 50-job history retention and are committed with
       // queue acceptance. A lost HTTP response must never enqueue twice.
       const receiptKey = `scheduler:receipt:${id}`
       if (scheduled && await tx.get(receiptKey)) return null
       const existing = await tx.get<PrivateAgentJob>(key)
       if (existing) {
-        if (existing.agentId !== profile.id || existing.instruction !== instruction) throw new Error('Invalid reuse of an instruction ID.')
+        if (existing.agentId !== profile.id || existing.instruction !== instruction || (existing.mode ?? 'write') !== mode) throw new Error('Invalid reuse of an instruction ID.')
         if (scheduled) await tx.put(receiptKey, true)
         return existing
       }
       const queue = await tx.get<Entry[]>(QUEUE) ?? []
       if (queue.length >= 100 || queue.filter((entry) => entry.identity.userId === identity.userId).length >= 20) throw new Error('Too many queued requests. Wait for some work to finish.')
-      const job: PrivateAgentJob = { id, agentId: profile.id, agentName: profile.name, instruction, reply: '', status: 'queued', createdAt: now, updatedAt: now, revision: 0, commits: [], source: scheduled ? 'scheduled' : 'manual' }
+      const job: PrivateAgentJob = { id, agentId: profile.id, agentName: profile.name, instruction, reply: '', status: 'queued', createdAt: now, updatedAt: now, revision: 0, mode, commits: [], source: scheduled ? 'scheduled' : 'manual' }
       const indexKey = `${this.prefix(identity)}index`
       const ids = await tx.get<string[]>(indexKey) ?? []
       const retained: string[] = []
@@ -143,15 +158,17 @@ export class PrivateRoomAgents {
       await tx.put(indexKey, [...ids.filter((oldId) => !retained.includes(oldId)), id])
       await this.putJob(tx, identity, job)
       if (scheduled) await tx.put(receiptKey, true)
-      await tx.put(QUEUE, [...queue, { identity, id }])
+      await tx.put(QUEUE, [...queue, { identity, id, mode }])
       // Persist a wakeup with acceptance, before relying on waitUntil.
-      await tx.setAlarm(Date.now() + 1000)
+      await scheduleEarlierAlarm(tx, Date.now() + 1000)
+      newlyAccepted = true
       return job
     })
     if (!job) { this.wake(); return }
-    await this.safeSend(identity, job)
-    await this.changed(identity)
+    if (newlyAccepted) logPipeline(identity.roomId, job.id, 'accepted', { mode, elapsedMs: Date.now() - Date.parse(job.createdAt) })
+    // Execution must not await subscriber authorization or room-wide notifications.
     this.wake()
+    this.deps.waitUntil(Promise.all([this.safeSend(identity, job), this.changed(identity)]).then(() => {}))
   }
   private requestArchive() {
     if (!this.deps.archive || this.archiving) return
@@ -165,28 +182,33 @@ export class PrivateRoomAgents {
         const first = (await this.deps.storage.get<Entry[]>(QUEUE))?.[0]
         const retry = pending ? Date.now() + (success ? 5000 : 30_000) : Infinity
         const recovery = first ? (first.deadline ? first.deadline + 1000 : Date.now() + 1000) : Infinity
-        if (Number.isFinite(Math.min(retry, recovery))) await this.deps.storage.setAlarm(Math.min(retry, recovery))
+        if (Number.isFinite(Math.min(retry, recovery))) await scheduleRoomAlarm(this.deps.storage, Math.min(retry, recovery))
       } catch {
-        await this.deps.storage.setAlarm(Date.now() + 30_000)
+        await scheduleRoomAlarm(this.deps.storage, Date.now() + 30_000)
       } finally { this.archiving = false }
     })())
   }
   wake() {
     this.requestArchive()
-    if (this.draining) return
-    this.draining = true
-    this.deps.waitUntil(this.drain().catch(async () => {
-      // Storage/DB outages leave the durable queue intact for the alarm.
-      await this.deps.storage.setAlarm(Date.now() + 5000)
-    }).finally(() => {
-      this.draining = false
-      this.lastArchived.clear()
-      this.requestArchive()
-    }))
+    this.readsRequested = true; this.writesRequested = true
+    if (!this.pumpingReads) {
+      this.pumpingReads = true
+      this.deps.waitUntil((async () => {
+        do { this.readsRequested = false; await this.pumpReads() } while (this.readsRequested)
+      })().catch(() => scheduleRoomAlarm(this.deps.storage, Date.now() + 5000))
+        .finally(() => { this.pumpingReads = false; if (this.readsRequested) this.wake() }))
+    }
+    if (!this.draining) {
+      this.draining = true
+      this.deps.waitUntil((async () => {
+        do { this.writesRequested = false; await this.drain() } while (this.writesRequested)
+      })().catch(() => scheduleRoomAlarm(this.deps.storage, Date.now() + 5000))
+        .finally(() => { this.draining = false; if (this.writesRequested) this.wake() }))
+    }
   }
   async cancel(identity: ChatIdentity, id: string) {
     const key = this.key(identity, id)
-    if (this.active?.key === key) this.active.controller.abort()
+    this.active.get(key)?.abort()
     const owner = await this.deps.storage.transaction(async (tx) => {
       const queue = await tx.get<Entry[]>(QUEUE) ?? []
       const entry = queue.find((entry) => this.key(entry.identity, entry.id) === key)
@@ -202,34 +224,101 @@ export class PrivateRoomAgents {
       return entry.identity
     })
     // The run may have started while cancellation was being persisted.
-    if (this.active?.key === key) this.active.controller.abort()
+    this.active.get(key)?.abort()
     const job = await this.deps.storage.get<PrivateAgentJob>(key)
     // Preserve scheduler metadata from the durable entry, not the browser caller.
     if (job) await this.safeSend(owner ?? identity, job)
     if (owner) await this.changed(owner)
   }
+  async observed(identity: ChatIdentity, input: Record<string, unknown>) {
+    if (typeof input.requestId !== 'string' || input.requestId.length > 100 ||
+      typeof input.elapsedMs !== 'number' || !Number.isFinite(input.elapsedMs) || input.elapsedMs < 0 || input.elapsedMs > 86_400_000 ||
+      typeof input.editorSaveMs !== 'number' || !Number.isFinite(input.editorSaveMs) || input.editorSaveMs < 0 || input.editorSaveMs > input.elapsedMs) return
+    const job = await this.deps.storage.get<PrivateAgentJob>(this.key(identity, input.requestId))
+    if (job) logPipeline(identity.roomId, job.id, 'browser.first-output', { clientElapsedMs: input.elapsedMs, editorSaveMs: input.editorSaveMs })
+  }
+  private async pumpReads(): Promise<void> {
+    for (;;) {
+      const queue = (await this.deps.storage.get<Entry[]>(QUEUE) ?? []).filter((entry) => entry.mode === 'read')
+      // Orphans hold their slots until the watchdog expires. Never replay a run.
+      for (const entry of queue.filter((entry) => entry.token && !this.active.has(this.key(entry.identity, entry.id)))) {
+        const job = await this.deps.storage.get<PrivateAgentJob>(this.key(entry.identity, entry.id))
+        if (!job || job.status === 'complete' || job.status === 'failed') {
+          await this.remove(entry)
+          return this.pumpReads()
+        }
+        if ((entry.deadline ?? 0) > Date.now()) {
+          await scheduleRoomAlarm(this.deps.storage, entry.deadline! + 1000)
+        } else {
+          job.status = 'failed'; job.error = 'The agent was interrupted. Please retry.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+          await this.storeJob(entry.identity, job)
+          await this.safeSend(entry.identity, job)
+          await this.remove(entry)
+          return this.pumpReads()
+        }
+      }
+      const running = queue.filter((entry) => entry.token)
+      if (running.length >= 3) return
+      // Reserve one room slot for other users; per-user queued limits still apply.
+      const entry = queue.find((entry) => !entry.token && running.filter((active) => active.identity.userId === entry.identity.userId).length < 2)
+      if (!entry) return
+      const key = this.key(entry.identity, entry.id)
+      const job = await this.deps.storage.get<PrivateAgentJob>(key)
+      if (!job || job.status === 'failed' || job.status === 'complete') { await this.remove(entry); continue }
+      const profile = await this.deps.profile(entry.identity, job.agentId)
+      if (!profile || !await this.deps.canAccess(entry.identity)) {
+        job.status = 'failed'; job.error = 'Room or agent access expired.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+        await this.storeJob(entry.identity, job); await this.safeSend(entry.identity, job); await this.remove(entry); continue
+      }
+      const claimed = await this.deps.storage.transaction(async (tx) => {
+        const current = await tx.get<Entry[]>(QUEUE) ?? []
+        const saved = current.find((item) => this.key(item.identity, item.id) === key)
+        if (!saved || saved.token) return false
+        saved.token = crypto.randomUUID(); saved.deadline = Date.now() + 240_000
+        Object.assign(entry, saved)
+        await tx.put(QUEUE, current); await scheduleEarlierAlarm(tx, saved.deadline + 1000)
+        return true
+      })
+      if (!claimed) continue
+      this.deps.waitUntil(this.run(entry, profile, job).then(() => this.remove(entry))
+        .catch(() => scheduleRoomAlarm(this.deps.storage, Date.now() + 5000))
+        .finally(() => { this.wake() }))
+    }
+  }
   private async safeSend(identity: ChatIdentity, job: PrivateAgentJob) {
+    const key = this.key(identity, job.id), snapshot = structuredClone(job)
     if (this.deps.archive) {
-      const key = `${OUTBOX}${this.key(identity, job.id)}`
       const signature = JSON.stringify([job.status, job.commits?.length, job.taskCommits?.length, job.activities])
       const previous = this.lastArchived.get(key)
-      // Streamed reply tokens are checkpointed durably but archived at most every
-      // five seconds. Status, phase, and commit changes are archived immediately.
       if (!previous || previous.signature !== signature || Date.now() - previous.at >= 5000) {
         this.lastArchived.set(key, { at: Date.now(), signature })
         this.requestArchive()
       }
     }
+    // Preserve revisions across acceptance, streaming and terminal notifications.
     // A disconnected subscriber must not change execution/commit state.
-    try { await this.deps.send(identity, { type: 'agent.update', job: { ...job } }) } catch { /* replay via history */ }
+    const delivery = (this.deliveries.get(key) ?? Promise.resolve()).then(async () => {
+      try { await this.deps.send(identity, { type: 'agent.update', job: snapshot }) } catch { /* replay via history */ }
+    })
+    this.deliveries.set(key, delivery)
+    await delivery
+    if (this.deliveries.get(key) === delivery) this.deliveries.delete(key)
   }
-  private async changed(identity: ChatIdentity) {
-    try { await this.deps.changed?.(identity) } catch { /* polling recovers missed notifications */ }
+  private changed(identity: ChatIdentity): Promise<void> {
+    this.notificationRequested = true
+    if (this.notification) return this.notification
+    this.notification = (async () => {
+      do {
+        this.notificationRequested = false
+        try { await this.deps.changed?.(identity) } catch { /* polling recovers missed notifications */ }
+      } while (this.notificationRequested)
+    })().finally(() => { this.notification = undefined })
+    return this.notification
   }
   private async drain() {
     for (;;) {
-      const entry = (await this.deps.storage.get<Entry[]>(QUEUE) ?? [])[0]
-      if (!entry) { await this.deps.storage.delete(ACTIVITIES); return }
+      const entry = (await this.deps.storage.get<Entry[]>(QUEUE) ?? []).find((entry) => entry.mode !== 'read')
+      if (!entry) return
       const key = this.key(entry.identity, entry.id)
       const job = await this.deps.storage.get<PrivateAgentJob>(key)
       if (!job) { await this.remove(entry); continue }
@@ -239,7 +328,7 @@ export class PrivateRoomAgents {
       }
       if (entry.token) {
         if ((entry.deadline ?? 0) > Date.now()) {
-          await this.deps.storage.setAlarm(entry.deadline! + 1000); return
+          await scheduleRoomAlarm(this.deps.storage, entry.deadline! + 1000); return
         }
         job.status = 'failed'; job.error = 'The agent was interrupted. Saved changes are preserved; review them before retrying.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
         await this.storeJob(entry.identity, job)
@@ -257,15 +346,16 @@ export class PrivateRoomAgents {
         await this.storeJob(entry.identity, job); await this.safeSend(entry.identity, job); await this.remove(entry); continue
       }
       const token = crypto.randomUUID()
-      if (!await this.deps.acquire(entry.identity, token)) { await this.deps.storage.setAlarm(Date.now() + 5000); return }
+      if (!await this.deps.acquire(entry.identity, token)) { await scheduleRoomAlarm(this.deps.storage, Date.now() + 5000); return }
       // Lease extends beyond execution deadline. Recovery waits for its expiry
       // before releasing a potentially orphaned run.
       entry.token = token; entry.deadline = Date.now() + 240_000
       try {
         await this.deps.storage.transaction(async (tx) => {
           const queue = await tx.get<Entry[]>(QUEUE) ?? []
-          if (!queue[0] || this.key(queue[0].identity, queue[0].id) !== key) throw new Error('Queue head changed')
-          queue[0] = entry; await tx.put(QUEUE, queue); await tx.setAlarm(entry.deadline! + 1000)
+          const index = queue.findIndex((item) => item.mode !== 'read')
+          if (index < 0 || this.key(queue[index].identity, queue[index].id) !== key) throw new Error('Queue head changed')
+          queue[index] = entry; await tx.put(QUEUE, queue); await scheduleEarlierAlarm(tx, entry.deadline! + 1000)
         })
         await this.run(entry, profile, job)
       } finally { await this.deps.release(entry.identity, token) }
@@ -273,22 +363,61 @@ export class PrivateRoomAgents {
     }
   }
   private async remove(entry: Entry) {
+    this.lastArchived.delete(this.key(entry.identity, entry.id))
+    this.requestArchive()
     await this.deps.storage.transaction(async (tx) => {
       const queue = await tx.get<Entry[]>(QUEUE) ?? []
       await tx.put(QUEUE, queue.filter((item) => this.key(item.identity, item.id) !== this.key(entry.identity, entry.id)))
-      await tx.delete(ACTIVITIES)
+      await tx.delete(ACTIVITIES + this.key(entry.identity, entry.id))
       const checkpoints = await tx.list({ prefix: `room-work:checkpoint:${encodeURIComponent(this.key(entry.identity, entry.id))}:` })
       for (const key of checkpoints.keys()) await tx.delete(key)
     })
-    await this.changed(entry.identity)
+    this.deps.waitUntil(this.changed(entry.identity))
   }
   private async run(entry: Entry, profile: PrivateAgentProfile, job: PrivateAgentJob) {
     const key = this.key(entry.identity, entry.id)
     const controller = new AbortController()
-    this.active = { key, controller }
-    const save = async () => {
+    this.active.set(key, controller)
+    const started = Date.now()
+    const seen = new Set<PipelineStage>()
+    const stage = (name: PipelineStage) => {
+      if (seen.has(name) && name !== 'committed') return
+      seen.add(name)
+      logPipeline(entry.identity.roomId, job.id, name, { mode: entry.mode ?? 'write', elapsedMs: Date.now() - Date.parse(job.createdAt), runMs: Date.now() - started })
+    }
+    let pending: Promise<void> | undefined
+    let latest: PrivateAgentJob | undefined
+    let deliveryError: unknown
+    let lastPersisted = 0
+    const snapshot = () => {
       job.updatedAt = new Date().toISOString(); job.revision++
-      await this.storeJob(entry.identity, job); await this.safeSend(entry.identity, job)
+      return structuredClone(job)
+    }
+    const publish = () => {
+      latest = snapshot()
+      if (pending) return
+      pending = (async () => {
+        while (latest) {
+          const update = latest; latest = undefined
+          // Persist checkpoints less often than socket output, with one in-flight
+          // delivery and at most one pending cumulative snapshot per run.
+          if (Date.now() - lastPersisted >= 1000) {
+            await this.storeJob(entry.identity, update); lastPersisted = Date.now()
+          }
+          await this.safeSend(entry.identity, update)
+          if (update.reply) stage('output.sent')
+        }
+      })().catch((error: unknown) => { deliveryError = error }).finally(() => { pending = undefined })
+    }
+    const save = async (waitForDelivery = true) => {
+      // A terminal or committed state must follow every in-flight partial update.
+      await pending
+      latest = undefined
+      await this.storeJob(entry.identity, snapshot())
+      const delivery = this.safeSend(entry.identity, job)
+      if (waitForDelivery) await delivery
+      else this.deps.waitUntil(delivery)
+      if (job.reply) stage('output.sent')
     }
     const activities = new Map<string, AgentWorkActivity>()
     const colors = new Map<string, AvatarColor>()
@@ -296,17 +425,19 @@ export class PrivateRoomAgents {
       const current = (await this.deps.storage.get<Entry[]>(QUEUE) ?? []).find((item) => this.key(item.identity, item.id) === key)
       if (current?.cancelRequested) controller.abort()
       controller.signal.throwIfAborted()
-      job.status = 'running'; job.startedAt = new Date().toISOString(); await save()
+      stage('dequeued'); job.status = 'running'; job.startedAt = new Date().toISOString(); await save(false)
       const messages: PrivateAgentMessage[] = [{ role: 'user', content: job.instruction }]
       let budget = 32_000 - job.instruction.length
-      for (const old of (entry.identity.scheduledDeliveryId ? [] : await this.history(entry.identity)).filter((item) => item.agentId === profile.id && item.status === 'complete').slice(-10).reverse()) {
+      const history = entry.identity.scheduledDeliveryId ? [] : await this.history(entry.identity)
+      const preceding = history.slice(0, Math.max(0, history.findIndex((item) => item.id === job.id)))
+      for (const old of preceding.filter((item) => item.agentId === profile.id && item.status === 'complete').slice(-10).reverse()) {
         if (old.instruction.length + old.reply.length > budget) break
         messages.unshift({ role: 'user', content: old.instruction }, { role: 'assistant', content: old.reply })
         budget -= old.instruction.length + old.reply.length
       }
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(RUN_MS)])
       const context: AgentRunContext = {
-        id: job.id, token: entry.token!,
+        id: job.id, token: entry.mode === 'read' ? '' : entry.token!, mode: entry.mode ?? 'write', stage,
         activity: async (activity, agentId) => {
           signal.throwIfAborted()
           if (activity) {
@@ -319,15 +450,15 @@ export class PrivateRoomAgents {
             activities.set(agentId, { ...activity, color })
           } else activities.delete(agentId)
           job.activities = [...activities.values()]
-          await this.deps.storage.put(ACTIVITIES, job.activities)
-          await save()
-          await this.changed(entry.identity)
+          await this.deps.storage.put(ACTIVITIES + key, job.activities)
+          await save(false)
+          this.deps.waitUntil(this.changed(entry.identity))
         },
         committed: async (commit) => {
           if (!job.commits?.some((saved) => saved.documentId === commit.documentId && saved.versionId === commit.versionId)) job.commits = [...(job.commits ?? []), commit]
-          await save(); await this.changed(entry.identity)
+          stage('committed'); await save(); this.deps.waitUntil(this.changed(entry.identity))
         },
-        taskCommitted: async (commit) => { job.taskCommits = [...(job.taskCommits ?? []), commit]; await save(); await this.changed(entry.identity) },
+        taskCommitted: async (commit) => { job.taskCommits = [...(job.taskCommits ?? []), commit]; stage('committed'); await save(); this.deps.waitUntil(this.changed(entry.identity)) },
         preview: async (toolCallId, input) => {
           signal.throwIfAborted()
           // Ephemeral, owner-only drafts; never persist them as document versions.
@@ -339,22 +470,23 @@ export class PrivateRoomAgents {
       let lastSent = 0
       for await (const delta of this.deps.stream(profile, messages, signal, entry.identity, context)) {
         signal.throwIfAborted()
+        if (deliveryError) throw deliveryError
+        stage('reply.first-delta')
         const reply = job.reply + delta
         // DO values have a byte limit; Unicode prompts/replies can exceed it
         // well before reaching the character limit. Keep the last safe reply.
         if (reply.length > 32_000 || new TextEncoder().encode(JSON.stringify({ ...job, reply })).byteLength > 110_000) throw new Error('Response too long')
         job.reply = reply
         if (Date.now() - lastSent >= 200) {
-          if (!await this.deps.canAccess(entry.identity)) throw new Error('Access expired')
-          await save(); lastSent = Date.now()
+          publish(); lastSent = Date.now()
         }
       }
       if (!job.reply.trim() || !await this.deps.canAccess(entry.identity)) throw new Error('No response or access expired')
-      job.status = 'complete'; job.finishedAt = new Date().toISOString(); job.activities = []; await save()
+      job.status = 'complete'; job.finishedAt = new Date().toISOString(); job.activities = []; await save(); stage('complete')
     } catch {
       job.status = 'failed'; job.error = controller.signal.aborted ? 'Cancelled. Any saved changes are preserved.' : 'The agent could not complete this response. Please retry.'
       job.finishedAt = new Date().toISOString(); job.activities = []
-      await save()
-    } finally { controller.abort(); this.active = undefined }
+      await save(); stage('failed')
+    } finally { controller.abort(); this.active.delete(key) }
   }
 }
