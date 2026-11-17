@@ -21,7 +21,7 @@ export function createAgentCreatorRouter(resolveModel: (env: Bindings) => Langua
     })
     if (existing) throw new HTTPException(409, { message: 'Choose a name that isn’t already used by another agent.' })
     const instructions = await generateAgentInstructions(input.description, resolveModel(c.env), c.req.raw.signal)
-    const agent = await saveCreatedAgent(db, organizationId, input, instructions)
+    const agent = await saveCreatedAgent(db, organizationId, input, instructions, c.get('session').user.id)
     return c.json({ agent }, 201)
   })
 

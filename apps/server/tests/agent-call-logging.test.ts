@@ -17,7 +17,7 @@ test('tool failures log safe codes and stages without messages, payloads or prov
       const logging = agentCallLogging({ runId: 'run' })
       logging.onToolExecutionEnd({ callId: 'call', toolCall: { toolCallId: 'write', toolName: 'applyDocumentEdits', input: { secret: 'private-payload' } }, toolOutput: { type: 'tool-error', toolCallId: 'write', toolName: 'applyDocumentEdits', input: {}, error }, toolExecutionMs: 10 } as Parameters<typeof logging.onToolExecutionEnd>[0])
     })
-    expect(records[0]).toMatchObject({ event: 'tool.failed', errorCode: error instanceof SkillOperationError ? 'OFFICE_REJECTED' : 'OPERATION_FAILED', stage: error instanceof SkillOperationError ? 'office' : 'unknown' })
+    expect(records[0]).toMatchObject({ event: 'tool.failed', errorCode: error instanceof SkillOperationError ? 'OFFICE_REJECTED' : 'OPERATION_FAILED', stage: error instanceof SkillOperationError ? 'office' : 'run' })
     expect(JSON.stringify(records)).not.toContain('private-')
   }
 })

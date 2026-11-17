@@ -24,6 +24,7 @@ function harness(output: unknown = instructions, duplicate = false) {
   const app = new Hono<AppEnv>()
   app.use('*', async (c, next) => {
     c.set('organizationId', 'org-1')
+    c.set('session', { user: { id: 'user-1' } } as AppEnv['Variables']['session'])
     c.set('db', { agent: {
       findUnique: async (query: unknown) => { lookups.push(query); return duplicate ? { id: 'existing' } : null },
       create: async (query: { data: Record<string, unknown> }) => {
@@ -43,7 +44,7 @@ function harness(output: unknown = instructions, duplicate = false) {
 
 test('creator generates structured instructions then saves and returns the tenant-owned agent', async () => {
   const { request, model, writes, lookups } = harness()
-  const response = await request({ ...input, organizationId: 'other', role: 'Override', rules: ['Override'] })
+  const response = await request({ ...input, organizationId: 'other', createdByUserId: 'attacker', role: 'Override', rules: ['Override'] })
   expect(response.status).toBe(201)
   expect(await response.json()).toMatchObject({ agent: {
     id: 'agent-1', organizationId: 'org-1', name: 'Scout', color: 'blue', avatarIcon: 'circle',
@@ -51,6 +52,7 @@ test('creator generates structured instructions then saves and returns the tenan
   } })
   expect(lookups[0]).toMatchObject({ where: { organizationId_nameKey: { organizationId: 'org-1', nameKey: 'scout' } } })
   expect(writes).toHaveLength(1)
+  expect(writes[0].data.createdByUserId).toBe('user-1')
   expect(writes[0].data).not.toHaveProperty('description')
   const call = model.doGenerateCalls[0]
   expect(call.responseFormat?.type).toBe('json')

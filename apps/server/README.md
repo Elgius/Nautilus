@@ -703,3 +703,32 @@ Validation:
 - `ACTIVITY_TEST_DATABASE_URL=... bun test apps/server/tests/agent-activity.integration.test.ts`
   against a migrated, dedicated test database. `ACTIVITY_TEST_WS_PROXY` optionally
   supports a local WebSocket-to-Postgres proxy, as in the knowledge integration test.
+
+
+### Personal agents and run diagnostics
+
+Apply the `20261117180000_personal_agents_and_run_errors` migration before running
+the updated server. New agents record their authenticated creator; client input
+cannot choose that owner. Existing agents retain a NULL creator and are excluded
+from personal lists and invocation until an administrator explicitly assigns a
+verified creator. Room membership or a previous room assignment does not prove
+creator identity. Room registration on first use is idempotent and does not grant
+other members permission to invoke that agent.
+
+Named document requests use `resolveDocument` (title search with pagination, exact
+match preference, and deterministic missing/ambiguous outcomes), followed by a
+versioned read. Related headings, prose, questions and tables should be prepared
+in a single atomic batch, within the existing 100-operation limit. A rejected
+review preserves its read for a corrected batch, while unchanged rejected edits
+remain blocked. Failed runs with committed versions contribute their original
+request and save receipts to later conversation context; agents must re-read.
+
+`shared/agent-errors.ts` defines the public error contract. Run failures log
+`[agent-run]` with run/room/agent IDs, error code, elapsed and timeout milliseconds,
+saved version IDs, and sanitized exception types. Tool failures include tool call
+IDs, stage, retryability and review reason where available. Raw prompts, document
+contents, credentials, provider response bodies and exception messages are never
+logged. Early review rejections also emit `review.decision`. Bounded operation
+warnings, reasons and terminal error codes are persisted with the private job and
+archived to `agentActivityRun`, and are displayed in room chat and activity details.
+A completed response with warnings does not imply all requested work was saved.

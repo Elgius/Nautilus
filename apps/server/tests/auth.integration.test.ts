@@ -153,6 +153,9 @@ test.skipIf(!process.env.TEST_DATABASE_URL)('invitation-only SaaS authentication
     const listed = await (await member.request(agentsPath)).json() as { agents: { name: string; role: string; rules: string[]; avatarIcon: string; color: string }[] }
     expect(listed.agents).toHaveLength(1)
     expect(listed.agents[0]).toMatchObject(updatedProfile)
+    expect((await (await admin.request(agentsPath)).json() as { agents: unknown[] }).agents).toHaveLength(0)
+    expect((await admin.request(chatPath, chatInput)).status).toBe(404)
+    expect((await admin.request(`${agentsPath}/${agent.id}`, updatedProfile, {}, 'PATCH')).status).toBe(404)
     const roomsPath = `/api/organizations/${organizationId}/rooms`
     expect((await anonymous.request(roomsPath)).status).toBe(401)
     expect((await stranger.request(roomsPath)).status).toBe(404)

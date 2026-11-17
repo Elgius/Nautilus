@@ -1,4 +1,6 @@
 "use client";
+import { agentRunErrorMessage } from '../../../../shared/agent-errors';
+import { AgentOperationWarnings } from '../room/agent-operation-warnings';
 
 import { ChoiceMenu } from "@/components/ui/choice-menu";
 import { useRef, useState } from "react";
@@ -30,7 +32,8 @@ function RunDetails({ base, run, userId }: { base: string; run: ActivityRun; use
   return <div className="agent-run-details">
     <div><h4>Your request</h4><p>{data.instruction}</p></div>
     {data.reply && <div><h4>Agent response</h4><AgentReply text={data.reply} citations={data.citations} /></div>}
-    {data.error && <p role="status" className="agent-run-error">{data.error}</p>}
+    {(data.errorCode || data.error) && <p role="status" className="agent-run-error">{data.errorCode ? agentRunErrorMessage(data.errorCode, data.documents.length) : data.error}</p>}
+    <AgentOperationWarnings issues={data.issues} />
     {!!data.documents.length && <div><h4>Saved documents</h4><ul>{data.documents.map((doc) => <li key={doc.versionId}><FileText size={14} />{doc.available ? <Link href={`${roomHref(run.roomId)}?${new URLSearchParams({ document: doc.documentId })}`}>{doc.title}</Link> : <span>{doc.title}</span>}<span>Version {doc.versionNumber}</span></li>)}</ul></div>}
     {!!data.tasks.length && <div><h4>Saved task changes</h4><ul>{data.tasks.map((task, index) => <li key={`${task.taskId}:${task.revision}:${index}`}><ListTodo size={14} /><span>{task.title}</span><span>Revision {task.revision}{!task.available ? " · Deleted" : ""}</span></li>)}</ul><Link href="/kanban">Open task list</Link></div>}
     {(run.startedAt || run.finishedAt) && <p className="agent-run-meta">{run.startedAt && `Started ${dateLabel(run.startedAt)}`}{run.startedAt && run.finishedAt && " · "}{run.finishedAt && `Finished ${dateLabel(run.finishedAt)}`}</p>}

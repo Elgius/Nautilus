@@ -39,7 +39,7 @@ export function AgentHubChat({ organizationId, userId }: { organizationId: strin
     </header>
     {(rooms.error || capabilities.error) && <div role="alert"><p>Could not load Agent Hub.</p><Button variant="outline" onClick={() => { void rooms.mutate(); void capabilities.mutate(); }}>Retry loading Hub</Button></div>}
     {!rooms.data && !rooms.error && <p role="status">Loading your rooms…</p>}
-    {rooms.data && !rooms.data.rooms.length && <p>Join a room and assign an agent to start a conversation.</p>}
+    {rooms.data && !rooms.data.rooms.length && <p>Join a room to start a conversation with your agents.</p>}
     {room && <HubConversation key={`${organizationId}:${userId}:${room.id}`} organizationId={organizationId} userId={userId} room={room} capabilities={capabilities.data} />}
   </section>;
 }
@@ -115,7 +115,7 @@ function HubConversation({ organizationId, userId, room, capabilities }: { organ
         <label>Reasoning<select aria-label="Agent reasoning effort" value={reasoning} onChange={(event) => setReasoning(event.target.value as HubOptions['reasoning'])}>{['low', 'medium', 'high'].map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
       </fieldset>
       {knowledge.includes('PERSONAL') && <p className="text-sm text-muted-foreground">Personal knowledge stays in this private response. Disable it for shared changes or delegation.</p>}
-      <Textarea aria-label="Agent Hub instruction" value={draft} maxLength={20000} disabled={sending || !!pending} placeholder={agent ? `Ask ${agent.name}…` : 'Assign an agent to this room to start'} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
+      <Textarea aria-label="Agent Hub instruction" value={draft} maxLength={20000} disabled={sending || !!pending} placeholder={agent ? `Ask ${agent.name}…` : 'Create an agent to start'} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
       <div className="agent-hub-send"><span>Only you can see this chat. Saved changes are shared with the room.</span><Button type="submit" disabled={!agent || !draft.trim() || !conversationId || sending || busy || !!pending || !capabilities?.execution}><ArrowUp size={15} />{sending ? 'Sending…' : 'Send'}</Button></div>
       {busy && <p role="status"><Square size={12} className="inline" /> Agent is working. You can cancel from its response.</p>}
       {error && <p role="alert">{error}</p>}

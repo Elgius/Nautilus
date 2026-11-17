@@ -5,11 +5,20 @@ import type { Bindings } from './env'
 import type { PrivateAgentMessage, PrivateAgentProfile } from './private-room-agents'
 import type { PipelineStage } from './agent-pipeline'
 import { parseDocumentPreview } from '../../../shared/document-preview'
+import type { AgentOperationIssue } from '../../../shared/agent-errors'
+import { AgentRunError } from './skill-operation-error'
 
-export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, resolveModel = createAgentModel, skills: AgentSkill[] = [], options: { stage?: (stage: PipelineStage) => void; toolCallConcurrency?: number; reasoning?: 'low' | 'medium' | 'high'; tool?: (call: HubToolCall) => Promise<void>; steps?: number; timeout?: number; loggingContext?: Record<string, string>; preview?: (toolCallId: string, input: string | null) => Promise<void> } = {}) {
-  const agent = createAgentInterface(profile, resolveModel(env), skills, options)
+export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAgentProfile, messages: PrivateAgentMessage[], signal: AbortSignal, resolveModel = createAgentModel, skills: AgentSkill[] = [], options: { stage?: (stage: PipelineStage) => void; toolCallConcurrency?: number; reasoning?: 'low' | 'medium' | 'high'; tool?: (call: HubToolCall) => Promise<void>; steps?: number; timeout?: number; loggingContext?: Record<string, string>; onIssue?: (issue: AgentOperationIssue) => void; preview?: (toolCallId: string, input: string | null) => Promise<void> } = {}) {
+  // Use one authoritative deadline so an SDK timer cannot race our error code.
+  const agent = createAgentInterface(profile, resolveModel(env), skills, { ...options, externalDeadline: true })
   options.stage?.('model.started')
-  const result = await agent.stream({ messages, abortSignal: signal })
+  const deadline = AbortSignal.timeout(options.timeout ?? 60_000)
+  const activeSignal = AbortSignal.any([signal, deadline])
+  const interruptionCode = () => deadline.aborted || signal.aborted && signal.reason instanceof Error && signal.reason.name === 'TimeoutError'
+    ? 'RUN_TIMEOUT' : signal.aborted ? 'RUN_CANCELLED' : 'MODEL_STREAM_INTERRUPTED'
+  let result
+  try { result = await agent.stream({ messages, abortSignal: activeSignal }) }
+  catch (error) { throw new AgentRunError(activeSignal.aborted ? interruptionCode() : 'MODEL_REQUEST_FAILED', { cause: error }) }
   let finished = false
   let firstDelta = true
   type Input = { text: string; sent: number; delivered?: string; delivery?: Promise<void>; failure?: { error: unknown } }
@@ -70,11 +79,19 @@ export async function* streamPrivateRoomAgent(env: Bindings, profile: PrivateAge
         inputs.delete(part.toolCallId)
         await options.preview?.(part.toolCallId, null)
       }
-      if (part.type === 'error' || part.type === 'abort') throw new Error('Agent stream failed')
+      if (part.type === 'error') throw new AgentRunError('MODEL_REQUEST_FAILED', { cause: part.error })
+      if (part.type === 'abort') throw new AgentRunError(interruptionCode())
       if (part.type === 'text-delta') yield part.text
-      if (part.type === 'finish') finished = true
+      if (part.type === 'finish') {
+        if (part.finishReason === 'length') throw new AgentRunError('MODEL_OUTPUT_LIMIT')
+        if (part.finishReason === 'tool-calls') throw new AgentRunError('STEP_LIMIT_REACHED')
+        finished = true
+      }
     }
-    if (!finished) throw new Error('Agent stream interrupted')
+    if (!finished) throw new AgentRunError('MODEL_STREAM_INTERRUPTED')
+  } catch (error) {
+    if (activeSignal.aborted) throw new AgentRunError(interruptionCode(), { cause: error })
+    throw error
   } finally {
     // Do not let an in-flight draft arrive after the queue's terminal rollback.
     await Promise.all([...inputs.values()].map((input) => input.delivery))

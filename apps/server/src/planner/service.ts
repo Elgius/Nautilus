@@ -18,10 +18,10 @@ export function plannerService(db: Database, identity: ChatIdentity, actor?: { a
   const scope = { organizationId: identity.organizationId, roomId: identity.roomId }
   const authorize = async (source = db) => {
     if (!await canChat(source, identity) || !await scheduledTaskAvailable(source, identity)) throw new HTTPException(403, { message: 'Room access expired.' })
-    if (actor && !await source.roomAgent.findFirst({ where: { ...scope, agentId: actor.agentId } })) throw new HTTPException(403, { message: 'Agent assignment expired.' })
+    if (actor && !await source.roomAgent.findFirst({ where: { ...scope, agentId: actor.agentId, agent: { createdByUserId: identity.userId } } })) throw new HTTPException(403, { message: 'Agent assignment expired.' })
   }
   const assigned = async (source: Pick<Database, 'roomAgent'>, agentIds: string[]) => {
-    if (await source.roomAgent.count({ where: { ...scope, agentId: { in: agentIds } } }) !== agentIds.length) throw new HTTPException(400, { message: 'Choose agents assigned to this room.' })
+    if (await source.roomAgent.count({ where: { ...scope, agentId: { in: agentIds }, agent: { createdByUserId: identity.userId } } }) !== agentIds.length) throw new HTTPException(400, { message: 'Choose agents assigned to this room.' })
   }
   const record = (tx: Pick<Database, 'plannerChange'>, task: { id: string; revision: number }, summary: string) => tx.plannerChange.create({ data: {
     taskId: task.id, revision: task.revision, userId: identity.userId, agentId: actor?.agentId, runId: actor?.runId,

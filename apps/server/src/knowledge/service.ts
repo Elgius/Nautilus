@@ -1,3 +1,4 @@
+import { personalAgentScope } from '../personal-agents'
 import { HTTPException } from 'hono/http-exception'
 import { queueSources } from './queue-sources'
 import { z } from 'zod'
@@ -80,7 +81,7 @@ export function knowledgeService(db: Database, identity: KnowledgeIdentity) {
           entry: allowed && entryIsCurrent(source, source.entry) ? source.entry : null })
       }
       const roster = cursor ? [] : await db.agent.findMany({
-        where: { organizationId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        where: personalAgentScope(organizationId, userId), orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         select: { id: true, name: true, color: true, avatarIcon: true, avatarUrl: true, avatarDesign: true,
           knowledgeSchedules: { where: { baseId: knowledgeBase.id }, select: { refreshHours: true, nextRefreshAt: true } },
         },
@@ -132,7 +133,7 @@ export function knowledgeService(db: Database, identity: KnowledgeIdentity) {
       return db.$transaction(async tx => {
         const baseId = knowledgeBase.id
         await tx.$queryRaw`SELECT id FROM "knowledgeBase" WHERE id = ${baseId} FOR UPDATE`
-        const agent = await tx.agent.findFirst({ where: { id: agentId, organizationId }, select: { id: true } })
+        const agent = await tx.agent.findFirst({ where: { id: agentId, ...personalAgentScope(organizationId, userId) }, select: { id: true } })
         if (!agent) throw new HTTPException(404, { message: 'Agent not found.' })
         const schedule = { refreshHours, nextRefreshAt: new Date(Date.now() + refreshHours * 3_600_000) }
         return tx.knowledgeAgentSchedule.upsert({
@@ -148,7 +149,7 @@ export function knowledgeService(db: Database, identity: KnowledgeIdentity) {
         await tx.$queryRaw`SELECT id FROM "knowledgeBase" WHERE id = ${knowledgeBase.id} FOR UPDATE`
         const current = await tx.knowledgeBase.findUniqueOrThrow({ where: { id: knowledgeBase.id } })
         const agents = await tx.agent.findMany({ where: { organizationId }, select: { id: true } })
-        if (!agents.some(agent => agent.id === agentId)) throw new HTTPException(404, { message: 'Agent not found.' })
+        if (!await tx.agent.findFirst({ where: { id: agentId, ...personalAgentScope(organizationId, userId) }, select: { id: true } })) throw new HTTPException(404, { message: 'Agent not found.' })
         const paused = new Set(current.enabled ? current.pausedAgentIds : agents.map(agent => agent.id))
         if (command === 'refresh') {
           if (paused.has(agentId)) throw new HTTPException(409, { message: 'Resume this agent before refreshing.' })

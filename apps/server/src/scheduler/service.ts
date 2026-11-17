@@ -27,7 +27,7 @@ export function schedulerService(db: Database, identity: ChatIdentity) {
       await authorize()
       const { agentIds, scheduledAt, requestId, ...content } = parseInput(eventInput, input)
       const create = async (source: Pick<Database, 'roomAgent' | 'schedulerEvent'>) => {
-        const assigned = await source.roomAgent.count({ where: { organizationId: scope.organizationId, roomId: scope.roomId, agentId: { in: agentIds } } })
+        const assigned = await source.roomAgent.count({ where: { organizationId: scope.organizationId, roomId: scope.roomId, agentId: { in: agentIds }, agent: { createdByUserId: identity.userId } } })
         if (assigned !== agentIds.length) throw new HTTPException(400, { message: 'Choose agents assigned to this room.' })
         return source.schedulerEvent.create({ data: { ...(requestId ? { id: requestId } : {}), ...scope, ...content, schedules: { create: {
           scheduledAt: new Date(scheduledAt), deliveries: { create: agentIds.map((agentId) => ({ organizationId: scope.organizationId, agentId, nextAttemptAt: new Date(scheduledAt) })) },

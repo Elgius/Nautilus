@@ -16,7 +16,7 @@ export function createPlannerReadSkill(identity: ChatIdentity, profile: PrivateA
     active.throwIfAborted()
     try {
       return await withDatabase(async (db) => {
-        if (!await db.roomAgent.findFirst({ where: { organizationId: identity.organizationId, roomId: identity.roomId, agentId: profile.id } })) {
+        if (!await db.roomAgent.findFirst({ where: { organizationId: identity.organizationId, roomId: identity.roomId, agentId: profile.id, agent: { createdByUserId: identity.userId } } })) {
           throw new HTTPException(403, { message: 'Agent assignment expired.' })
         }
         // Both services recheck live session and room membership on every read.

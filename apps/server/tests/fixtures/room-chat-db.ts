@@ -23,7 +23,12 @@ export function createDatabase() {
       executions.set(where.id, { ...executions.get(where.id), ...data }); return { count: 1 }
     } },
     session: { findFirst: async ({ where }: { where: { userId: string } }) => where.userId !== 'expired' && !(revoked && where.userId === 'bob') ? { id: 'session' } : null },
+    agent: {
+      findMany: async ({ where }: { where: { organizationId: string; createdByUserId: string } }) => where.organizationId === 'org' && ['alice', 'bob', 'hub-user'].includes(where.createdByUserId) ? [{ id: where.createdByUserId === 'alice' ? 'agent-1' : where.createdByUserId === 'bob' ? 'agent-bob' : 'agent-hub', name: 'Scout', role: 'Research' }] : [],
+      findFirst: async ({ where }: { where: { id: string; organizationId: string; createdByUserId: string } }) => where.organizationId === 'org' && ((where.id === 'agent-1' && where.createdByUserId === 'alice') || (where.id === 'agent-bob' && where.createdByUserId === 'bob') || (where.id === 'agent-hub' && where.createdByUserId === 'hub-user')) ? { id: where.id, name: 'Scout', role: 'Research', rules: ['Be concise'] } : null,
+    },
     roomAgent: {
+      createMany: async () => ({ count: 1 }),
       findMany: async ({ where }: { where: { organizationId: string; roomId: string } }) => where.organizationId === 'org' && where.roomId === 'room' ? [{ agent: { id: 'agent-1', name: 'Scout', role: 'Research' } }] : [],
       findFirst: async ({ where }: { where: { organizationId: string; roomId: string; agentId: string } }) => where.organizationId === 'org' && where.roomId === 'room' && where.agentId === 'agent-1' ? { agent: { id: 'agent-1', name: 'Scout', role: 'Research', rules: ['Be concise'] } } : null,
     },

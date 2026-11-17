@@ -10,6 +10,7 @@ import { HTTPException } from 'hono/http-exception'
 import { createAgentModel, createLLMAgent, parseAgentChat } from '../ai'
 import type { AppEnv } from '../index'
 import { generationTimeoutMs, hubIds, hubOwner, reserveTurn } from '../hub-history'
+import { personalAgentScope } from '../personal-agents'
 
 // Mounted behind the existing session, live membership, and origin checks.
 export const agentChat = new Hono<AppEnv>()
@@ -22,7 +23,7 @@ agentChat.post('/:agentId/chat', bodyLimit({ maxSize: 256 * 1024 }), async (c) =
   if (history && (!history.success || input.stream)) throw new HTTPException(400, { message: 'Invalid saved chat request.' })
   const owner = history?.success ? hubOwner(c) : undefined
   const profile = await c.get('db').agent.findFirst({
-    where: { id: c.req.param('agentId'), organizationId: c.get('organizationId') },
+    where: { id: c.req.param('agentId'), ...personalAgentScope(c.get('organizationId'), c.get('session').user.id) },
     select: { id: true, name: true, role: true, rules: true },
   })
   if (!profile) throw new HTTPException(404, { message: 'Agent not found.' })

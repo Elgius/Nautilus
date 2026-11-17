@@ -16,7 +16,7 @@ export function createRoomSkillBackend(env: Bindings, identity: ChatIdentity, ag
   return {
     authorize: () => withDatabase(async (db) => {
       if (!await canChat(db, identity) || !await scheduledTaskAvailable(db, identity) || !await db.roomAgent.findFirst({
-        where: { organizationId: identity.organizationId, roomId: identity.roomId, agentId }, select: { agentId: true },
+        where: { organizationId: identity.organizationId, roomId: identity.roomId, agentId, agent: { createdByUserId: identity.userId } }, select: { agentId: true },
       })) throw new HTTPException(403, { message: 'Room or agent access expired.' })
     }),
     list: (options = {}, signal) => withDatabase(async (db) => {

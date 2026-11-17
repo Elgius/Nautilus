@@ -12,7 +12,7 @@ function harness(found: boolean) {
   const app = new Hono<AppEnv>()
   app.use('*', async (c, next) => {
     c.set('organizationId', 'org-1')
-    c.set('session', { user: { id: 'user' }, session: { id: 'session' } } as AppEnv['Variables']['session'])
+    c.set('session', { user: { id: 'user-1' }, session: { id: 'session' } } as AppEnv['Variables']['session'])
     c.set('db', { agent: { findFirst: async (query: unknown) => {
       lookups.push(query)
       return found ? { id: 'agent-1', name: 'Scout', role: 'Research', rules: [] } : null
@@ -31,7 +31,7 @@ test('chat lookup scopes the agent to the current organization before resolving 
     body: JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }] }),
   }, {})
   expect(response.status).toBe(404)
-  expect(lookups[0]).toMatchObject({ where: { id: 'agent-1', organizationId: 'org-1' } })
+  expect(lookups[0]).toMatchObject({ where: { id: 'agent-1', organizationId: 'org-1', createdByUserId: 'user-1' } })
 })
 
 test('chat reports unavailable AI without breaking unrelated endpoints', async () => {

@@ -69,6 +69,18 @@ try {
   };
   window.addEventListener('room-document-save', blockSave);
   const agent = { id: 'scout', name: 'Scout', role: 'Research' };
+  await act(async () => { receive({ type: 'agent.history', jobs: [] }); });
+  assert.equal(socket.sent.filter((event) => event.type === 'agent.list').length, 0, 'Empty history keeps profile loading lazy');
+  const historicalJob = { id: 'historical', agentId: agent.id, agentName: agent.name, instruction: 'Earlier question', reply: 'Earlier reply', status: 'complete', revision: 1, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' };
+  await act(async () => { receive({ type: 'agent.history', jobs: [historicalJob] }); });
+  assert.equal(socket.sent.filter((event) => event.type === 'agent.list').length, 1, 'Restored conversations load profiles without opening the picker');
+  assert.equal(chat!.agentsLoading, true);
+  const appearance = { ...agent, color: 'teal', avatarIcon: 'cloud' };
+  await act(async () => { receive({ type: 'agent.list', agents: [appearance] }); });
+  assert.deepEqual(chat!.agents[0], appearance);
+  assert.equal(chat!.agentsLoading, false);
+  await act(async () => { receive({ type: 'agent.update', job: historicalJob }); });
+  assert.equal(socket.sent.filter((event) => event.type === 'agent.list').length, 1, 'Job updates reuse the requested profiles');
   await act(async () => { assert.equal(await chat!.invokeAgent(agent, 'Save a change'), false); });
   assert.equal(saves, 1);
   await act(async () => { assert.equal(await chat!.invokeAgent(agent, 'Read saved text', 'read'), true); });

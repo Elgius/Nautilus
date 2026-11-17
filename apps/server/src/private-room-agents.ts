@@ -6,6 +6,8 @@ import { parseSend, type ChatIdentity } from './room-chat-service'
 import { logPipeline, type PipelineStage } from './agent-pipeline'
 import { scheduleEarlierAlarm, scheduleRoomAlarm } from './room-alarm'
 import { avatarColors, type AvatarColor } from '../../../shared/agent-appearance'
+import { agentRunErrorMessage, type AgentOperationIssue } from '../../../shared/agent-errors'
+import { AgentRunError, SkillOperationError, errorDiagnostics } from './skill-operation-error'
 
 export type PrivateAgentProfile = RoomAgentOption & { rules: string[] }
 export type PrivateAgentMessage = { role: 'user' | 'assistant'; content: string }
@@ -23,6 +25,7 @@ export type AgentRunContext = {
   taskCommitted?: (commit: { taskId: string; revision: number }) => Promise<void>
   checkpoint: (id: string, value: unknown) => Promise<void>
   preview?: (toolCallId: string, input: string | null) => Promise<void>
+  issue?: (issue: AgentOperationIssue) => void
 }
 type Entry = { identity: ChatIdentity; id: string; mode?: AgentRunMode; token?: string; deadline?: number; cancelRequested?: boolean }
 type Dependencies = {
@@ -130,7 +133,7 @@ export class PrivateRoomAgents {
       if (!job) continue
       // Migrate interrupted pre-queue jobs without replaying their writes.
       if ((job.status === 'running' || job.status === 'queued') && !queue.some((entry) => this.key(entry.identity, entry.id) === key)) {
-        job.status = 'failed'; job.error = 'The agent was interrupted. Please retry.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+        job.status = 'failed'; job.errorCode = 'RUN_INTERRUPTED'; job.error = agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0); job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
         await this.storeJob(identity, job)
       }
       jobs.push(job)
@@ -153,7 +156,7 @@ export class PrivateRoomAgents {
     // Old clients and scheduled work retain the serialized writer path.
     const mode: AgentRunMode = scheduled ? 'write' : input.mode === 'read' ? 'read' : 'write'
     const profile = await this.deps.profile(identity, input.agentId)
-    if (!profile) throw new Error('Invalid agent selection. Choose an agent assigned to this room.')
+    if (!profile) throw new SkillOperationError('AGENT_ACCESS_DENIED', 'authorization', 'Choose an agent you created in this organization.', false, 403)
     const key = this.key(identity, id)
     const now = new Date().toISOString()
     let newlyAccepted = false
@@ -245,7 +248,7 @@ export class PrivateRoomAgents {
         return entry.identity
       }
       const job = await tx.get<PrivateAgentJob>(key)
-      if (job) { job.status = 'failed'; job.error = 'Cancelled before starting.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++; await this.putJob(tx, identity, job) }
+      if (job) { job.status = 'failed'; job.errorCode = 'RUN_CANCELLED'; job.error = agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0); job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++; await this.putJob(tx, identity, job) }
       await tx.put(QUEUE, queue.filter((item) => item !== entry))
       return entry.identity
     })
@@ -283,7 +286,7 @@ export class PrivateRoomAgents {
         if ((entry.deadline ?? 0) > Date.now()) {
           await scheduleRoomAlarm(this.deps.storage, entry.deadline! + 1000)
         } else {
-          job.status = 'failed'; job.error = 'The agent was interrupted. Please retry.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+          job.status = 'failed'; job.errorCode = 'RUN_INTERRUPTED'; job.error = agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0); job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
           await this.storeJob(entry.identity, job)
           await this.safeSend(entry.identity, job)
           await this.remove(entry)
@@ -300,7 +303,7 @@ export class PrivateRoomAgents {
       if (!job || job.status === 'failed' || job.status === 'complete') { await this.remove(entry); continue }
       const profile = await this.deps.profile(entry.identity, job.agentId)
       if (!profile || !await this.deps.canAccess(entry.identity)) {
-        job.status = 'failed'; job.error = 'Room or agent access expired.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+        job.status = 'failed'; job.errorCode = 'ACCESS_DENIED'; job.error = agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0); job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
         await this.storeJob(entry.identity, job); await this.safeSend(entry.identity, job); await this.remove(entry); continue
       }
       const claimed = await this.deps.storage.transaction(async (tx) => {
@@ -370,19 +373,19 @@ export class PrivateRoomAgents {
         if ((entry.deadline ?? 0) > Date.now()) {
           await scheduleRoomAlarm(this.deps.storage, entry.deadline! + 1000); return
         }
-        job.status = 'failed'; job.error = 'The agent was interrupted. Saved changes are preserved; review them before retrying.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+        job.status = 'failed'; job.errorCode = 'RUN_INTERRUPTED'; job.error = agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0); job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
         await this.storeJob(entry.identity, job)
         await this.deps.release(entry.identity, entry.token)
         await this.safeSend(entry.identity, job)
         await this.remove(entry); continue
       }
       if (!await this.deps.canAccess(entry.identity)) {
-        job.status = 'failed'; job.error = 'Room access expired.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+        job.status = 'failed'; job.errorCode = 'ACCESS_DENIED'; job.error = agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0); job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
         await this.storeJob(entry.identity, job); await this.safeSend(entry.identity, job); await this.remove(entry); continue
       }
       const profile = await this.deps.profile(entry.identity, job.agentId)
       if (!profile) {
-        job.status = 'failed'; job.error = 'This agent is no longer assigned to the room.'; job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
+        job.status = 'failed'; job.errorCode = 'AGENT_ACCESS_DENIED'; job.error = agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0); job.finishedAt = job.updatedAt = new Date().toISOString(); job.revision++
         await this.storeJob(entry.identity, job); await this.safeSend(entry.identity, job); await this.remove(entry); continue
       }
       const token = crypto.randomUUID()
@@ -463,6 +466,7 @@ export class PrivateRoomAgents {
     }
     const activities = new Map<string, AgentWorkActivity>()
     const colors = new Map<string, AvatarColor>()
+    const deadline = AbortSignal.timeout(RUN_MS - 5000)
     try {
       const current = (await this.deps.storage.get<Entry[]>(QUEUE) ?? []).find((item) => this.key(item.identity, item.id) === key)
       if (current?.cancelRequested) controller.abort()
@@ -472,19 +476,20 @@ export class PrivateRoomAgents {
       let budget = 32_000 - job.instruction.length
       const history = entry.identity.scheduledDeliveryId ? [] : await this.history(entry.identity)
       const preceding = history.slice(0, Math.max(0, history.findIndex((item) => item.id === job.id)))
-      for (const old of preceding.filter((item) => item.id !== job.id && item.agentId === profile.id && item.status === 'complete' && !item.knowledgeUnavailable && item.options?.conversationId === job.options?.conversationId && JSON.stringify(item.options?.knowledge ?? ['ORGANIZATION']) === JSON.stringify(job.options?.knowledge ?? ['ORGANIZATION'])).slice(-10).reverse()) {
-        if (old.instruction.length + old.reply.length > budget) break
-        // A response using prior answers also depends on the sources behind those answers.
+      for (const old of preceding.filter((item) => item.agentId === profile.id && (item.status === 'complete' || item.status === 'failed' && !!item.commits?.length) && !item.knowledgeUnavailable && item.options?.conversationId === job.options?.conversationId && JSON.stringify(item.options?.knowledge ?? ['ORGANIZATION']) === JSON.stringify(job.options?.knowledge ?? ['ORGANIZATION'])).slice(-10).reverse()) {
+        const reply = [old.reply, old.status === 'failed' ? `The previous attempt stopped after saving these versions. Re-read them before continuing: ${JSON.stringify(old.commits)}` : ''].filter(Boolean).join('\n')
+        if (old.instruction.length + reply.length > budget) break
         try { Object.assign(job, mergeHubProvenance(job, old.sources ?? [], old.knowledgeReferences ?? [])) }
-        catch { break } // Do not include history whose provenance cannot be retained.
-        messages.unshift({ role: 'user', content: old.instruction }, { role: 'assistant', content: old.reply })
-        budget -= old.instruction.length + old.reply.length
+        catch { break }
+        messages.unshift({ role: 'user', content: old.instruction }, { role: 'assistant', content: reply })
+        budget -= old.instruction.length + reply.length
       }
       await save(false)
-      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(RUN_MS)])
+      const signal = AbortSignal.any([controller.signal, deadline])
       signal.throwIfAborted()
       const context: AgentRunContext = {
         id: job.id, token: entry.mode === 'read' ? '' : entry.token!, mode: entry.mode ?? 'write', stage, agentId: profile.id, options: job.options,
+        issue: (issue) => { job.issues = [...(job.issues ?? []), issue].slice(-32) },
         tool: async (call) => {
           job.tools = [...(job.tools ?? []).filter((old) => old.id !== call.id), call].slice(-64)
           await save()
@@ -553,18 +558,26 @@ export class PrivateRoomAgents {
         const reply = job.reply + delta
         // DO values have a byte limit; Unicode prompts/replies can exceed it
         // well before reaching the character limit. Keep the last safe reply.
-        if (reply.length > 32_000 || new TextEncoder().encode(JSON.stringify({ ...job, reply, citations: buildHubCitations(reply, job.sources ?? []) })).byteLength > 110_000) throw new Error('Response too long')
+        if (reply.length > 32_000 || new TextEncoder().encode(JSON.stringify({ ...job, reply, citations: buildHubCitations(reply, job.sources ?? []) })).byteLength > 110_000) throw new AgentRunError('RESPONSE_TOO_LARGE')
         job.reply = reply
         if (Date.now() - lastSent >= 200) {
           publish(); lastSent = Date.now()
         }
       }
       signal.throwIfAborted()
-      if (!job.reply.trim() || !await this.deps.canAccess(entry.identity)) throw new Error('No response or access expired')
+      if (!job.reply.trim()) throw new AgentRunError('EMPTY_RESPONSE')
+      if (!await this.deps.canAccess(entry.identity)) throw new AgentRunError('ACCESS_DENIED')
       job.status = 'complete'; job.finishedAt = new Date().toISOString(); job.activities = []; await save(); controller.signal.throwIfAborted(); stage('complete')
-    } catch {
+    } catch (error) {
       for (const call of job.tools ?? []) if (call.status === 'running') { call.status = 'failed'; call.summary = 'Execution interrupted. Review saved results before retrying.' }
-      job.status = 'failed'; job.error = this.knowledgeUnavailable.has(key) ? 'Knowledge sources changed or access expired. Any saved changes are preserved.' : controller.signal.aborted ? 'Cancelled. Any saved changes are preserved.' : 'The agent could not complete this response. Please retry.'
+      job.errorCode = this.knowledgeUnavailable.has(key) ? 'ACCESS_DENIED' : controller.signal.aborted ? 'RUN_CANCELLED' : deadline.aborted ? 'RUN_TIMEOUT'
+        : error instanceof AgentRunError || error instanceof SkillOperationError ? error.code
+        : 'INTERNAL_ERROR'
+      job.status = 'failed'; job.error = agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0)
+      console.error('[agent-run]', JSON.stringify({ event: 'run.failed', timestamp: new Date().toISOString(),
+        roomId: entry.identity.roomId, runId: job.id, agentId: profile.id, errorCode: job.errorCode,
+        durationMs: Date.now() - started, timeoutMs: RUN_MS - 5000, savedBatches: job.commits?.length ?? 0,
+        savedVersions: job.commits ?? [], issueCount: job.issues?.length ?? 0, ...errorDiagnostics(error) }))
       job.finishedAt = new Date().toISOString(); job.activities = []
       await save(); stage('failed')
     } finally { controller.abort(); this.active.delete(key); this.knowledgeUnavailable.delete(key) }

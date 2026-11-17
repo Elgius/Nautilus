@@ -9,7 +9,8 @@ checks, or room write lease.
 Mounted at `/api/organizations/:organizationId/agent-hub`, behind authentication,
 live organization membership, origin checks and no-store responses:
 
-- `GET /rooms`: joined rooms and their assigned agents.
+- `GET /rooms`: joined rooms and agents created by the requesting user. First
+  invocation registers the selected personal agent with the room.
 - `GET /capabilities`: infrastructure availability.
 - `GET /rooms/:roomId/history`: the current user's last 50 runs, including tool
   status, source evidence, confirmations and committed document/task revisions.

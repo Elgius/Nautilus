@@ -138,7 +138,7 @@ test('private streaming reports provider stream errors without exposing their de
     { type: 'error', error: new Error('SECRET_PROVIDER_DETAILS') },
   ] }) } })
   const consume = async () => { for await (const _ of streamPrivateRoomAgent({} as Bindings, profile, [{ role: 'user', content: 'PRIVATE_PROMPT' }], new AbortController().signal, () => model)) { /* consume */ } }
-  await expect(consume()).rejects.toThrow('Agent stream failed')
+  await expect(consume()).rejects.toMatchObject({ code: 'MODEL_REQUEST_FAILED' })
 })
 
 test('private streaming executes skill calls through the interface before streaming the final reply', async () => {
@@ -170,4 +170,16 @@ test('private streaming executes skill calls through the interface before stream
   expect(chunks.join('')).toBe('Found the workbook.')
   expect(reads).toBe(1)
   expect(JSON.stringify(model.doStreamCalls[1].prompt)).toContain('sheet-1')
+})
+
+test('a provider request exceeding the application deadline reports RUN_TIMEOUT', async () => {
+  const model = new MockLanguageModelV4({ doStream: async ({ abortSignal }) => {
+    await new Promise<void>((_, reject) => {
+      if (abortSignal?.aborted) { reject(abortSignal.reason); return }
+      abortSignal?.addEventListener('abort', () => reject(abortSignal.reason), { once: true })
+    })
+    throw new Error('unreachable')
+  } })
+  const consume = async () => { for await (const _ of streamPrivateRoomAgent({} as Bindings, profile, [{ role: 'user', content: 'Write.' }], new AbortController().signal, () => model, [], { timeout: 20 })) { /* consume */ } }
+  await expect(consume()).rejects.toMatchObject({ code: 'RUN_TIMEOUT' })
 })

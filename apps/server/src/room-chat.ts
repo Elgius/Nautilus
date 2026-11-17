@@ -1,4 +1,7 @@
 import { authorizedHubHistory } from './agent-hub/knowledge'
+import { personalAgentScope, registerPersonalRoomAgent } from './personal-agents'
+import { SkillOperationError, errorDiagnostics } from './skill-operation-error'
+import { agentErrorMessages } from '../../../shared/agent-errors'
 import { archiveAgentRun } from './agent-activity'
 import { DurableObject } from 'cloudflare:workers'
 import { HTTPException } from 'hono/http-exception'
@@ -44,9 +47,7 @@ export class RoomChat extends DurableObject<Bindings> {
       filterHistory: (identity, jobs) => this.withDatabase((db) => authorizedHubHistory(db, identity, jobs)),
       archive: (identity, job) => this.withDatabase((db) => archiveAgentRun(db, identity, job)),
       profile: (identity, agentId) => this.withDatabase(async (db) => {
-        if (!await scheduledTaskAvailable(db, identity)) return null
-        const assignment = await db.roomAgent.findFirst({ where: { organizationId: identity.organizationId, roomId: identity.roomId, agentId }, select: { agent: { select: { ...agentAppearanceSelect, role: true, rules: true } } } })
-        return assignment?.agent ?? null
+        return registerPersonalRoomAgent(db, identity, agentId)
       }),
       canAccess: (identity) => this.withDatabase(async (db) => Boolean(await canChat(db, identity))),
       acquire: (identity, token) => this.withDatabase((db) => acquireRoomWork(db, identity, token)),
@@ -217,8 +218,8 @@ export class RoomChat extends DurableObject<Bindings> {
       if (count > 40) throw new Error('Too many events. Please wait a moment.')
       socket.serializeAttachment(state)
       if (input.type === 'agent.list') {
-        const assignments = await db.roomAgent.findMany({ where: { organizationId: state.identity.organizationId, roomId: state.identity.roomId }, orderBy: { position: 'asc' }, select: { agent: { select: { ...agentAppearanceSelect, role: true } } } })
-        this.send(socket, { type: 'agent.list', agents: assignments.map(({ agent }) => agent) })
+        const agents = await db.agent.findMany({ where: personalAgentScope(state.identity.organizationId, state.identity.userId), orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { ...agentAppearanceSelect, role: true } })
+        this.send(socket, { type: 'agent.list', agents })
       } else if (input.type === 'agent.history') {
         // Ignore all client-supplied owner/user IDs, including history requests.
         const jobs = await this.agentService.history(state.identity)
@@ -259,8 +260,16 @@ export class RoomChat extends DurableObject<Bindings> {
       } else if (input.type === 'ping') this.send(socket, { type: 'pong' })
       else throw new Error('Unknown chat event.')
     } catch (error) {
+      if (error instanceof SkillOperationError) {
+        console.error('[agent-request]', JSON.stringify({ roomId: (socket.deserializeAttachment() as Attachment).identity.roomId, runId: requestId,
+          errorCode: error.code, stage: error.stage, retryable: error.retryable, ...errorDiagnostics(error) }))
+        this.send(socket, { type: 'error', requestId, errorCode: error.code, error: agentErrorMessages[error.code] })
+        return
+      }
       const message = error instanceof Error && /^(Invalid|Enter|Too many|Unknown)/.test(error.message) ? error.message : 'Could not complete the chat request. Please retry.'
-      this.send(socket, { type: 'error', requestId, error: message })
+      const errorCode = message === 'Could not complete the chat request. Please retry.' ? 'INTERNAL_ERROR' : 'INVALID_REQUEST'
+      console.error('[agent-request]', JSON.stringify({ runId: requestId, errorCode, ...errorDiagnostics(error) }))
+      this.send(socket, { type: 'error', requestId, errorCode, error: message })
     } finally { await db.$disconnect() }
   }
   private async broadcast(db: Database, event: object) {

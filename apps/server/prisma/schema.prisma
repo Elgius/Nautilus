@@ -33,6 +33,7 @@ model User {
   accounts      Account[]
   members       Member[]
   invitations   Invitation[]
+  createdAgents Agent[]
   createdRooms  Room[]
   roomStars     RoomStar[]
   roomMessages  RoomMessage[]
@@ -186,6 +187,8 @@ model Agent {
   scheduledDeliveries SchedulerDelivery[]
   id             String       @id @default(uuid())
   organizationId String
+  createdByUserId String?
+  createdBy User? @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
   name           String       @db.VarChar(30)
   nameKey        String
   role           String       @db.VarChar(70)
@@ -204,6 +207,7 @@ model Agent {
   documentVersions DocumentVersion[]
 
   @@unique([organizationId, id])
+  @@index([organizationId, createdByUserId])
   @@unique([organizationId, nameKey])
   @@index([organizationId, createdAt])
   @@map("agent")
@@ -769,6 +773,8 @@ model AgentActivityRun {
   instruction String
   reply String
   error String?
+  errorCode String?
+  issues Json @default("[]")
   activities Json
   commits Json
   taskCommits Json

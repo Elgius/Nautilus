@@ -53,9 +53,10 @@ try {
   const hubCall = (identity, action, input = {}, destination = 'room') => mf.dispatchFetch(`https://api.test/agent-hub?room=${destination}`, {
     method: 'POST', body: JSON.stringify({ identity, action, input }),
   })
-  const hubInput = { requestId: hubId, agentId: 'agent-1', instruction: 'Hub private request', conversationId: hubConversation, knowledge: ['ORGANIZATION'], reasoning: 'high' }
+  const hubInput = { requestId: hubId, agentId: 'agent-hub', instruction: 'Hub private request', conversationId: hubConversation, knowledge: ['ORGANIZATION'], reasoning: 'high' }
   assert.equal((await hubCall(hubIdentity, 'invoke', hubInput, 'other')).status, 403)
   assert.equal((await hubCall({ ...hubIdentity, userId: 'outsider' }, 'invoke', hubInput)).status, 403)
+  assert.equal((await hubCall(hubIdentity, 'invoke', { ...hubInput, agentId: 'agent-1' })).status, 409, 'Hub cannot invoke another member’s personal agent')
   assert.equal((await hubCall(hubIdentity, 'invoke', hubInput)).status, 202)
   const hubDeadline = Date.now() + 5000
   let hubJob
@@ -163,8 +164,10 @@ try {
   assert.equal((await receive(alice, 'agent.update')).job.id, privateId)
   assert.equal((await (await mf.dispatchFetch('https://api.test/agent-calls')).json()).calls, hubCallsBeforeRetry + 1)
   send(other, { type: 'agent.invoke', requestId: crypto.randomUUID(), agentId: 'agent-1', instruction: 'not assigned' })
-  assert.match((await receive(other, 'error')).error, /Invalid agent selection/)
-  send(bob, { type: 'agent.invoke', requestId: privateId, agentId: 'agent-1', instruction: 'BOB_PRIVATE_INSTRUCTION' })
+  assert.equal((await receive(other, 'error')).errorCode, 'AGENT_ACCESS_DENIED')
+  send(bob, { type: 'agent.invoke', requestId: crypto.randomUUID(), agentId: 'agent-1', instruction: 'Try Alice agent' })
+  assert.equal((await receive(bob, 'error')).errorCode, 'AGENT_ACCESS_DENIED')
+  send(bob, { type: 'agent.invoke', requestId: privateId, agentId: 'agent-bob', instruction: 'BOB_PRIVATE_INSTRUCTION' })
   let bobResult
   do { bobResult = await receive(bob, 'agent.update') } while (bobResult.job.status !== 'complete')
   assert.equal(bobResult.job.instruction, 'BOB_PRIVATE_INSTRUCTION')
@@ -209,7 +212,7 @@ try {
   send(alice, { type: 'agent.cancel', jobId: cancelledId })
   do { cancelled = await receive(alice, 'agent.update') } while (cancelled.job.id !== cancelledId || cancelled.job.status !== 'failed')
   const readExecution = async () => (await (await mf.dispatchFetch('https://api.test/scheduler-results')).json())[cancelledId]
-  assert.deepEqual(await readExecution(), { executionState: 'failed', result: '', executionError: 'Cancelled before starting.' })
+  assert.deepEqual(await readExecution(), { executionState: 'failed', result: '', executionError: 'Cancelled.' })
   const refreshed = await connect('alice')
   send(refreshed, { type: 'agent.history' })
   assert.equal((await receive(refreshed, 'agent.history')).jobs.find((job) => job.id === cancelledId).status, 'failed')
@@ -222,7 +225,7 @@ try {
   send(alice, { type: 'agent.invoke', requestId: slowId, agentId: 'agent-1', instruction: 'Slow write' })
   let slow
   do { slow = await receive(alice, 'agent.update') } while (slow.job.id !== slowId || slow.job.status !== 'running')
-  send(bob, { type: 'agent.invoke', requestId: askId, agentId: 'agent-1', instruction: 'Read beside writer', mode: 'read' })
+  send(bob, { type: 'agent.invoke', requestId: askId, agentId: 'agent-bob', instruction: 'Read beside writer', mode: 'read' })
   let answer
   do { answer = await receive(bob, 'agent.update') } while (answer.job.id !== askId || answer.job.status !== 'complete')
   assert.equal(answer.job.mode, 'read')

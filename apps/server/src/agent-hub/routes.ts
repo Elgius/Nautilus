@@ -8,13 +8,19 @@ import { agentAppearanceSelect } from '../agents'
 import { officeConfigured } from '../office-service'
 import { storageConfigured } from '../storage'
 import { runInput } from './contracts'
+import { personalAgentScope } from '../personal-agents'
 
 export const agentHub = new Hono<AppEnv>()
 agentHub.use('*', bodyLimit({ maxSize: 256 * 1024 }))
-agentHub.get('/rooms', async (c) => c.json({ rooms: await c.get('db').room.findMany({
-  where: { organizationId: c.get('organizationId'), members: { some: { member: { organizationId: c.get('organizationId'), userId: c.get('session').user.id } } } },
-  select: { id: true, name: true, agents: { orderBy: { position: 'asc' }, select: { agent: { select: { ...agentAppearanceSelect, role: true } } } } }, orderBy: { name: 'asc' },
-}) }))
+agentHub.get('/rooms', async (c) => {
+  const db = c.get('db'), organizationId = c.get('organizationId'), userId = c.get('session').user.id
+  const [rooms, agents] = await Promise.all([
+    db.room.findMany({ where: { organizationId, members: { some: { member: { organizationId, userId } } } }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
+    db.agent.findMany({ where: personalAgentScope(organizationId, userId), select: { ...agentAppearanceSelect, role: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }),
+  ])
+  // Invocation registers the user's agent with the selected room on first use.
+  return c.json({ rooms: rooms.map((room) => ({ ...room, agents: agents.map((agent) => ({ agent })) })) })
+})
 agentHub.get('/capabilities', (c) => c.json({ documents: storageConfigured(c.env) && officeConfigured(c.env), knowledge: true, kanban: true, calendar: true, scheduling: true,
   execution: !!c.env.ROOM_CHAT, localAttachments: false }))
 agentHub.all('/rooms/:roomId/*', async (c) => {

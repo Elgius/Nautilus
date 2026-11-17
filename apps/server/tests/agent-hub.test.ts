@@ -17,18 +17,30 @@ const identity = { organizationId: 'org', roomId, userId: 'user', sessionId: 'se
 function routeHarness() {
   let allowed = true
   const forwarded: Record<string, unknown>[] = []
+  const queries: { kind: string; query: unknown }[] = []
   const app = new Hono<AppEnv>()
   app.use('*', async (c, next) => {
     c.set('organizationId', 'org')
     c.set('session', { user: { id: 'user', name: 'Alice' }, session: { id: 'session' } } as AppEnv['Variables']['session'])
-    c.set('db', { session: { findFirst: async () => allowed ? { id: 'session' } : null }, roomMember: { findFirst: async () => allowed ? { organizationMemberId: 'member' } : null } } as unknown as Database)
+    c.set('db', { session: { findFirst: async () => allowed ? { id: 'session' } : null }, roomMember: { findFirst: async () => allowed ? { organizationMemberId: 'member' } : null },
+      room: { findMany: async (query: unknown) => { queries.push({ kind: 'rooms', query }); return [{ id: roomId, name: 'Design' }] } },
+      agent: { findMany: async (query: unknown) => { queries.push({ kind: 'agents', query }); return [{ id: 'new-personal-agent', name: 'Scout', role: 'Research' }] } },
+    } as unknown as Database)
     await next()
   })
   app.route('/', agentHub)
   app.onError((e, c) => c.json({ error: e.message }, e instanceof HTTPException ? e.status : 500))
   const env = { ROOM_CHAT: { idFromName: (key: string) => key, get: () => ({ fetch: async (req: Request) => { forwarded.push(await req.json()); return Response.json({ accepted: true }, { status: 202 }) } }) } }
-  return { app, forwarded, env, revoke: () => { allowed = false } }
+  return { app, forwarded, env, queries, revoke: () => { allowed = false } }
 }
+
+test('Hub room selection offers the requesting user’s agents before their first room registration', async () => {
+  const h = routeHarness(), response = await h.app.request('/rooms', {}, h.env)
+  expect(response.status).toBe(200)
+  expect(await response.json()).toMatchObject({ rooms: [{ id: roomId, agents: [{ agent: { id: 'new-personal-agent' } }] }] })
+  expect(h.queries.find((entry) => entry.kind === 'agents')?.query).toMatchObject({ where: { organizationId: 'org', createdByUserId: 'user' } })
+  expect(h.queries.find((entry) => entry.kind === 'rooms')?.query).toMatchObject({ where: { organizationId: 'org', members: { some: { member: { organizationId: 'org', userId: 'user' } } } } })
+})
 
 test('Hub derives execution identity server-side and rejects user or tool overrides', async () => {
   const h = routeHarness()

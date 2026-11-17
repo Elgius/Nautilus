@@ -30,7 +30,7 @@ export function progressService(db: Database, identity: ChatIdentity, actor: Act
   const scope = { ...room, userId: identity.userId, agentId: actor.agentId }
   async function authorize(source = db) {
     if (!await canChat(source, identity) || !await scheduledTaskAvailable(source, identity) ||
-      !await source.roomAgent.findFirst({ where: { ...room, agentId: actor.agentId }, select: { agentId: true } })) {
+      !await source.roomAgent.findFirst({ where: { ...room, agentId: actor.agentId, agent: { createdByUserId: identity.userId } }, select: { agentId: true } })) {
       throw new HTTPException(403, { message: 'Room or agent access expired.' })
     }
   }

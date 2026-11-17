@@ -241,7 +241,8 @@
 .room-composer:focus-within {
   border-color: var(--ring);
 }
-.room-composer textarea {
+.room-chat-editor { width: 100%; min-width: 0; }
+.room-composer .room-chat-editable {
   width: 100%;
   min-height: 88px;
   max-height: 200px;
@@ -1191,26 +1192,27 @@
 .room-private-conversation-content { display: grid; gap: 12px; padding-top: 12px; min-width: 0; }
 .room-private-turn { min-width: 0; padding-top: 10px; border-top: 1px solid var(--border); }
 .room-private-turn-heading > span, .room-private-status { font-size: 11px; color: var(--muted-foreground); }
-.room-private-instruction, .room-private-reply { margin: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
-.room-private-reply { white-space: normal; min-width: 0; }
-.room-private-reply > :first-child { margin-top: 0; }
-.room-private-reply > :last-child { margin-bottom: 0; }
-.room-private-reply p, .room-private-reply ul, .room-private-reply ol, .room-private-reply blockquote, .room-private-reply pre, .room-private-table { margin: 8px 0; }
-.room-private-reply :is(h1, h2, h3, h4, h5, h6) { margin: 12px 0 6px; font-size: 14px; font-weight: 650; line-height: 1.4; }
-.room-private-reply ul { list-style: disc; padding-left: 20px; }
-.room-private-reply ol { list-style: decimal; padding-left: 20px; }
-.room-private-reply li + li { margin-top: 4px; }
-.room-private-reply li > p { margin: 4px 0; }
-.room-private-reply a { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
-.room-private-reply blockquote { border-left: 2px solid var(--border); padding-left: 10px; color: var(--muted-foreground); }
-.room-private-reply code { border-radius: 4px; background: var(--muted); padding: 1px 4px; font-size: 12px; }
-.room-private-reply pre { max-width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; padding: 10px; background: var(--muted); white-space: pre; overflow-wrap: normal; }
-.room-private-reply pre code { padding: 0; background: transparent; }
+.room-private-instruction, .room-message-text { margin: 8px 0; white-space: normal; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
+.room-message-text { min-width: 0; margin: 0; }
+.room-message-text p { white-space: pre-wrap; }
+.room-message-text > :first-child { margin-top: 0; }
+.room-message-text > :last-child { margin-bottom: 0; }
+.room-message-text p, .room-message-text ul, .room-message-text ol, .room-message-text blockquote, .room-message-text pre, .room-private-table { margin: 8px 0; }
+.room-message-text :is(h1, h2, h3, h4, h5, h6) { margin: 12px 0 6px; font-size: 14px; font-weight: 650; line-height: 1.4; }
+.room-message-text ul { list-style: disc; padding-left: 20px; }
+.room-message-text ol { list-style: decimal; padding-left: 20px; }
+.room-message-text li + li { margin-top: 4px; }
+.room-message-text li > p { margin: 4px 0; }
+.room-message-text a { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+.room-message-text blockquote { border-left: 2px solid var(--border); padding-left: 10px; color: var(--muted-foreground); }
+.room-message-text code { border-radius: 4px; background: var(--muted); padding: 1px 4px; font-size: 12px; }
+.room-message-text pre { max-width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; padding: 10px; background: var(--muted); white-space: pre; overflow-wrap: normal; }
+.room-message-text pre code { padding: 0; background: transparent; }
 .room-private-table { max-width: 100%; overflow-x: auto; }
 .room-private-table table { border-collapse: collapse; font-size: 12px; }
 .room-private-table th, .room-private-table td { border: 1px solid var(--border); padding: 5px 8px; text-align: left; }
 .room-private-table th { background: var(--muted); font-weight: 600; }
-.room-private-reply hr { margin: 12px 0; border-color: var(--border); }
+.room-message-text hr { margin: 12px 0; border-color: var(--border); }
 .room-private-instruction { color: var(--muted-foreground); }
 
 .room-agent-work { flex-shrink: 0; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--muted); font-size: 12px; }
@@ -1262,4 +1264,14 @@
 /* Unconfirmed messages keep a translucent fill until the server acknowledges them. */
 .room-message[data-delivery] .room-message-body > [data-variant="muted"] > [data-slot="bubble-content"] {
   background: color-mix(in srgb, color-mix(in srgb, var(--primary) 9%, var(--card)) 55%, transparent);
+}
+
+.room-chat-editable { white-space: pre-wrap; overflow-y: auto; overflow-wrap: anywhere; }
+.room-chat-editable p { margin: 0; }
+.room-chat-editable ul { list-style: disc; padding-left: 22px; }
+.room-chat-editable ol { list-style: decimal; padding-left: 22px; }
+.room-chat-editable li { margin: 0; }
+.room-chat-editable ul, .room-chat-editable ol { margin: 4px 0; }
+.room-chat-editable[data-empty="true"]::before {
+  content: attr(aria-placeholder); float: left; height: 0; pointer-events: none; color: var(--muted-foreground);
 }

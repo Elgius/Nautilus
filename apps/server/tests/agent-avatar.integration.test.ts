@@ -10,11 +10,13 @@ import type { Database } from '../src/db'
 test.skipIf(!process.env.TEST_AVATAR_DATABASE_URL)('generated avatar survives create, reload, profile edits, and preset reset in Neon', async () => {
   const db = createDatabase(process.env.TEST_AVATAR_DATABASE_URL!)
   const organizationId = crypto.randomUUID()
+  const userId = crypto.randomUUID()
   const avatarDesign: AvatarDesign = { bodyPath: 'M 10 10 L 90 10 L 50 90 Z', color: '#ffb500', eyes: [{ cx: 38, cy: 40, rx: 5, ry: 7 }, { cx: 64, cy: 40, rx: 5, ry: 7 }] }
   try {
+    await db.user.create({ data: { id: userId, name: 'Avatar test', email: `${userId}@example.test` } })
     await db.organization.create({ data: { id: organizationId, name: 'Avatar persistence test', slug: `avatar-${organizationId}` } })
     const input = parseAgentCreation({ name: 'Pencil', color: 'amber', avatarIcon: 'triangle', avatarDesign, description: 'Help with writing.' })
-    const created = await saveCreatedAgent(db as unknown as Database, organizationId, input, { purpose: 'Writing', rules: ['Be concise.'] })
+    const created = await saveCreatedAgent(db as unknown as Database, organizationId, input, { purpose: 'Writing', rules: ['Be concise.'] }, userId)
     const where = { id: created.id, organizationId }
     const loaded = await db.agent.findUniqueOrThrow({ where, select: agentSelect })
     expect(loaded.avatarDesign).toEqual(avatarDesign)
@@ -28,6 +30,7 @@ test.skipIf(!process.env.TEST_AVATAR_DATABASE_URL)('generated avatar survives cr
     expect(reset.avatarIcon).toBe('cloud')
   } finally {
     await db.organization.deleteMany({ where: { id: organizationId } })
+    await db.user.deleteMany({ where: { id: userId } })
     await db.$disconnect()
   }
 }, 30_000)

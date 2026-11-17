@@ -7,6 +7,20 @@ Room agents access these functions through the registered tools in
 `applyDocumentEdits`. The host supplies saved content; model arguments never
 contain complete snapshots or authorization identities.
 
+When the user names a saved document, call the host's `resolveDocument` tool with
+that title, then read the returned document ID. It searches all title-match pages,
+prefers an exact title, and returns deterministic missing or ambiguous errors.
+Do not guess from earlier document references or ask the user to provide an ID
+before trying lookup. A later user correction of the document name updates the
+target for their earlier task.
+
+Plan a coherent section or small worksheet before writing. Batch related titles,
+headings, prose, questions and tables into one atomic call where possible; every
+call performs a separate independent review. Later offsets refer to earlier edits
+in the same batch. Re-read after a successful save. A rejected review does not
+invalidate the read, but an unchanged rejected edit cannot be retried. Do not
+split an unchanged rejected scope into smaller writes to bypass review.
+
 `getDocumentCapabilities` reports native operations and pending features for the
 saved document. It does not count as reading its contents before editing.
 `readDocument` also returns stable table IDs and table properties; `readTable`

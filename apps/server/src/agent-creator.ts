@@ -71,7 +71,7 @@ export async function generateAgentInstructions(description: string, model: Lang
   }
 }
 
-export async function saveCreatedAgent(db: Database, organizationId: string, input: AgentCreation, instructions: AgentInstructions) {
+export async function saveCreatedAgent(db: Database, organizationId: string, input: AgentCreation, instructions: AgentInstructions, createdByUserId: string) {
   const profile = parseAgentProfile({ ...input, role: instructions.purpose, rules: instructions.rules })
-  return db.agent.create({ data: { ...agentProfileData(profile), organizationId }, select: agentSelect })
+  return db.agent.create({ data: { ...agentProfileData(profile), organizationId, createdByUserId }, select: agentSelect })
 }

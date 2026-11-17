@@ -1,4 +1,5 @@
 import type { AgentAppearance } from './agent-appearance';
+import type { AgentErrorCode, AgentOperationIssue } from './agent-errors';
 
 export type ChatUser = { id: string; name: string };
 export type AgentWorkActivity = {
@@ -20,7 +21,7 @@ export type ChatServerEvent<Message> = PrivateAgentEvent
   | { type: 'presence'; users: ChatUser[] }
   | { type: 'typing'; userId: string; name: string; expiresAt: number }
   | { type: 'read'; userId: string; readAt: string }
-  | { type: 'error'; requestId?: string; error: string };
+  | { type: 'error'; requestId?: string; error: string; errorCode?: AgentErrorCode };
 
 export type RoomAgentOption = AgentAppearance & { id: string; name: string; role: string };
 export type HubSource = {
@@ -45,6 +46,8 @@ export type PrivateAgentJob = {
   reply: string;
   status: 'queued' | 'running' | 'complete' | 'failed';
   error?: string;
+  errorCode?: AgentErrorCode;
+  issues?: AgentOperationIssue[];
   createdAt: string;
   updatedAt: string;
   revision: number;
