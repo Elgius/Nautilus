@@ -30,6 +30,25 @@ test('review distinguishes requested new factual content and returns a safe reas
   await expect(reviewDocumentEdit(model('invalid'), messages, edit, new AbortController().signal)).rejects.toMatchObject({ code: 'REVIEW_UNAVAILABLE', retryable: true })
 })
 
+test('review instructions cover heading formatting after the requested section has been saved', async () => {
+  const reviewer = model('{"approved":true,"reason":null}')
+  const candidate: EditReview = {
+    documentId: 'doc', expectedVersionId: 'v5', kind: 'DOCUMENT', changeSummary: 'Style the Pacific Ocean heading',
+    edits: [{ type: 'formatParagraph', paragraphId: 'pacific-heading', style: { namedStyleType: 4 } }],
+    reads: [{ documentId: 'doc', currentVersionId: 'v5', kind: 'DOCUMENT', reads: [{ operation: 'readDocument', args: {}, result: {
+      body: {
+        dataStream: 'Pacific Ocean\rThe Pacific is the largest ocean.\r\n',
+        paragraphs: [{ paragraphId: 'pacific-heading', startIndex: 13, paragraphStyle: {} }],
+      },
+    } }] }],
+  }
+  await reviewDocumentEdit(reviewer, [{ role: 'user', content: 'Add a Pacific Ocean section and paragraph.' }], candidate, new AbortController().signal)
+  const { prompt } = reviewer.doGenerateCalls[0]
+  expect(prompt[0].content).toContain('a separate formatting-only batch after the section has been saved')
+  expect(prompt[0].content).toContain('the read of the current version')
+  expect(JSON.stringify(prompt)).toContain('pacific-heading')
+})
+
 test('rejection and malformed review output fail closed', async () => {
   for (const response of ['{"approved":false,"reason":"insufficient_context"}', 'not json', '{"approved":"true"}']) {
     await expect(reviewDocumentEdit(model(response), messages, edit, new AbortController().signal)).rejects.toThrow('could not be verified')
