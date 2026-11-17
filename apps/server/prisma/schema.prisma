@@ -16,6 +16,7 @@ datasource db {
 }
 
 model User {
+  activityRuns AgentActivityRun[]
   knowledgeBases KnowledgeBase[]
   knowledgeSources KnowledgeSource[]
   agentProgress AgentProgress[]
@@ -250,6 +251,7 @@ enum DocumentStatus {
 }
 
 model Room {
+  activityRuns AgentActivityRun[]
   agentProgress AgentProgress[]
   tasks PlannerTask[]
   scheduledEvents SchedulerEvent[]
@@ -703,4 +705,34 @@ model KnowledgeRun {
   @@index([status, nextAttemptAt])
   @@index([sourceId, createdAt])
   @@map("knowledgeRun")
+}
+
+// Owner-private run archive, independent of the room chat's rolling history.
+model AgentActivityRun {
+  organizationId String
+  roomId String
+  userId String
+  id String
+  agentId String
+  agentName String
+  title String @db.VarChar(200)
+  status String
+  source String
+  revision Int
+  instruction String
+  reply String
+  error String?
+  activities Json
+  commits Json
+  taskCommits Json
+  createdAt DateTime
+  updatedAt DateTime
+  startedAt DateTime?
+  finishedAt DateTime?
+  room Room @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Cascade, map: "agentActivityRun_room_fkey")
+  owner User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([organizationId, roomId, userId, id])
+  @@index([organizationId, userId, createdAt, id, roomId])
+  @@index([organizationId, userId, status, createdAt])
+  @@map("agentActivityRun")
 }

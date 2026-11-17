@@ -17,6 +17,10 @@ const server=http.createServer(async(req,res)=>{
  const url=new URL(req.url,'http://localhost'); counts[url.pathname]=(counts[url.pathname]||0)+1;
  const send=(data,status=200)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));};
  if(url.pathname==='/api/me'){const organization={id:org,name:org==='org-a'?'Test workspace':'Other workspace',slug:org};return send({user:{id:'user',name:'Test User',email:'test@example.com',emailVerified:true,platformRole:'user'},memberships:[{organizationId:org,role:'owner',organization}],activeOrganization:organization,needsOrganizationSelection:false});}
+ if(url.pathname.endsWith('/knowledge'))return send({base:{id:'base',enabled:true,nextRefreshAt:'2026-11-18T00:00:00Z',lastCheckedAt:null},agent:{name:'Knowledge',refreshHours:6},sources:[],nextCursor:null});
+ if(url.pathname.endsWith('/activity/sync'))return send({nextCursor:null});
+ if(url.pathname.endsWith('/activity/room-1/run-1'))return send({instruction:'Prepare the launch plan',reply:'Plan saved successfully.',error:null,documents:[{documentId:'doc-1',versionId:'v1',versionNumber:1,title:'Launch plan',available:true}],tasks:[]});
+ if(url.pathname.endsWith('/activity'))return send({runs:url.searchParams.get('status')==='failed'?[]:[{id:'run-1',roomId:'room-1',roomName:'Launch room',agentId:'scout',agentName:'Scout',title:'Prepare the launch plan',status:'complete',source:'manual',createdAt:'2026-11-17T00:00:00Z',updatedAt:'2026-11-17T00:01:00Z',startedAt:null,finishedAt:null,activities:[],documentCount:1,taskCount:0}],active:[],nextCursor:null,rooms:[{id:'room-1',name:'Launch room'}],agents:[{id:'scout',name:'Scout'}]});
  if(url.pathname.endsWith('/rooms')){
   if(req.method==='POST'){let body='';for await(const c of req)body+=c;const data=JSON.parse(body);const saved=room('created',data.name);created.push(saved);return send({room:saved});}
   if(blockRooms) await roomsReady;return send({rooms:[room(),...created]});
@@ -58,6 +62,18 @@ const server=http.createServer(async(req,res)=>{
   const shell=async()=>assert.ok(await page.evaluate(()=>window.savedShell===document.querySelector('.workspace-shell')),'workspace shell was replaced');
   async function nav(label,heading){await page.getByRole('link',{name:label,exact:true}).click();if(heading)await page.getByRole('heading',{name:heading,exact:true}).waitFor();await shell();}
   await nav('Activity','Workspace timeline');
+  await page.getByRole('button',{name:/Prepare the launch plan/}).click();
+  await page.getByText('Plan saved successfully.',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('link',{name:'Launch plan',exact:true}).getAttribute('href'),'/room-id=room-1?document=doc-1');
+  await page.getByLabel('Filter by status').selectOption('failed');
+  await page.getByRole('heading',{name:'No matching requests'}).waitFor();
+  await page.getByRole('button',{name:'Clear filters'}).click();
+  await page.getByRole('button',{name:/Prepare the launch plan/}).waitFor();
+  await page.screenshot({path:'/tmp/nautilus-activity-desktop.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'Activity overflows mobile viewport');
+  await page.screenshot({path:'/tmp/nautilus-activity-mobile.png',fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
   await nav('Documents','Your room documents');
   await page.getByRole('heading',{name:'org-a Document 0',exact:true}).waitFor();
   assert.equal(await page.locator('.document-card').count(),50);
@@ -82,13 +98,13 @@ const server=http.createServer(async(req,res)=>{
   assert.equal(counts['/api/organizations/org-a/rooms'],1);
   // Create while the original summary request is still pending: its late response must not erase the mutation.
   await nav('Knowledge','Good work starts with good context.');
-  await page.getByRole('button',{name:'Create a room with a brief',exact:true}).click();
+  await page.getByRole('button',{name:'Create room',exact:true}).last().click();
   await page.getByLabel('Room name').fill('New launch room');
   await page.getByRole('button',{name:'Create room',exact:true}).last().click();
   await page.getByText('New launch room',{exact:true}).first().waitFor();
   blockRooms=false;releaseRooms();
   await page.getByText('Launch room',{exact:true}).first().waitFor();
-  await nav('Activity','Workspace timeline');await page.getByText('New launch room',{exact:true}).waitFor();
+  await nav('Activity','Workspace timeline');await page.getByRole('button',{name:/Prepare the launch plan/}).waitFor();assert.equal(await page.getByText('You created',{exact:true}).count(),0);
   await nav('Rooms');await page.getByText('New launch room',{exact:true}).first().waitFor();
   await nav('Documents','Your room documents');
   failDocuments=true;await page.getByLabel('Search documents').fill('failure');

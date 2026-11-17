@@ -74,6 +74,7 @@ import dynamic from "next/dynamic";
 import { useWorkspaceData } from "@/lib/workspace-data";
 import { ViewBoundary, ViewLoading } from "./view-boundary";
 
+const AgentActivity = dynamic(() => import("./agent-activity").then((module) => module.AgentActivity), { loading: ViewLoading });
 const KnowledgeBase = dynamic(() => import("@/components/knowledge/knowledge-base").then((module) => module.KnowledgeBase), { loading: ViewLoading });
 const loadDocuments = () => import("./room-document-library");
 const loadPlanner = () => import("./planner");
@@ -343,7 +344,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
               <strong>{view}</strong>
             </div>
             <div className="topbar-actions">
-              <span className="demo-label">Sample content</span>
+              {view !== "Activity" && <span className="demo-label">Sample content</span>}
               <Button variant="ghost" size="sm"
                 className="notification-button"
                 aria-label="View notifications"
@@ -382,7 +383,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
                           : view === "Knowledge"
                             ? "Shared context. Smarter teamwork."
                             : view === "Activity"
-                              ? "Keep a pulse on your workspace."
+                              ? "Your agents’ work, in one place."
                               : "Make this space your own."}
                   </h1>
                   <p>
@@ -395,7 +396,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
                           : view === "Knowledge"
                             ? "Give your agents the context they need to do their best work."
                             : view === "Activity"
-                              ? "The latest updates from your people and agents."
+                              ? "Follow your requests from start to finish, across every room."
                               : "Manage the basics for your team’s home in Agents hub."}
                   </p>
                 </div>
@@ -817,24 +818,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
                 </p>
               </section>
             )}
-            {view === "Activity" && (
-              <section className="full-panel">
-                <div className="section-heading">
-                  <h2>Workspace timeline</h2>
-                  <Badge variant="outline">
-                    Sample activity + this session
-                  </Badge>
-                </div>
-                <ActivityFeed
-                  events={events}
-                  onOpen={(name) => {
-                    const room = rooms.find((item) => item.name === name);
-                    if (room) openRoom(room);
-                    else navigate("Agents");
-                  }}
-                />
-              </section>
-            )}
+            {view === "Activity" && <ViewBoundary><AgentActivity key={`${session.activeOrganization!.id}:${session.user.id}`} organizationId={session.activeOrganization!.id} userId={session.user.id} /></ViewBoundary>}
             {view === "Knowledge" && <ViewBoundary><KnowledgeBase key={session.activeOrganization!.id} organizationId={session.activeOrganization!.id} /></ViewBoundary>}
             {view === "Settings" && (
               <>
@@ -877,7 +861,7 @@ export function Workspace({ children }: { children?: ReactNode }) {
                 Power to do.
               </span>
               <span>
-                <span className="status-dot" /> Frontend preview
+                <span className="status-dot" /> {view === "Activity" ? "Personal activity" : "Frontend preview"}
               </span>
             </footer>
           </main>

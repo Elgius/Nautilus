@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests",
+    "test:activity": "bun tests/agent-activity.ui.tsx",
     "test:knowledge": "bun tests/knowledge.ui.tsx",
     "test:document-selection": "bun tests/document-selection.browser.mjs",
     "test:room-composer": "bun tests/room-chat-composer.ui.tsx",
