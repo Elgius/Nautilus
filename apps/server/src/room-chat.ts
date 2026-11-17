@@ -1,3 +1,4 @@
+import { archiveAgentRun } from './agent-activity'
 import { DurableObject } from 'cloudflare:workers'
 import { HTTPException } from 'hono/http-exception'
 import type { Bindings } from './env'
@@ -38,6 +39,7 @@ export class RoomChat extends DurableObject<Bindings> {
   private get agentService() {
     return this.privateAgents ??= new PrivateRoomAgents({
       storage: this.ctx.storage,
+      archive: (identity, job) => this.withDatabase((db) => archiveAgentRun(db, identity, job)),
       profile: (identity, agentId) => this.withDatabase(async (db) => {
         if (!await scheduledTaskAvailable(db, identity)) return null
         const assignment = await db.roomAgent.findFirst({ where: { organizationId: identity.organizationId, roomId: identity.roomId, agentId }, select: { agent: { select: { ...agentAppearanceSelect, role: true, rules: true } } } })
@@ -114,6 +116,13 @@ export class RoomChat extends DurableObject<Bindings> {
         await this.agentService.cancel({ ...identity, scheduledDeliveryId: deliveryId }, deliveryId)
         return Response.json({ cancelled: true })
       })
+    }
+    if (url.pathname === '/activity-history' && request.method === 'POST') {
+      const identity = await request.json<ChatIdentity>()
+      const expectedId = this.env.ROOM_CHAT?.idFromName(JSON.stringify([identity.organizationId, identity.roomId]))
+      if (!expectedId || !this.ctx.id.equals(expectedId) || !await this.withDatabase((db) => canChat(db, identity))) return new Response('Forbidden', { status: 403 })
+      const synced = await this.agentService.archiveHistory(identity)
+      return Response.json({ synced }, { status: synced ? 200 : 503 })
     }
     if (url.pathname === '/work' && request.method === 'GET') {
       return Response.json(await this.agentService.activity(), { headers: { 'Cache-Control': 'no-store' } })

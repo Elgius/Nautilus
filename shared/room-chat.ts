@@ -34,6 +34,10 @@ export type PrivateAgentJob = {
   createdAt: string;
   updatedAt: string;
   revision: number;
+  source?: "manual" | "scheduled";
+  startedAt?: string;
+  finishedAt?: string;
+  activities?: AgentWorkActivity[];
   taskCommits?: { taskId: string; revision: number }[];
   commits?: { documentId: string; versionId: string; versionNumber: number }[];
 };
