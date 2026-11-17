@@ -336,6 +336,8 @@ model RoomStar {
 
 model RoomMessage {
   knowledgeSources KnowledgeSource[]
+  recipientUserId String?
+  recipientReadAt DateTime?
   clientMessageId String?
   id             String   @id @default(uuid())
   organizationId String

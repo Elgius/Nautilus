@@ -238,27 +238,36 @@ export class RoomChat extends DurableObject<Bindings> {
         await this.agentService.cancel(state.identity, input.jobId)
       } else if (input.type === 'send') {
         const parsed = parseSend(input)
-        // Quoted document excerpts may contain @ text; only instructions need a private target.
-        if (/(^|\s)@/.test(parsed.text.replace(/^>.*$/gm, ''))) throw new Error('Invalid room message. Select an agent to send an @ instruction privately.')
         const message = await saveChatMessage(db, state.identity, parsed)
-        await this.broadcast(db, { type: 'message', message })
+        await this.broadcast(db, { type: 'message', message }, [state.identity.userId, parsed.recipientUserId])
         this.send(socket, { type: 'ack', requestId, message })
       } else if (input.type === 'typing') {
-        await this.broadcast(db, { type: 'typing', userId: state.identity.userId, name: state.identity.name, expiresAt: Date.now() + 4000 })
+        if (typeof input.recipientUserId === 'string') await this.broadcast(db, { type: 'typing', userId: state.identity.userId, name: state.identity.name, expiresAt: Date.now() + 4000 }, [input.recipientUserId])
       } else if (input.type === 'history' || input.type === 'sync') {
         if (input.cursor !== undefined && (typeof input.cursor !== 'string' || input.cursor.length > 100)) throw new Error('Invalid cursor.')
         const direction = input.type === 'sync' && input.cursor ? 'after' : 'before'
         const page = await chatHistory(db, state.identity, input.cursor as string | undefined, direction)
         this.send(socket, { type: input.type, requestId, ...page })
         if (input.type === 'sync') {
-          const readers = await db.roomMember.findMany({ where: { organizationId: state.identity.organizationId, roomId: state.identity.roomId, lastReadAt: { not: null } }, select: { lastReadAt: true, member: { select: { userId: true } } } })
-          for (const reader of readers) this.send(socket, { type: 'read', userId: reader.member.userId, readAt: reader.lastReadAt!.toISOString() })
+          const { organizationId, roomId, userId } = state.identity
+          const receipts = await db.roomMessage.groupBy({ by: ['recipientUserId'],
+            where: { organizationId, roomId, authorUserId: userId, recipientUserId: { not: null }, recipientReadAt: { not: null } }, _max: { createdAt: true } })
+          for (const receipt of receipts) this.send(socket, { type: 'read', userId: receipt.recipientUserId, readAt: receipt._max.createdAt?.toISOString() })
           await this.presence(db)
         }
       } else if (input.type === 'read') {
-        const member = await canChat(db, state.identity)
-        if (member) await db.roomMember.update({ where: { roomId_organizationMemberId: { roomId: state.identity.roomId, organizationMemberId: member.organizationMemberId } }, data: { lastReadAt: new Date() } })
-        await this.broadcast(db, { type: 'read', userId: state.identity.userId, readAt: new Date().toISOString() })
+        if (typeof input.cursor !== 'string') return
+        const { organizationId, roomId, userId } = state.identity
+        const scope = { organizationId, roomId, recipientUserId: userId }
+        const cursor = await db.roomMessage.findFirst({ where: { id: input.cursor, ...scope }, select: { createdAt: true } })
+        if (!cursor) return
+        const updated = await db.roomMessage.updateManyAndReturn({ where: { ...scope, createdAt: { lte: cursor.createdAt }, recipientReadAt: null },
+          data: { recipientReadAt: new Date() }, select: { authorUserId: true, createdAt: true } })
+        const latestByAuthor = new Map<string, Date>()
+        for (const row of updated) {
+          if (row.authorUserId && row.createdAt.getTime() > (latestByAuthor.get(row.authorUserId)?.getTime() ?? 0)) latestByAuthor.set(row.authorUserId, row.createdAt)
+        }
+        for (const [author, time] of latestByAuthor) await this.broadcast(db, { type: 'read', userId, readAt: time.toISOString() }, [author])
       } else if (input.type === 'ping') this.send(socket, { type: 'pong' })
       else throw new Error('Unknown chat event.')
     } catch (error) {
@@ -274,10 +283,11 @@ export class RoomChat extends DurableObject<Bindings> {
       this.send(socket, { type: 'error', requestId, errorCode, error: message })
     } finally { await db.$disconnect() }
   }
-  private async broadcast(db: Database, event: object) {
+  private async broadcast(db: Database, event: object, audience?: string[]) {
     const peers = this.ctx.getWebSockets().filter((peer) => peer.readyState === WebSocket.OPEN)
     await Promise.all(peers.map(async (peer) => {
       const { identity } = peer.deserializeAttachment() as Attachment
+      if (audience && !audience.includes(identity.userId)) return
       if (!await canChat(db, identity)) { this.closeSocket(peer, 4003, 'Room access expired'); return }
       this.send(peer, event)
     }))

@@ -8,7 +8,7 @@ type Result = { suggestions: string[]; retryAfterMs?: number };
 
 export function useRoomSuggestions(organizationId: string, roomId: string, userId: string, enabled: boolean, messages: RoomMessage[]) {
   const scope = JSON.stringify([organizationId, roomId, userId]);
-  const revision = JSON.stringify(messages.slice(-5).map(({ id, editedAt, text }) => [id, editedAt, text]));
+  const revision = JSON.stringify(messages.filter(message => !message.recipientUserId).slice(-5).map(({ id, editedAt, text }) => [id, editedAt, text]));
   const [result, setResult] = useState<{ scope: string; revision: string; suggestions: string[] } | null>(null);
 
   useEffect(() => {

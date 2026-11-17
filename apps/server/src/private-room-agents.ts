@@ -2,7 +2,7 @@ import { assertHubJobSize, mergeHubProvenance } from './agent-hub/provenance'
 import { buildHubCitations } from '../../../shared/agent-citations'
 import { hubOptions } from './agent-hub/contracts'
 import type { AgentQuestion, AgentRunMode, AgentWorkActivity, PrivateAgentEvent, PrivateAgentJob, RoomAgentOption, HubToolCall, HubSource, HubOptions } from '../../../shared/room-chat'
-import { parseSend, type ChatIdentity } from './room-chat-service'
+import { parseMessageText, type ChatIdentity } from './room-chat-service'
 import { logPipeline, type PipelineStage } from './agent-pipeline'
 import { scheduleEarlierAlarm, scheduleRoomAlarm } from './room-alarm'
 import { avatarColors, type AvatarColor } from '../../../shared/agent-appearance'
@@ -166,7 +166,7 @@ export class PrivateRoomAgents {
     if (updated) await this.safeSend(identity, updated)
   }
   async invoke(identity: ChatIdentity, input: Record<string, unknown>, { scheduled = false, receivedAt = Date.now(), canAskUser = false, response }: InvocationOptions = {}) {
-    const { clientMessageId: id, text: instruction } = parseSend({ clientMessageId: input.requestId, text: input.instruction })
+    const { clientMessageId: id, text: instruction } = parseMessageText({ clientMessageId: input.requestId, text: input.instruction })
     logPipeline(identity.roomId, id, 'received', { receivedAtMs: receivedAt, ingressMs: Date.now() - receivedAt })
     if (typeof input.agentId !== 'string' || !input.agentId || input.agentId.length > 100) throw new Error('Invalid agent selection.')
     const parsedOptions = hubOptions.safeParse({ conversationId: input.conversationId, knowledge: input.knowledge, reasoning: input.reasoning })

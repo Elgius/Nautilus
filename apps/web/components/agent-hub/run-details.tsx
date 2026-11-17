@@ -9,6 +9,7 @@ import { Sources, SourcesContent, SourcesTrigger, Source } from '@/components/ai
 import { Confirmation, ConfirmationActions, ConfirmationAction, ConfirmationTitle } from '@/components/ai-elements/confirmation';
 import { Checkpoint, CheckpointIcon } from '@/components/ai-elements/checkpoint';
 import { ChainOfThought, ChainOfThoughtHeader, ChainOfThoughtContent, ChainOfThoughtStep } from '@/components/ai-elements/chain-of-thought';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
 export function RunDetails({ job, roomId, confirm }: { job: PrivateAgentJob; roomId?: string; confirm?: (jobId: string, confirmationId: string, approved: boolean) => void | Promise<void> }) {
@@ -23,7 +24,8 @@ export function RunDetails({ job, roomId, confirm }: { job: PrivateAgentJob; roo
     </ChainOfThoughtContent></ChainOfThought>}
     {job.confirmations?.map((item) => <Confirmation key={item.id} approval={item.status === 'pending' ? { id: item.id } : { id: item.id, approved: item.status === 'approved' }} state={item.status === 'pending' && active ? 'approval-requested' : 'approval-responded'} className="rounded-lg border p-3">
       <ConfirmationTitle>{item.label}</ConfirmationTitle>
-      {item.status !== 'pending' && <p>{item.status === 'approved' ? 'Approved' : 'Declined or expired'}</p>}
+      {item.status === 'approved' && <Badge className="rounded-full bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200">Approved</Badge>}
+      {item.status === 'declined' && <p>Declined or expired</p>}
       {item.status === 'pending' && !active && <p>Confirmation expired.</p>}
       <ConfirmationActions>{confirm && [false, true].map((approved) => <ConfirmationAction key={String(approved)} disabled={!!pending || !active} variant={approved ? 'default' : 'outline'} onClick={async () => {
         setPending(item.id); setError('');

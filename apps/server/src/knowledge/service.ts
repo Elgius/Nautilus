@@ -102,7 +102,7 @@ export function knowledgeService(db: Database, identity: KnowledgeIdentity) {
         await tx.$queryRaw`SELECT id FROM "knowledgeBase" WHERE id = ${knowledgeBase.id} FOR UPDATE`
         const proposed = { organizationId, roomId, taggedByUserId: userId, revokedAt: null, base: knowledgeBase,
           document: documentId ? await tx.document.findFirst({ where: { id: documentId, organizationId, roomId }, select: { id: true, title: true, currentVersionId: true } }) : null,
-          message: messageId ? await tx.roomMessage.findFirst({ where: { id: messageId, organizationId, roomId, authorUserId: { not: null }, authorAgentId: null }, select: { id: true, createdAt: true, editedAt: true } }) : null,
+          message: messageId ? await tx.roomMessage.findFirst({ where: { id: messageId, organizationId, roomId, authorUserId: { not: null }, recipientUserId: null, authorAgentId: null }, select: { id: true, createdAt: true, editedAt: true } }) : null,
         } as Source
         if (!await sourceAccess(tx, proposed)) throw new HTTPException(403, { message: scope === 'ORGANIZATION' ? 'A room owner or organisation admin with room access must approve sharing this source with the organisation.' : 'Join the source’s room before tagging it.' })
         if (documentId && !proposed.document?.currentVersionId) throw new HTTPException(422, { message: 'Save this document before tagging it for Knowledge.' })

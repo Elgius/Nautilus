@@ -96,7 +96,7 @@ export async function processKnowledgeStep(db: Database, env: Bindings, runId: s
       sourceHash = await hashText(JSON.stringify(saved.content))
     } else {
       // Exact tagged message only. Linked documents and neighbouring messages are never fetched.
-      const message = await db.roomMessage.findFirst({ where: { id: source.messageId!, organizationId: source.organizationId, roomId: source.roomId }, select: { text: true } })
+      const message = await db.roomMessage.findFirst({ where: { id: source.messageId!, recipientUserId: null, organizationId: source.organizationId, roomId: source.roomId }, select: { text: true } })
       if (!message) return await cancel()
       chunks = textChunks(message.text, `Message ${source.messageId}`)
       sourceHash = await hashText(message.text)

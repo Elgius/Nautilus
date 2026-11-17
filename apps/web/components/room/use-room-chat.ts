@@ -8,14 +8,14 @@ import { roomRequest, RoomRequestError, type RoomMessage, type RoomDetail } from
 
 import type { HubOptions, AgentRunMode, ChatServerEvent, ChatUser, PrivateAgentJob, RoomAgentOption } from "../../../../shared/room-chat";
 
-export type PendingMessage = { id: string; text: string; status: "pending" | "failed" };
+export type PendingMessage = { id: string; recipientUserId: string; createdAt: string; text: string; status: "pending" | "failed" };
 export function useRoomChat(organizationId: string, roomId: string, userId: string, enabled: boolean, initialData?: Pick<RoomDetail, 'messages' | 'nextCursor'>) {
   const [agents, setAgents] = useState<RoomAgentOption[]>([]);
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [agentJobs, setAgentJobs] = useState<PrivateAgentJob[]>([]);
   const [answeringQuestions, setAnsweringQuestions] = useState<string[]>([]);
   const questionOutbox = useRef(new Map<string, { jobId: string; questionId: string; answer: string; mode: AgentRunMode }>());
-  const agentsRequested = useRef(false);
+  const newestReceived = useRef(initialData?.messages.filter(message => message.recipientUserId === userId).at(-1));
   const preparingAgent = useRef(false);
   const agentOutbox = useRef(new Map<string, { agentId: string; instruction: string; mode: AgentRunMode; knowledge?: HubOptions['knowledge']; reasoning?: HubOptions['reasoning'] }>());
   const timings = useRef(new Map<string, ReturnType<typeof startAgentTiming>>());
@@ -33,7 +33,7 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
   const [loadingOlder, setLoadingOlder] = useState(false);
   const connection = useRef<WebSocket | null>(null);
   const ready = useRef(false);
-  const outbox = useRef(new Map<string, string>());
+  const outbox = useRef(new Map<string, { text: string; recipientUserId: string }>());
   // Effects run after the response has been committed to the client UI.
   useEffect(() => {
     for (const job of agentJobs) {
@@ -67,10 +67,13 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
         readTimer = setTimeout(() => { readTimer = undefined; markRead(); }, delay);
       } else {
         lastReadSent = Date.now();
-        send({ type: "read" });
+        if (newestReceived.current) send({ type: "read", cursor: newestReceived.current.id });
       }
     };
     const merge = (incoming: RoomMessage[]) => {
+      for (const message of incoming) {
+        if (message.recipientUserId === userId && (!newestReceived.current || newestReceived.current.createdAt < message.createdAt)) newestReceived.current = message;
+      }
       setMessages((previous) => {
         const map = new Map(previous.map((message) => [message.id, message]));
         for (const message of incoming) map.set(message.id, message);
@@ -80,13 +83,6 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
     const mergeAgentJobs = (incoming: PrivateAgentJob[]) => {
       for (const job of incoming) if (job.question?.answer) questionOutbox.current.delete(job.id);
       setAnsweringQuestions([...questionOutbox.current.keys()]);
-      // History can include personal agents absent from the initial room roster.
-      // Load their current appearance even when the picker has never been opened.
-      if (incoming.length && !agentsRequested.current) {
-        agentsRequested.current = true;
-        setAgentsLoading(true);
-        send({ type: 'agent.list', requestId: 'agent.list' });
-      }
       for (const job of incoming) agentOutbox.current.delete(job.id);
       setAgentJobs((previous) => {
         const jobs = new Map(previous.map((job) => [job.id, job]));
@@ -108,7 +104,8 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
             attempt = 0; replaying = true; initialSync = !latest.current;
             send({ type: "sync", requestId: "sync", cursor: latest.current });
             send({ type: "agent.history", requestId: "agent.history" });
-            if (agentsRequested.current) send({ type: "agent.list", requestId: "agent.list" });
+            setAgentsLoading(true);
+            send({ type: "agent.list", requestId: "agent.list" });
           } else if (event.type === "sync") {
             merge(event.messages);
             const last = event.messages.at(-1);
@@ -131,7 +128,7 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
                 }).catch((error) => { if (!disposed) setNotice(`Agent not started: ${errorMessage(error)}`); });
               }
             }
-            for (const [clientMessageId, text] of outbox.current) send({ type: "send", requestId: clientMessageId, clientMessageId, text });
+            for (const [clientMessageId, payload] of outbox.current) send({ type: "send", requestId: clientMessageId, clientMessageId, ...payload });
             for (const answer of questionOutbox.current.values()) {
               const deliver = () => { if (!disposed && socket?.readyState === WebSocket.OPEN && questionOutbox.current.has(answer.jobId)) send({ type: 'agent.answer', requestId: answer.questionId, ...answer }); };
               if (answer.mode === 'write') void flushRoomDocuments(organizationId, roomId).then(deliver).catch((error) => {
@@ -228,25 +225,18 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
     document.addEventListener("visibilitychange", markRead);
     return () => { disposed = true; clearInterval(typingExpiry); clearTimeout(timer); clearTimeout(readTimer); clearInterval(heartbeat); socket?.close(); connection.current = null; ready.current = false; document.removeEventListener("visibilitychange", markRead); };
   }, [organizationId, roomId, userId, enabled]);
-  function sendMessage(text: string, retryId?: string) {
+  function sendMessage(text: string, recipientUserId: string, retryId?: string) {
     if (!enabled || blocked) return false;
     const id = retryId ?? crypto.randomUUID();
-    outbox.current.set(id, text);
-    setPending((previous) => [...previous.filter((message) => message.id !== id), { id, text, status: "pending" }]);
-    if (ready.current && connection.current?.readyState === WebSocket.OPEN) connection.current.send(JSON.stringify({ type: "send", requestId: id, clientMessageId: id, text }));
+    outbox.current.set(id, { text, recipientUserId });
+    setPending((previous) => [...previous.filter((message) => message.id !== id), { id, text, recipientUserId, createdAt: new Date().toISOString(), status: "pending" }]);
+    if (ready.current && connection.current?.readyState === WebSocket.OPEN) connection.current.send(JSON.stringify({ type: "send", requestId: id, clientMessageId: id, text, recipientUserId }));
     return true;
   }
   function loadOlder() {
     if (!nextCursor || loadingOlder || connection.current?.readyState !== WebSocket.OPEN) return;
     setLoadingOlder(true);
     connection.current.send(JSON.stringify({ type: "history", cursor: nextCursor }));
-  }
-  function loadAgents() {
-    agentsRequested.current = true;
-    if (!enabled || blocked) return;
-    if (connection.current?.readyState !== WebSocket.OPEN) { setNotice("Connect to room chat before choosing an agent."); return; }
-    setAgentsLoading(true);
-    connection.current.send(JSON.stringify({ type: "agent.list", requestId: "agent.list" }));
   }
   async function invokeAgent(agent: RoomAgentOption, instruction: string, mode: AgentRunMode = 'write', options?: Pick<HubOptions, 'knowledge' | 'reasoning'>) {
     if (!enabled || blocked || !instruction.trim() || preparingAgent.current) return false;
@@ -266,10 +256,10 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
     } catch (error) { timings.current.delete(id); setNotice(`Agent not started: ${errorMessage(error)}`); return false; }
     finally { preparingAgent.current = false; }
   }
-  function sendTyping() {
+  function sendTyping(recipientUserId: string) {
     if (Date.now() - lastTyping.current < 2000 || connection.current?.readyState !== WebSocket.OPEN) return;
     lastTyping.current = Date.now();
-    connection.current.send(JSON.stringify({ type: "typing" }));
+    connection.current.send(JSON.stringify({ type: "typing", recipientUserId }));
   }
   function confirmAgent(jobId: string, confirmationId: string, approved: boolean) {
     if (connection.current?.readyState !== WebSocket.OPEN) throw new Error('Reconnect before confirming.')
@@ -290,5 +280,5 @@ export function useRoomChat(organizationId: string, roomId: string, userId: stri
       questionOutbox.current.delete(job.id); setAnsweringQuestions([...questionOutbox.current.keys()]); setNotice(errorMessage(error));
     }
   }
-  return { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, cancelAgent, confirmAgent, answerQuestion, answeringQuestions, canSend: enabled && !blocked, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage };
+  return { agents, agentsLoading, agentJobs, invokeAgent, cancelAgent, confirmAgent, answerQuestion, answeringQuestions, canSend: enabled && !blocked, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage };
 }

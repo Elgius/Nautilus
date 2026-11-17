@@ -1,5 +1,9 @@
 // In-memory Prisma boundary for the workerd transport test. No real DB credentials.
-type Row = { id: string; roomId: string; organizationId: string; authorUserId: string; clientMessageId: string; createdAt: Date; text: string }
+type Row = { recipientUserId?: string; recipientReadAt?: Date; id: string; roomId: string; organizationId: string; authorUserId: string; clientMessageId: string; createdAt: Date; text: string }
+type Audience = { OR: [{ recipientUserId: null }, { recipientUserId: string }, { authorUserId: string }] }
+function visible(row: Row, audience?: Audience) {
+  return !audience || !row.recipientUserId || row.recipientUserId === audience.OR[1].recipientUserId || row.authorUserId === audience.OR[2].authorUserId
+}
 const rows: Row[] = []
 const executions = new Map<string, Record<string, unknown>>()
 export function schedulerExecutions() { return Object.fromEntries(executions) }
@@ -38,17 +42,28 @@ export function createDatabase() {
       update: async () => ({}),
     },
     roomMessage: {
-      findFirst: async ({ where, orderBy }: { where: Partial<Row>; orderBy?: unknown }) => {
-        const matches = rows.filter((row) => Object.entries(where).every(([key, value]) => value === row[key as keyof Row] || key === 'authorAgentId' || typeof value === 'object'))
+      findFirst: async ({ where, orderBy }: { where: Partial<Row> & { AND?: Audience }; orderBy?: unknown }) => {
+        const matches = rows.filter((row) => visible(row, where.AND) && Object.entries(where).every(([key, value]) => value === row[key as keyof Row] || key === 'authorAgentId' || typeof value === 'object'))
         return orderBy ? matches.at(-1) ?? null : matches[0] ?? null
       },
-      findMany: async ({ where, orderBy, take }: { where: { roomId: string; organizationId: string; OR?: Array<{ createdAt: { gt?: Date; lt?: Date } }> }; orderBy: Array<{ createdAt?: string }>; take: number }) => {
+      findMany: async ({ where, orderBy, take }: { where: { roomId: string; organizationId: string; AND?: Audience; OR?: Array<{ createdAt: { gt?: Date; lt?: Date } }> }; orderBy: Array<{ createdAt?: string }>; take: number }) => {
         const pause = nextHistory
         nextHistory = undefined
         await pause?.()
         const direction = orderBy[0].createdAt === 'asc' ? 1 : -1
-        const result = rows.filter((row) => row.roomId === where.roomId && row.organizationId === where.organizationId && (!where.OR || (direction === 1 ? row.createdAt > where.OR[0].createdAt.gt! : row.createdAt < where.OR[0].createdAt.lt!)))
+        const result = rows.filter((row) => visible(row, where.AND) && row.roomId === where.roomId && row.organizationId === where.organizationId && (!where.OR || (direction === 1 ? row.createdAt > where.OR[0].createdAt.gt! : row.createdAt < where.OR[0].createdAt.lt!)))
         return result.sort((a, b) => direction * (a.createdAt.getTime() - b.createdAt.getTime())).slice(0, take)
+      },
+      groupBy: async ({ where }: { where: Pick<Row, 'roomId' | 'organizationId' | 'authorUserId'> }) => {
+        const byRecipient = new Map<string, Date>()
+        for (const row of rows) {
+          if (row.roomId === where.roomId && row.organizationId === where.organizationId && row.authorUserId === where.authorUserId && row.recipientUserId && row.recipientReadAt) byRecipient.set(row.recipientUserId, row.createdAt)
+        }
+        return [...byRecipient].map(([recipientUserId, createdAt]) => ({ recipientUserId, _max: { createdAt } }))
+      },
+      updateManyAndReturn: async ({ where, data }: { where: { roomId: string; organizationId: string; recipientUserId: string; createdAt: { lte: Date } }; data: { recipientReadAt: Date } }) => {
+        const unread = rows.filter(row => row.roomId === where.roomId && row.organizationId === where.organizationId && row.recipientUserId === where.recipientUserId && !row.recipientReadAt && row.createdAt <= where.createdAt.lte)
+        return unread.map(row => Object.assign(row, data))
       },
       create: async ({ data }: { data: Omit<Row, 'id'> }) => {
         const row = { id: crypto.randomUUID(), ...data, authorAgent: null, authorUser: { name: data.authorUserId }, documents: [] }

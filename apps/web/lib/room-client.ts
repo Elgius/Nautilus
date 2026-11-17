@@ -13,7 +13,7 @@ export type RoomRecord = {
   stars: { userId: string }[]; documents: RoomDocument[];
 };
 export type RoomMessage = {
-  id: string; clientMessageId?: string | null; text: string; createdAt: string; editedAt: string | null; authorUserId: string | null;
+  id: string; recipientUserId?: string | null; recipientReadAt?: string | null; clientMessageId?: string | null; text: string; createdAt: string; editedAt: string | null; authorUserId: string | null;
   authorUser: { name: string } | null; authorAgent: { name: string } | null;
   documents: { documentId: string; documentVersionId: string | null; document: { title: string; kind: string } }[];
 };

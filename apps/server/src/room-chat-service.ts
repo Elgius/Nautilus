@@ -17,16 +17,26 @@ export async function canChat(db: Database, identity: ChatIdentity) {
   ])
   return authorization && member ? member : null
 }
-export function parseSend(input: Record<string, unknown>) {
+export function parseMessageText(input: Record<string, unknown>) {
   if (typeof input.clientMessageId !== 'string' || !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(input.clientMessageId)) throw new Error('Invalid message ID.')
   if (typeof input.text !== 'string' || !input.text.trim() || input.text.length > 20_000) throw new Error('Enter a message up to 20,000 characters.')
   return { clientMessageId: input.clientMessageId, text: input.text.trim() }
+}
+export function parseSend(input: Record<string, unknown>) {
+  const message = parseMessageText(input)
+  if (typeof input.recipientUserId !== 'string' || !input.recipientUserId || input.recipientUserId.length > 128) throw new Error('Invalid recipient. Select a room member.')
+  return { ...message, recipientUserId: input.recipientUserId }
 }
 export async function saveChatMessage(db: Database, identity: ChatIdentity, input: ReturnType<typeof parseSend>) {
   const { organizationId, roomId, userId: authorUserId } = identity
   return db.$transaction(async (tx) => {
     const existing = await tx.roomMessage.findFirst({ where: { organizationId, roomId, authorUserId, clientMessageId: input.clientMessageId }, include: chatInclude })
-    if (existing) return existing
+    if (existing) {
+      if (existing.recipientUserId !== input.recipientUserId) throw new Error('Invalid retry recipient.')
+      return existing
+    }
+    const recipient = await tx.roomMember.findFirst({ where: { organizationId, roomId, member: { userId: input.recipientUserId, organizationId } }, select: { organizationMemberId: true } })
+    if (!recipient || input.recipientUserId === authorUserId) throw new Error('Invalid recipient. Select another room member.')
     // The room coordinator serializes writes. Make timestamps strictly increasing
     // so reconnect cursors cannot skip messages saved within the same millisecond.
     const latest = await tx.roomMessage.findFirst({ where: { organizationId, roomId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { createdAt: true } })
@@ -37,7 +47,7 @@ export async function saveChatMessage(db: Database, identity: ChatIdentity, inpu
   })
 }
 export async function chatHistory(db: Database, identity: ChatIdentity, cursorId?: string, direction: 'before' | 'after' = 'before') {
-  const scope = { organizationId: identity.organizationId, roomId: identity.roomId, authorAgentId: null, authorUserId: { not: null } }
+  const scope = { organizationId: identity.organizationId, roomId: identity.roomId, authorAgentId: null, authorUserId: { not: null }, AND: { OR: [{ recipientUserId: null }, { recipientUserId: identity.userId }, { authorUserId: identity.userId }] } }
   const cursor = cursorId ? await db.roomMessage.findFirst({ where: { ...scope, id: cursorId }, select: { id: true, createdAt: true } }) : null
   if (cursorId && !cursor) throw new Error('Invalid history cursor.')
   const comparison = direction === 'after' ? 'gt' : 'lt'

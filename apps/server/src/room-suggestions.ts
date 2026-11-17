@@ -9,7 +9,7 @@ export type SuggestionMessage = { id: string; text: string; createdAt: Date; edi
 
 export async function suggestionHistory(db: Database, identity: ChatIdentity) {
   const rows = await db.roomMessage.findMany({
-    where: { organizationId: identity.organizationId, roomId: identity.roomId, authorAgentId: null, authorUserId: { not: null } },
+    where: { organizationId: identity.organizationId, roomId: identity.roomId, recipientUserId: null, authorAgentId: null, authorUserId: { not: null } },
     select: { id: true, text: true, createdAt: true, editedAt: true },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 5,
   })

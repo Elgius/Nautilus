@@ -17,7 +17,7 @@ export const AgentReply = memo(function AgentReply({ text, job, citations: suppl
   return <RoomMessageText text={text} className="room-private-reply" citations={citations} />;
 });
 
-export function PrivateAgentConversation({ jobs, agents = [], canSend, busy, retry, cancel, roomId, confirm, full = false }: {
+type ConversationProps = {
   full?: boolean;
   roomId?: string;
   confirm?: (jobId: string, confirmationId: string, approved: boolean) => void | Promise<void>;
@@ -27,7 +27,9 @@ export function PrivateAgentConversation({ jobs, agents = [], canSend, busy, ret
   busy: boolean;
   retry: (agent: RoomAgentOption, instruction: string, mode?: AgentRunMode) => boolean | Promise<boolean>;
   cancel?: (jobId: string) => void;
-}) {
+};
+
+export function PrivateAgentConversation({ jobs, agents = [], canSend, busy, retry, cancel, roomId, confirm, full = false }: ConversationProps) {
   const [expanded, setExpanded] = useState(false);
   const historyId = useId();
   if (!jobs.length) return null;
@@ -41,13 +43,21 @@ export function PrivateAgentConversation({ jobs, agents = [], canSend, busy, ret
       <div className="room-private-instruction"><strong>You:</strong><RoomMessageText text={job.instruction} /></div>
       {job.reply && <AgentReply text={job.reply} job={job} />}
       {job.question && <div className="room-private-question"><RoomMessageText text={job.question.question} />{job.question.answer && <p className="whitespace-pre-wrap"><strong>Your answer:</strong> {job.question.answer}</p>}</div>}
-      <p className="room-private-status" role="status">{job.status === 'queued' ? job.mode === 'read' ? 'Waiting for an Ask slot…' : 'Queued for the room moderator…' : job.status === 'running' ? job.mode === 'read' ? 'Reading and answering…' : 'Moderator is working…' : job.status === 'failed' ? job.errorCode ? agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0) : job.error ?? 'The agent could not reply.' : job.question && !job.question.answer ? 'Waiting for your answer' : job.issues?.length ? 'Response complete with operation warnings' : 'Response complete'}</p>
+      <AgentRunFeedback {...{ job, roomId, confirm, cancel, canSend, busy, retry }} />
+    </article>)}
+    </div>
+  </section>;
+}
+
+export function AgentRunFeedback({ job, roomId, confirm, cancel, canSend, busy, retry }: Omit<ConversationProps, "jobs"> & { job: PrivateAgentJob }) {
+  return <>
+
+      {job.status !== 'complete' && <p className="room-private-status" role="status">{job.status === 'queued' ? job.mode === 'read' ? 'Waiting for an Ask slot…' : 'Queued for the room moderator…' : job.status === 'running' ? job.mode === 'read' ? 'Reading and answering…' : 'Moderator is working…' : job.status === 'failed' ? job.errorCode ? agentRunErrorMessage(job.errorCode, job.commits?.length ?? 0) : job.error ?? 'The agent could not reply.' : ''}</p>}
+      {job.status === 'complete' && !!job.issues?.length && <p className="room-private-status" role="status">Response complete with operation warnings</p>}
       {!!job.commits?.length && !(job.status === 'failed' && job.errorCode) && <p className="room-private-status">{job.commits.length} edit {job.commits.length === 1 ? 'batch' : 'batches'} saved.</p>}
       {(job.status === 'complete' || job.status === 'failed') && <AgentOperationWarnings issues={job.issues} />}
       <RunDetails job={job} roomId={roomId} confirm={confirm} />
       {cancel && (job.status === 'queued' || job.status === 'running') && <Button type="button" size="sm" variant="ghost" disabled={!canSend} onClick={() => cancel(job.id)}>Cancel</Button>}
       {job.status === 'failed' && <Button type="button" size="sm" variant="outline" disabled={!canSend || busy} onClick={() => retry({ id: job.agentId, name: job.agentName, role: '' }, job.instruction, job.mode ?? 'write')}>Retry privately</Button>}
-    </article>)}
-    </div>
-  </section>;
+  </>;
 }

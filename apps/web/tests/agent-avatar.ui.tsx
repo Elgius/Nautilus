@@ -192,11 +192,9 @@ try {
   expectCustomAvatar();
   await act(async () => { root.render(createElement(RoomChatComposer, {
     canSend: true, agents: [reloaded], agentsLoading: false, agentBusy: false,
-    loadAgents() {}, sendTyping() {}, sendMessage: () => true, invokeAgent: () => true,
+    sendTyping() {}, sendMessage: () => true, invokeAgent: () => true,
   })); });
-  await type('textarea', '@Pen');
-  expectCustomAvatar();
-  await click('[role="option"]');
+  assert.equal(container.querySelector('button[aria-label="Personal agent"]')?.textContent, reloaded.name);
   expectCustomAvatar();
   await act(async () => { root.render(createElement(AgentProfileDialog, { agent: reloaded, organizationId: 'org', onClose() {}, onSave: async (profile) => {
     await persistAgent('org', profile, reloaded.id); return null;

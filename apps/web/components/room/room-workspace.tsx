@@ -14,7 +14,8 @@ import { RoomConnectionStatus } from "./room-connection-status";
 import { RoomChatComposer } from "./room-chat-composer";
 import { RoomMessageText } from "./room-message-text";
 import { useRoomMessageTime } from "./use-room-message-time";
-import { PrivateAgentConversation } from "./private-agent-conversation";
+import { RoomAgentAvatar } from "./room-agent-avatar";
+import { AgentRunFeedback, AgentReply } from "./private-agent-conversation";
 import { useWorkspaceSession } from "@/components/auth/workspace-session";
 import { initials } from "@/lib/auth-types";
 import { errorMessage } from "@/lib/auth-client";
@@ -38,7 +39,7 @@ export function RoomWorkspace({ initialData, initialDocumentId }: { initialData:
   const panels = useRef<HTMLElement>(null);
   const [joined, setJoined] = useState(room.members.some(({ member }) => member.user.id === session.user.id));
   const [joining, setJoining] = useState(false);
-  const { agents, agentsLoading, agentJobs, loadAgents, invokeAgent, cancelAgent, confirmAgent, answerQuestion, answeringQuestions, canSend, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage } = useRoomChat(organizationId, room.id, session.user.id, joined, initialData);
+  const { agents, agentsLoading, agentJobs, invokeAgent, cancelAgent, confirmAgent, answerQuestion, answeringQuestions, canSend, online, typing, reads, sendTyping, messages, pending, status, notice, setNotice, nextCursor, loadingOlder, loadOlder, sendMessage } = useRoomChat(organizationId, room.id, session.user.id, joined, initialData);
   const activeQuestion = agentJobs.find((job) => job.question && !job.question.answer && job.status !== 'failed');
   const suggestions = useRoomSuggestions(organizationId, room.id, session.user.id, joined, messages);
   const requestedDocument = useSearchParams().get("document") ?? initialDocumentId;
@@ -72,6 +73,16 @@ export function RoomWorkspace({ initialData, initialDocumentId }: { initialData:
     null,
   );
   const agentBusy = agentJobs.filter((job) => job.status === "queued" || job.status === "running").length >= 20;
+  const members = [...new Map([...room.members.map(({ member }) => member.user), ...online].map(member => [member.id, member])).values()];
+  const memberName = (id: string) => members.find(member => member.id === id)?.name ?? 'Room member';
+  const timeline = [
+    ...messages.map(message => ({ kind: 'human' as const, message, time: message.createdAt, id: message.id })),
+    ...pending.map(message => ({ kind: 'pending' as const, message, time: message.createdAt, id: message.id })),
+    ...agentJobs.flatMap(job => [true, false].map(outgoing => ({
+      kind: 'agent' as const, job, outgoing, id: `${job.id}-${outgoing ? '1' : '2'}`,
+      time: outgoing ? job.createdAt : job.startedAt ?? job.createdAt,
+    }))),
+  ].sort((a, b) => a.time.localeCompare(b.time) || a.id.localeCompare(b.id));
   const typingNames = Object.entries(typing).filter(([id]) => id !== session.user.id).map(([, user]) => user.name).join(', ');
   return <div className="room-workspace">
     <header className="room-topbar">
@@ -100,28 +111,47 @@ export function RoomWorkspace({ initialData, initialDocumentId }: { initialData:
         <MessageScrollerViewport className="room-messages" aria-label="Conversation" tabIndex={0}>
         <MessageScrollerContent className="room-chat-content" aria-label="Conversation messages" aria-live="polite">
           {nextCursor && <Button variant="ghost" size="sm" onClick={loadOlder} disabled={loadingOlder}>{loadingOlder ? 'Loading…' : 'Load earlier messages'}</Button>}
-          {!messages.length && !pending.length && <div className="room-conversation-intro"><div className="room-intro-icon"><MessageSquare size={20} /></div><h3>A space to think together</h3><p>Share an idea or work through a document with the people in this room.</p></div>}
-          {messages.map((message) => {
+          {!timeline.length && <div className="room-conversation-intro"><div className="room-intro-icon"><MessageSquare size={20} /></div><h3>Start a conversation</h3><p>Ask your agent a question, or type @ to reach a room member.</p></div>}
+          {timeline.map(entry => {
+            if (entry.kind === 'pending') {
+              const message = entry.message;
+              return <MessageScrollerItem key={message.id} messageId={message.id}>
+                <Message align="end" className="room-message is-own" data-delivery={message.status} aria-busy={message.status === 'pending'}>
+                  <div className="room-message-avatar">{initials(session.user.name)}</div>
+                  <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>You</strong> to {memberName(message.recipientUserId)}</MessageHeader><Bubble variant="muted" align="end"><BubbleContent><RoomMessageText text={message.text} /></BubbleContent></Bubble>
+                  <p className="room-message-meta" role="status">{message.status === 'pending' ? 'Sending…' : 'Message failed'}{message.status === 'failed' && <Button variant="ghost" size="sm" disabled={!canSend} onClick={() => sendMessage(message.text, message.recipientUserId, message.id)}>Retry</Button>}</p>
+                </MessageContent></Message>
+              </MessageScrollerItem>;
+            }
+            if (entry.kind === 'agent') {
+              const { job, outgoing, id, time } = entry;
+              const agent = agents.find(agent => agent.id === job.agentId) ?? room.agents.find(({ agent }) => agent.id === job.agentId)?.agent;
+              const clarification = job.continuationOf && agentJobs.find(parent => parent.id === job.continuationOf)?.question?.answer;
+              return <MessageScrollerItem key={id} messageId={id} scrollAnchor={outgoing}>
+                <Message align={outgoing ? 'end' : 'start'} className={`room-message ${outgoing ? 'is-own' : ''}`}>
+                  {outgoing ? <div className="room-message-avatar">{initials(session.user.name)}</div> : <RoomAgentAvatar agent={agent ?? { name: job.agentName }} />}
+                  <MessageContent className="room-message-body">
+                    <MessageHeader className="room-message-meta"><strong>{outgoing ? 'You' : job.agentName}</strong><span>{outgoing ? `to ${job.agentName}` : 'Only you'}</span><time dateTime={time}>{messageTime(time).time}</time></MessageHeader>
+                    {(outgoing || job.reply) && <Bubble variant={outgoing ? 'muted' : 'outline'} align={outgoing ? 'end' : 'start'}><BubbleContent>{outgoing ? <RoomMessageText text={clarification || job.instruction} /> : <AgentReply job={job} text={job.reply} />}</BubbleContent></Bubble>}
+                    {!outgoing && job.question && <Bubble variant="outline"><BubbleContent><RoomMessageText text={job.question.question} /></BubbleContent></Bubble>}
+                    {!outgoing && <AgentRunFeedback job={job} roomId={room.id} canSend={canSend} busy={agentBusy} retry={invokeAgent} cancel={cancelAgent} confirm={confirmAgent} />}
+                  </MessageContent>
+                </Message>
+              </MessageScrollerItem>;
+            }
+            const message = entry.message;
             const own = message.authorUserId === session.user.id, author = message.authorUser?.name || 'Unknown author';
             const timestamp = messageTime(message.createdAt);
             return <MessageScrollerItem key={message.id} messageId={message.id} scrollAnchor={Boolean(message.authorUserId)}>
               <Message align={own ? 'end' : 'start'} className={`room-message ${own ? 'is-own' : ''}`} aria-label={`${author}, ${timestamp.label}`}>
               <div id={`message-${message.id}`} className="room-message-avatar">{initials(author)}</div>
-              <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>{own ? 'You' : author}</strong><time dateTime={message.createdAt}>{timestamp.time}</time></MessageHeader>
-                <Bubble variant={own ? 'muted' : 'ghost'} align={own ? 'end' : 'start'}><BubbleContent><RoomMessageText text={message.text} /></BubbleContent></Bubble>
-                {own && message.id === latestOutgoingId && <span className="room-message-meta">{Object.entries(reads).filter(([id, readAt]) => id !== session.user.id && readAt >= message.createdAt).length ? 'Seen' : 'Sent'}</span>}
+              <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>{own ? 'You' : author}</strong>{message.recipientUserId && <span>to {own ? memberName(message.recipientUserId) : 'you'}</span>}<time dateTime={message.createdAt}>{timestamp.time}</time></MessageHeader>
+                <Bubble variant={own ? 'muted' : 'outline'} align={own ? 'end' : 'start'}><BubbleContent><RoomMessageText text={message.text} /></BubbleContent></Bubble>
+                {own && message.id === latestOutgoingId && <span className="room-message-meta">{message.recipientReadAt || (message.recipientUserId && reads[message.recipientUserId] >= message.createdAt) ? 'Seen' : 'Sent'}</span>}
                 {message.documents.map((attachment) => <Button variant="ghost" size="sm" key={attachment.documentId} className="room-document-reference" onClick={() => { dispatchFiles({ type: 'select', id: attachment.documentId }); setMobilePanel('document'); }}><FileText size={15} />{attachment.document.title}</Button>)}
               </MessageContent>
             </Message></MessageScrollerItem>;
           })}
-          {pending.map((message) => <MessageScrollerItem key={message.id} messageId={message.id}>
-            <Message align="end" className="room-message is-own" data-delivery={message.status} aria-busy={message.status === 'pending'}>
-              <div className="room-message-avatar">{initials(session.user.name)}</div>
-              <MessageContent className="room-message-body"><MessageHeader className="room-message-meta"><strong>You</strong></MessageHeader><Bubble variant="muted" align="end"><BubbleContent><RoomMessageText text={message.text} /></BubbleContent></Bubble>
-              <p className="room-message-meta" role="status">{message.status === 'pending' ? 'Sending…' : 'Message failed'}{message.status === 'failed' && <Button variant="ghost" size="sm" disabled={!canSend} onClick={() => sendMessage(message.text, message.id)}>Retry</Button>}</p>
-            </MessageContent></Message>
-          </MessageScrollerItem>)}
-          <PrivateAgentConversation agents={[...agents, ...room.agents.map(({ agent }) => agent)]} jobs={agentJobs} canSend={canSend} busy={agentBusy} retry={invokeAgent} cancel={cancelAgent} confirm={confirmAgent} roomId={room.id} />
         </MessageScrollerContent>
         </MessageScrollerViewport>
         <MessageScrollerButton />
@@ -130,7 +160,7 @@ export function RoomWorkspace({ initialData, initialDocumentId }: { initialData:
         <div className="room-composer-area">
           {!joined && <Button variant="outline" size="sm" disabled={joining} onClick={joinRoom}>{joining ? 'Joining…' : 'Join room chat'}</Button>}
           {typingNames && <p role="status">{typingNames} typing…</p>}
-          <RoomChatComposer selection={selection} onClearSelection={(expected) => setSelection((current) => !expected || current === expected ? null : current)} suggestions={suggestions} canSend={canSend} agents={agents} agentsLoading={agentsLoading} agentBusy={agentBusy} loadAgents={loadAgents} sendMessage={sendMessage} invokeAgent={invokeAgent} sendTyping={sendTyping}
+          <RoomChatComposer members={members.filter(member => member.id !== session.user.id)} preferenceKey={`room-agent:${organizationId}:${room.id}:${session.user.id}`} selection={selection} onClearSelection={(expected) => setSelection((current) => !expected || current === expected ? null : current)} suggestions={suggestions} canSend={canSend} agents={agents} agentsLoading={agentsLoading} agentBusy={agentBusy} sendMessage={sendMessage} invokeAgent={invokeAgent} sendTyping={sendTyping}
             pendingQuestion={activeQuestion?.question ? { question: activeQuestion.question, agentName: activeQuestion.agentName, ready: activeQuestion.status === 'complete', sending: answeringQuestions.includes(activeQuestion.id), onAnswer: (answer) => { void answerQuestion(activeQuestion, answer); } } : undefined} />
         </div>
       </section>

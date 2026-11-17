@@ -14,6 +14,7 @@ type ChoiceMenuProps<T extends string> = {
   disabled?: boolean;
   className?: string;
   title?: string;
+  placeholder?: string;
   icon?: ReactNode;
 } & (
   | { value: T; onValueChange: (value: T) => void; defaultValue?: never }
@@ -32,7 +33,7 @@ export function ChoiceMenu<T extends string>(props: ChoiceMenuProps<T>) {
     <DropdownMenu>
       <DropdownMenuTrigger id={props.id} aria-label={label} aria-describedby={valueId} title={props.title}
         disabled={disabled} render={<Button type="button" variant="outline" className={cn("max-w-full justify-between", props.className)} />}>
-        {props.icon}<span className="truncate" id={valueId}>{selected?.label ?? value}</span><ChevronDown aria-hidden="true" />
+        {props.icon}<span className="truncate" id={valueId}>{selected?.label ?? props.placeholder ?? value}</span><ChevronDown aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent aria-label={label} className="w-max max-w-(--available-width) min-w-(--anchor-width)">
         <DropdownMenuRadioGroup value={value} onValueChange={(next: T) => {

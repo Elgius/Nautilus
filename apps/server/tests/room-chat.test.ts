@@ -19,7 +19,7 @@ test('chat requires a live session and membership in the requested room and orga
 })
 
 test('message validation rejects empty, oversized, and malformed sends and ignores forged author fields', () => {
-  expect(parseSend({ text: ' hello ', clientMessageId, authorAgentId: 'bot', authorUserId: 'mallory' })).toEqual({ text: 'hello', clientMessageId })
+  expect(parseSend({ recipientUserId: 'bob', text: ' hello ', clientMessageId, authorAgentId: 'bot', authorUserId: 'mallory' })).toEqual({ recipientUserId: 'bob', text: 'hello', clientMessageId })
   for (const input of [{ text: '', clientMessageId }, { text: ' '.repeat(10), clientMessageId }, { text: 'a'.repeat(20001), clientMessageId }, { text: 'hello', clientMessageId: 'bad' }]) expect(() => parseSend(input)).toThrow()
 })
 
@@ -32,11 +32,12 @@ test('retries return one persisted user message and preserve the authenticated a
       findFirst: async ({ where }: { where: { clientMessageId?: string } }) => where.clientMessageId ? saved : { createdAt: clock },
       create: async ({ data }: { data: Record<string, unknown> }) => { writes.push(data); saved = { id: 'saved', ...data }; return saved },
     },
+    roomMember: { findFirst: async () => ({ organizationMemberId: 'bob' }) },
     room: { update: async () => ({}) },
     $transaction: async (fn: (db: unknown) => unknown) => fn(db),
   } as unknown as Database
-  const message = await saveChatMessage(db, identity, parseSend({ text: 'hello', clientMessageId }))
-  expect(await saveChatMessage(db, identity, parseSend({ text: 'retry', clientMessageId }))).toEqual(message)
+  const message = await saveChatMessage(db, identity, parseSend({ recipientUserId: 'bob', text: 'hello', clientMessageId }))
+  expect(await saveChatMessage(db, identity, parseSend({ recipientUserId: 'bob', text: 'retry', clientMessageId }))).toEqual(message)
   expect(writes).toHaveLength(1)
   expect(writes[0]).toMatchObject({ roomId: 'room', organizationId: 'org', authorUserId: 'alice', text: 'hello', createdAt: new Date(clock.getTime() + 1) })
   expect(writes[0]).not.toHaveProperty('authorAgentId')

@@ -80,20 +80,20 @@ try {
   const busySender = await connect('alice', 'busy-room'), busyReader = await connect('bob', 'busy-room')
   for (let index = 0; index < 40; index++) {
     const id = crypto.randomUUID()
-    send(busySender, { type: 'send', requestId: id, clientMessageId: id, text: `Burst ${index}` })
+    send(busySender, { type: 'send', recipientUserId: 'bob', requestId: id, clientMessageId: id, text: `Burst ${index}` })
     await receive(busySender, 'ack')
-    await receive(busyReader, 'message')
-    send(busyReader, { type: 'read' })
-    await receive(busyReader, 'read')
+    const delivery = await receive(busyReader, 'message')
+    send(busyReader, { type: 'read', cursor: delivery.message.id })
+    await receive(busySender, 'read')
   }
   const replyId = crypto.randomUUID()
-  send(busyReader, { type: 'send', requestId: replyId, clientMessageId: replyId, text: 'My first message' })
+  send(busyReader, { type: 'send', recipientUserId: 'alice', requestId: replyId, clientMessageId: replyId, text: 'My first message' })
   assert.equal((await receive(busyReader, 'ack')).requestId, replyId)
   // Both allowances remain bounded independently.
   send(busyReader, { type: 'read', requestId: 'receipt-limit' })
   assert.equal((await receive(busyReader, 'error')).requestId, 'receipt-limit')
   const overflowId = crypto.randomUUID()
-  send(busySender, { type: 'send', requestId: overflowId, clientMessageId: overflowId, text: 'Over the send limit' })
+  send(busySender, { type: 'send', recipientUserId: 'bob', requestId: overflowId, clientMessageId: overflowId, text: 'Over the send limit' })
   assert.equal((await receive(busySender, 'error')).requestId, overflowId)
   assert.equal((await upgrade(await ticket('alice'), 'room', 'https://evil.test')).status, 403)
   assert.equal((await upgrade(await ticket('outsider'))).status, 403)
@@ -103,17 +103,23 @@ try {
   const first = await upgrade(oneUse); assert.equal(first.status, 101); first.webSocket.accept(); sockets.push(first.webSocket)
   assert.equal((await upgrade(oneUse)).status, 401)
   const alice = await connect('alice'), bob = await connect('bob'), other = await connect('carol', 'other')
+  const thirdMember = await connect('carol')
   const id = crypto.randomUUID()
-  send(alice, { type: 'send', clientMessageId: id, requestId: id, text: 'Hello Bob', authorUserId: 'mallory', authorAgentId: 'bot' })
+  send(alice, { type: 'send', recipientUserId: 'bob', clientMessageId: id, requestId: id, text: 'Hello Bob', authorUserId: 'mallory', authorAgentId: 'bot' })
   const delivered = await receive(bob, 'message')
   assert.equal(delivered.message.text, 'Hello Bob'); assert.equal(delivered.message.authorUserId, 'alice')
   const ack = await receive(alice, 'ack'); assert.equal(ack.message.id, delivered.message.id)
-  send(alice, { type: 'send', clientMessageId: id, requestId: id, text: 'duplicate' })
+  send(alice, { type: 'send', recipientUserId: 'bob', clientMessageId: id, requestId: id, text: 'duplicate' })
   assert.equal((await receive(alice, 'ack')).message.id, delivered.message.id)
   send(bob, { type: 'sync' }); assert.equal((await receive(bob, 'sync')).messages.length, 1)
   send(other, { type: 'sync' }); assert.equal((await receive(other, 'sync')).messages.length, 0)
   assert.equal(queues.get(other).some((event) => event.type === 'message'), false)
   send(bob, { type: 'sync', cursor: delivered.message.id }); assert.equal((await receive(bob, 'sync')).messages.length, 0)
+  send(thirdMember, { type: 'sync' })
+  assert.deepEqual((await receive(thirdMember, 'sync')).messages, [])
+  send(thirdMember, { type: 'history', cursor: delivered.message.id })
+  assert.match((await receive(thirdMember, 'error')).error, /Invalid history cursor/)
+  assert.ok(!queues.get(thirdMember).some(event => event.type === 'message'))
   // Resume an offline cursor across more than two complete replay pages.
   await mf.dispatchFetch('https://api.test/seed')
   let cursor = delivered.message.id
@@ -128,8 +134,9 @@ try {
   assert.equal(replay[0], 'seed-0'); assert.equal(replay.at(-1), 'seed-204')
   send(other, { type: 'history', cursor: delivered.message.id })
   assert.match((await receive(other, 'error')).error, /Invalid history cursor/)
-  send(bob, { type: 'typing' }); assert.equal((await receive(alice, 'typing')).userId, 'bob')
-  send(bob, { type: 'read' }); assert.equal((await receive(alice, 'read')).userId, 'bob')
+  send(bob, { type: 'typing', recipientUserId: 'alice' }); assert.equal((await receive(alice, 'typing')).userId, 'bob')
+  send(bob, { type: 'read', cursor: delivered.message.id }); assert.equal((await receive(alice, 'read')).userId, 'bob')
+  assert.ok(!queues.get(thirdMember).some(event => event.type === 'typing' || event.type === 'read'))
   const presence = await receive(bob, 'presence'); assert.equal(presence.users.filter((user) => user.id === 'alice').length, 1)
   const aliceTab = await connect('alice')
   send(alice, { type: 'agent.list' })
@@ -140,7 +147,7 @@ try {
   send(alice, { type: 'agent.invoke', requestId: privateId, agentId: 'agent-1', instruction: secret, userId: 'bob' })
   // The public room queue must remain responsive while the model is streaming.
   const publicId = crypto.randomUUID()
-  send(alice, { type: 'send', clientMessageId: publicId, requestId: publicId, text: 'Public while agent runs' })
+  send(alice, { type: 'send', recipientUserId: 'bob', clientMessageId: publicId, requestId: publicId, text: 'Public while agent runs' })
   assert.equal((await receive(alice, 'ack')).message.text, 'Public while agent runs')
   assert.equal(queues.get(alice).some((event) => event.type === 'agent.update' && event.job.status === 'complete'), false)
   const draft = await receive(alice, 'agent.document-preview')
@@ -179,10 +186,10 @@ try {
   assert.equal(JSON.stringify(publicHistory).includes(secret), false)
   assert.equal(JSON.stringify(publicHistory).includes('BOB_PRIVATE'), false)
   send(alice, { type: 'send', clientMessageId: crypto.randomUUID(), text: '@Scout ' + secret })
-  assert.match((await receive(alice, 'error')).error, /Select an agent/)
+  assert.match((await receive(alice, 'error')).error, /Select a room member/)
   const excerptMessage = 'Explain this excerpt\n\n> Contact @Scout for details';
   const excerptId = crypto.randomUUID();
-  send(alice, { type: 'send', requestId: excerptId, clientMessageId: excerptId, text: excerptMessage });
+  send(alice, { type: 'send', recipientUserId: 'bob', requestId: excerptId, clientMessageId: excerptId, text: excerptMessage });
   assert.equal((await receive(alice, 'ack')).message.text, excerptMessage);
   // Scheduler delivery uses real Durable Object storage and owner-only delivery.
   const scheduledId = 'c326b5dc-0fdd-4d70-b838-d155fe1ecacd'

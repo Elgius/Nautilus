@@ -29,7 +29,7 @@ test('history is the latest five public room messages, tenant-scoped and chronol
   const db = { roomMessage: { findMany: async (input: unknown) => { query = input; return ['5', '4', '3', '2', '1'].map(message) } } } as unknown as Database
   expect((await suggestionHistory(db, identity)).map(({ id }) => id)).toEqual(['1', '2', '3', '4', '5'])
   expect(query).toEqual({
-    where: { organizationId: 'org', roomId: 'room', authorAgentId: null, authorUserId: { not: null } },
+    where: { organizationId: 'org', roomId: 'room', recipientUserId: null, authorAgentId: null, authorUserId: { not: null } },
     select: { id: true, text: true, createdAt: true, editedAt: true },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 5,
   })

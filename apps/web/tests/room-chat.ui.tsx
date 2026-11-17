@@ -26,7 +26,7 @@ const { useRoomChat } = await import('../components/room/use-room-chat');
 let chat: ReturnType<typeof useRoomChat>;
 function Chat() {
   const state = useRoomChat('org', 'room', 'alice', true, {
-    messages: [{ id: 'bootstrap', text: 'Already visible', createdAt: '2026-01-01T00:00:00.000Z', editedAt: null, authorUserId: 'bob', authorUser: { name: 'Bob' }, authorAgent: null, documents: [] }],
+    messages: [{ id: 'bootstrap', text: 'Already visible', createdAt: '2026-01-01T00:00:00.000Z', editedAt: null, authorUserId: 'bob', recipientUserId: 'alice', authorUser: { name: 'Bob' }, authorAgent: null, documents: [] }],
     nextCursor: 'older-bootstrap',
   });
   useEffect(() => { chat = state; });
@@ -53,14 +53,14 @@ try {
     receive({ type: 'ready' });
     receive({ type: 'sync', messages: [], nextCursor: null });
     for (let index = 0; index < 40; index++) receive({ type: 'message', message: {
-      id: `message-${index}`, text: `Burst ${index}`, authorUserId: 'bob', createdAt: new Date().toISOString(),
+      id: `message-${index}`, text: `Burst ${index}`, authorUserId: 'bob', recipientUserId: 'alice', createdAt: new Date().toISOString(),
     } });
   });
   assert.equal(chat!.messages.length, 41);
   assert.deepEqual(socket.sent.find((event) => event.type === 'sync'), { type: 'sync', requestId: 'sync', cursor: 'bootstrap' });
   assert.equal(chat!.nextCursor, 'older-bootstrap', 'catch-up sync preserves older bootstrap pagination');
   assert.equal(receipts(), 1, 'a burst must not emit a receipt for every message');
-  await act(async () => { chat!.sendMessage('My first message'); });
+  await act(async () => { chat!.sendMessage('My first message', 'bob'); });
   assert.equal(socket.sent.filter((event) => event.type === 'send').length, 1);
   let saves = 0;
   const blockSave = (event: Event) => {
@@ -70,7 +70,7 @@ try {
   window.addEventListener('room-document-save', blockSave);
   const agent = { id: 'scout', name: 'Scout', role: 'Research' };
   await act(async () => { receive({ type: 'agent.history', jobs: [] }); });
-  assert.equal(socket.sent.filter((event) => event.type === 'agent.list').length, 0, 'Empty history keeps profile loading lazy');
+  assert.equal(socket.sent.filter((event) => event.type === 'agent.list').length, 1, 'The composer loads personal agents on connect');
   const historicalJob = { id: 'historical', agentId: agent.id, agentName: agent.name, instruction: 'Earlier question', reply: 'Earlier reply', status: 'complete', revision: 1, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' };
   await act(async () => { receive({ type: 'agent.history', jobs: [historicalJob] }); });
   assert.equal(socket.sent.filter((event) => event.type === 'agent.list').length, 1, 'Restored conversations load profiles without opening the picker');
@@ -115,14 +115,14 @@ try {
   await act(async () => { await pause(1100); });
   assert.equal(receipts(), 2, 'send the final receipt even when no more messages arrive');
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
-  await act(async () => { receive({ type: 'message', message: { id: 'hidden', authorUserId: 'bob', createdAt: new Date().toISOString() } }); });
+  await act(async () => { receive({ type: 'message', message: { id: 'hidden', authorUserId: 'bob', recipientUserId: 'alice', createdAt: new Date().toISOString() } }); });
   await act(async () => { await pause(1100); });
   assert.equal(receipts(), 2, 'hidden tabs must not mark new messages read');
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
   await act(async () => { document.dispatchEvent(new dom.Event('visibilitychange') as unknown as Event); });
   assert.equal(receipts(), 3);
   await act(async () => {
-    receive({ type: 'message', message: { id: 'before-unmount', authorUserId: 'bob', createdAt: new Date().toISOString() } });
+    receive({ type: 'message', message: { id: 'before-unmount', authorUserId: 'bob', recipientUserId: 'alice', createdAt: new Date().toISOString() } });
   });
   await act(async () => { root.unmount(); });
   await pause(1100);
