@@ -344,20 +344,24 @@ function withdrawnHistory(jobs: PrivateAgentJob[]) {
   return jobs.map((job) => job.knowledgeReferences?.some((ref) => ref.id === knowledgeSource.id) ? { ...job, sources: [], citations: [], knowledgeUnavailable: true, reply: 'Knowledge is no longer available.' } : job)
 }
 
-test('activity archives cannot replay retrieved answers without source authorization', async () => {
-  const archived: PrivateAgentJob[] = []
+test('sourced answers and dependencies outlive rolling history without destructive import redaction', async () => {
+  const archived = new Map<string, PrivateAgentJob>()
+  let withdrawn = false
   const h = harness({ reply: 'TEAM_SECRET [Plan](#source-knowledge-source)',
-    archive: async (_identity, job) => { archived.push(structuredClone(job)) },
+    archive: async (_identity, job) => { archived.set(job.id, structuredClone(job)) },
+    filterHistory: async (_identity, jobs) => withdrawn ? withdrawnHistory(jobs) : jobs,
     onRun: async (run) => { await run.sources?.([knowledgeSource]) },
   })
   await h.invoke(); await settle(h.tasks)
   const job = (await h.service.history(alice))[0]
   expect(job.reply).toContain('TEAM_SECRET')
+  withdrawn = true
+  expect((await h.service.history(alice))[0].reply).not.toContain('TEAM_SECRET')
   await h.service.archiveHistory(alice)
-  const terminal = archived.filter((entry) => entry.id === job.id && entry.status === 'complete')
-  expect(terminal.length).toBeGreaterThan(0)
-  expect(terminal.every((entry) => !entry.reply.includes('TEAM_SECRET'))).toBe(true)
-  expect(terminal.at(-1)?.reply).toContain('private room conversation')
+  expect(archived.get(job.id)).toMatchObject({ reply: job.reply, sources: job.sources, knowledgeReferences: job.knowledgeReferences })
+  for (let index = 0; index < 50; index++) { await h.invoke(alice, `Later question ${index}`); await settle(h.tasks) }
+  expect((await h.service.history(alice)).some((entry) => entry.id === job.id)).toBe(false)
+  expect(archived.get(job.id)).toMatchObject({ status: 'complete', reply: job.reply, sources: job.sources, knowledgeReferences: job.knowledgeReferences })
 })
 
 test('withdrawing knowledge filters every live update and stops the active run', async () => {

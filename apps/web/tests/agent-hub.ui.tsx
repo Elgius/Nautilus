@@ -99,9 +99,28 @@ try {
   await click('Room tools');
   assert.ok(host.querySelector('[aria-label="Agent Hub instruction"]'), 'Room tools expose the cited, tool-enabled conversation');
   assert.equal(savedChats.parentElement?.hidden, true);
+  const roomInstruction = host.querySelector('[aria-label="Agent Hub instruction"]') as HTMLTextAreaElement;
+  const roomReasoning = host.querySelector('[aria-label="Agent reasoning effort"]') as HTMLSelectElement;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(dom.HTMLTextAreaElement.prototype, 'value')!.set!.call(roomInstruction, 'Keep this instruction across views');
+    roomInstruction.dispatchEvent(new Event('input', { bubbles: true }));
+    roomReasoning.value = 'high'; roomReasoning.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  failSend = true;
+  await click('Send');
+  const uncertainRun = requests.filter((request) => request.path.endsWith('/runs')).at(-1)!.body!;
+  assert.equal(roomInstruction.disabled, true, 'Uncertain acceptance must retain the exact request');
   await click('Private conversations');
   assert.equal(host.querySelector('[aria-label="Agent hub"]'), savedChats, 'Switching views must preserve the saved conversation component');
   assert.equal(savedChats.parentElement?.hidden, false);
+  assert.equal(roomInstruction.closest('[aria-label="Agent Hub chat"]')?.parentElement?.hidden, true);
+  await click('Room tools');
+  assert.equal(host.querySelector('[aria-label="Agent Hub instruction"]'), roomInstruction, 'Room tools must stay mounted');
+  assert.equal(roomInstruction.value, 'Keep this instruction across views');
+  assert.equal(roomReasoning.value, 'high');
+  assert.equal(roomInstruction.disabled, true, 'Pending acceptance must survive a view switch');
+  await click('Retry sending instruction');
+  assert.deepEqual(requests.filter((request) => request.path.endsWith('/runs')).at(-1)!.body, uncertainRun, 'Retry must preserve the original request ID and options');
   console.log('Agent Hub UI checks passed: discovery, exact retry, configured options, tools, citations, history, terminal-error recovery, and switching between saved chats and room tools.');
 } finally {
   await act(async () => root.unmount());

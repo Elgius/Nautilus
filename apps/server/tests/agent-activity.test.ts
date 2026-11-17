@@ -3,18 +3,22 @@ import { Hono } from 'hono'
 import { agentActivity, activityQuery, activityScope, activityStatus, archiveAgentRun } from '../src/agent-activity'
 import type { AppEnv } from '../src/index'
 import type { Database } from '../src/db'
-import type { ActivityPage } from '../../../shared/agent-activity'
-import type { PrivateAgentJob } from '../../../shared/room-chat'
+import type { ActivityDetail, ActivityPage } from '../../../shared/agent-activity'
+import type { HubSource, PrivateAgentJob } from '../../../shared/room-chat'
 
 function harness() {
   const queries: { operation: string; query: unknown }[] = []
   let rows: Record<string, unknown>[] = []
+  let detail: Record<string, unknown> | null = null, sources: Record<string, unknown>[] = [], unavailable = false, roomAccess = true
   const db = {
     agentActivityRun: {
       findMany: async (query: { distinct?: string[]; where: { status?: unknown } }) => { queries.push({ operation: 'list', query }); return query.distinct || query.where.status ? [] : rows },
-      findFirst: async (query: unknown) => { queries.push({ operation: 'detail', query }); return null },
+      findFirst: async (query: unknown) => { queries.push({ operation: 'detail', query }); return detail },
     },
     room: { findMany: async (query: unknown) => { queries.push({ operation: 'rooms', query }); return [] } },
+    document: { findMany: async () => [] }, plannerTask: { findMany: async () => [] },
+    knowledgeSource: { findMany: async (query: unknown) => { queries.push({ operation: 'knowledge', query }); if (unavailable) throw new Error('Knowledge unavailable'); return sources } },
+    member: { findUnique: async () => ({ role: 'owner' }) }, roomMember: { findFirst: async () => roomAccess ? { role: 'OWNER' } : null },
   } as unknown as Database
   const app = new Hono<AppEnv>()
   app.use('*', async (c, next) => {
@@ -23,7 +27,8 @@ function harness() {
     await next()
   })
   app.route('/activity', agentActivity)
-  return { app, queries, setRows: (value: typeof rows) => { rows = value } }
+  return { app, queries, setRows: (value: typeof rows) => { rows = value }, setDetail: (value: typeof detail) => { detail = value },
+    setSources: (value: typeof sources) => { sources = value }, outage: () => { unavailable = true }, denySourceRoom: () => { roomAccess = false } }
 }
 
 test('activity rejects injected ownership and invalid filters', async () => {
@@ -70,4 +75,49 @@ test('archive uses monotonic replay-safe upserts and separates cancellation from
   expect(statement).toContain('WHERE "agentActivityRun".revision < EXCLUDED.revision')
   expect(values.slice(0, 4)).toEqual(['org', 'room', 'alice', 'run'])
   expect(values).toContain('scheduled'); expect(values).toContain('cancelled')
+  expect(statement).toContain('"agentActivityRun".revision = EXCLUDED.revision AND "agentActivityRun".evidence =');
+  const sources: HubSource[] = [{ id: 'plan', kind: 'document', scope: 'ROOM', title: 'Plan', body: 'Saved', roomId: 'room', documentId: 'doc', messageId: null, updatedAt: '', citations: [{ quote: 'Saved', locator: 'Body', documentVersionId: 'v1' }] }]
+  await archiveAgentRun(db, { organizationId: 'org', roomId: 'room', userId: 'alice', sessionId: 'session' }, { ...job, sources, knowledgeReferences: [{ id: 'knowledge', revision: 1 }] })
+  expect(values).toContain(JSON.stringify({ sources, knowledgeReferences: [{ id: 'knowledge', revision: 1 }] }))
+})
+
+test('archived replies reauthorize evidence and return citations without exposing withdrawn findings', async () => {
+  const h = harness()
+  const source: HubSource = { id: 'knowledge', title: 'Plan', revision: 1, scope: 'PERSONAL', roomId: 'source-room', documentId: 'doc', messageId: null, updatedAt: '', body: 'TEAM_SECRET', citations: [{ quote: 'TEAM_SECRET', locator: 'Body', documentVersionId: 'v1' }] }
+  const row = { id: source.id, organizationId: 'org', roomId: source.roomId, base: { scope: 'PERSONAL', ownerUserId: 'alice' }, taggedByUserId: 'alice', revokedAt: null as Date | null,
+    revision: 2, lastProcessedRevision: 2, lastProcessedVersionId: 'v1', document: { currentVersionId: 'v1' }, message: null, entry: { revision: 1, sourceRevision: 2 } }
+  const detail = { instruction: 'My question', reply: 'TEAM_SECRET [Plan](#source-knowledge)', error: null, commits: [], taskCommits: [], evidence: { sources: [source], knowledgeReferences: [{ id: source.id, revision: 1 }] } }
+  h.setDetail(detail); h.setSources([row])
+  const read = async () => {
+    const response = await h.app.request('/activity/room/run')
+    expect(response.status).toBe(200)
+    return response.json() as Promise<ActivityDetail>
+  }
+  expect(await read()).toMatchObject({ reply: detail.reply, knowledgeUnavailable: false, citations: [{ sourceId: source.id, quote: 'TEAM_SECRET', number: 1 }] })
+  expect(h.queries.find((query) => query.operation === 'knowledge')?.query).toMatchObject({ where: { organizationId: 'org', revokedAt: null, base: { OR: [{ scope: 'PERSONAL', ownerUserId: 'alice' }, { scope: 'ORGANIZATION', ownerUserId: null }] } } })
+  row.revokedAt = new Date()
+  const withdrawn = await read()
+  expect(withdrawn.knowledgeUnavailable).toBe(true); expect(withdrawn.citations).toEqual([])
+  expect(JSON.stringify(withdrawn)).not.toContain('TEAM_SECRET')
+  row.revokedAt = null
+  expect((await read()).reply).toBe(detail.reply)
+  row.entry.revision = 2
+  expect(JSON.stringify(await read())).not.toContain('TEAM_SECRET')
+  row.entry.revision = 1
+  h.denySourceRoom()
+  expect(JSON.stringify(await read())).not.toContain('TEAM_SECRET')
+  h.setDetail({ ...detail, evidence: { sources: [], knowledgeReferences: detail.evidence.knowledgeReferences } })
+  expect(JSON.stringify(await read())).not.toContain('TEAM_SECRET')
+  h.outage()
+  const outage = await h.app.request('/activity/room/run')
+  expect(outage.status).toBe(500); expect(await outage.text()).not.toContain('TEAM_SECRET')
+  expect(detail.reply).toContain('TEAM_SECRET') // Redaction must never overwrite the archive.
+})
+
+test('legacy archives without evidence remain readable', async () => {
+  const h = harness()
+  h.setDetail({ instruction: 'My question', reply: 'Plain answer', error: null, commits: [], taskCommits: [], evidence: {} })
+  const response = await h.app.request('/activity/room/run')
+  expect(response.status).toBe(200)
+  expect(await response.json()).toMatchObject({ reply: 'Plain answer', citations: [], knowledgeUnavailable: false })
 })

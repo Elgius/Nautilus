@@ -772,6 +772,7 @@ model AgentActivityRun {
   activities Json
   commits Json
   taskCommits Json
+  evidence Json @default("{}")
   createdAt DateTime
   updatedAt DateTime
   startedAt DateTime?

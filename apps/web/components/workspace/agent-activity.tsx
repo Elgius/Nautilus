@@ -12,6 +12,7 @@ import { workspaceFetch } from "@/lib/workspace-data";
 import type { ActivityDetail, ActivityPage, ActivityRun, ActivityStatus } from "../../../../shared/agent-activity";
 import { ViewLoading } from "./view-boundary";
 import "./agent-activity.css";
+import { AgentReply } from "@/components/room/private-agent-conversation";
 
 const statusLabels: Record<ActivityStatus, string> = { queued: "Queued", running: "Running", complete: "Completed", failed: "Failed", cancelled: "Cancelled" };
 const roomHref = (roomId: string) => `/room-id=${encodeURIComponent(roomId)}`;
@@ -28,7 +29,7 @@ function RunDetails({ base, run, userId }: { base: string; run: ActivityRun; use
   if (!data) return <p role="status">Loading request…</p>;
   return <div className="agent-run-details">
     <div><h4>Your request</h4><p>{data.instruction}</p></div>
-    {data.reply && <div><h4>Agent response</h4><p>{data.reply}</p></div>}
+    {data.reply && <div><h4>Agent response</h4><AgentReply text={data.reply} citations={data.citations} /></div>}
     {data.error && <p role="status" className="agent-run-error">{data.error}</p>}
     {!!data.documents.length && <div><h4>Saved documents</h4><ul>{data.documents.map((doc) => <li key={doc.versionId}><FileText size={14} />{doc.available ? <Link href={`${roomHref(run.roomId)}?${new URLSearchParams({ document: doc.documentId })}`}>{doc.title}</Link> : <span>{doc.title}</span>}<span>Version {doc.versionNumber}</span></li>)}</ul></div>}
     {!!data.tasks.length && <div><h4>Saved task changes</h4><ul>{data.tasks.map((task, index) => <li key={`${task.taskId}:${task.revision}:${index}`}><ListTodo size={14} /><span>{task.title}</span><span>Revision {task.revision}{!task.available ? " · Deleted" : ""}</span></li>)}</ul><Link href="/kanban">Open task list</Link></div>}

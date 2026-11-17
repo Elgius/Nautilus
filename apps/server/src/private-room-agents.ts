@@ -85,12 +85,7 @@ export class PrivateRoomAgents {
     for (const [key, entry] of entries) {
       if (!entry) continue
       try {
-        // Activity history has no source references for reauthorization. Keep
-        // retrieved answers in the Hub history, which checks evidence on replay.
-        const job = entry.job.sources?.length || entry.job.knowledgeReferences?.length
-          ? { ...entry.job, reply: 'Open the private room conversation to view this response and its sources.' }
-          : entry.job
-        await this.deps.archive(entry.identity, job)
+        await this.deps.archive(entry.identity, entry.job)
         await this.deps.storage.transaction(async (tx) => {
           const current = await tx.get<ArchiveEntry>(key)
           if (current?.job.revision === entry.job.revision) await tx.delete(key)
@@ -100,7 +95,9 @@ export class PrivateRoomAgents {
     return success
   }
   async archiveHistory(identity: ChatIdentity) {
-    const jobs = await this.history(identity)
+    // Persist original answers and their dependencies. Authorization belongs at
+    // read time; an import while knowledge is withdrawn must not destroy them.
+    const jobs = await this.retainedHistory(identity)
     await this.deps.storage.transaction(async (tx) => {
       for (const job of jobs) {
         const key = `${OUTBOX}${this.key(identity, job.id)}`
@@ -123,7 +120,7 @@ export class PrivateRoomAgents {
       .map((entry) => this.deps.storage.get<AgentWorkActivity[]>(ACTIVITIES + this.key(entry.identity, entry.id))))
     return { queued: queue.filter((entry) => !entry.token).length, activities: activities.flatMap((items) => items ?? []) }
   }
-  async history(identity: ChatIdentity) {
+  private async retainedHistory(identity: ChatIdentity) {
     const ids = await this.deps.storage.get<string[]>(`${this.prefix(identity)}index`) ?? []
     const queue = await this.deps.storage.get<Entry[]>(QUEUE) ?? []
     const jobs: PrivateAgentJob[] = []
@@ -138,6 +135,10 @@ export class PrivateRoomAgents {
       }
       jobs.push(job)
     }
+    return jobs
+  }
+  async history(identity: ChatIdentity) {
+    const jobs = await this.retainedHistory(identity)
     const visible = this.deps.filterHistory ? await this.deps.filterHistory(identity, jobs) : jobs
     return visible.map((job) => ({ ...job, citations: buildHubCitations(job.reply, job.sources ?? []) }))
   }

@@ -5,7 +5,7 @@ import { HTTPException } from 'hono/http-exception'
 import type { Database } from '../db'
 import { sourceAccess, entryIsCurrent, sourceInclude, type KnowledgeIdentity, type KnowledgeScope } from '../knowledge/service'
 import type { AgentSkill } from '../agent_interface/skills'
-import type { HubSource } from '../../../../shared/room-chat'
+import type { HubCitation, HubSource, PrivateAgentJob } from '../../../../shared/room-chat'
 
 /** Retrieval is performed as the requesting human, never as an agent identity. */
 export function hubKnowledge(db: Database, identity: KnowledgeIdentity) {
@@ -49,9 +49,9 @@ export function createKnowledgeSkill(withDatabase: <T>(action: (db: Database) =>
 }
 
 /** Do not replay withdrawn knowledge through chat history or back into a model. */
-export async function authorizedHubHistory(db: Database, identity: KnowledgeIdentity, jobs: import('../../../../shared/room-chat').PrivateAgentJob[]) {
+export async function authorizedHubHistory<T extends Pick<PrivateAgentJob, 'reply' | 'sources' | 'knowledgeReferences' | 'citations' | 'knowledgeUnavailable'>>(db: Database, identity: KnowledgeIdentity, jobs: T[]): Promise<(T & { citations: HubCitation[]; knowledgeUnavailable?: boolean })[]> {
   const ids = [...new Set(jobs.flatMap((job) => (job.knowledgeReferences ?? job.sources?.filter((source) => !source.kind || source.kind === 'knowledge'))?.map((source) => source.id) ?? []))]
-  if (!ids.length) return jobs
+  if (!ids.length) return jobs.map((job) => ({ ...job, citations: buildHubCitations(job.reply, job.sources ?? []) }))
   const rows = await db.knowledgeSource.findMany({ where: { organizationId: identity.organizationId, id: { in: ids }, revokedAt: null,
     base: { OR: [{ scope: 'PERSONAL', ownerUserId: identity.userId }, { scope: 'ORGANIZATION', ownerUserId: null }] } }, include: { ...sourceInclude, entry: true } })
   const available = new Map<string, { version: string | null; revision: number }>()

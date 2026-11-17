@@ -10,10 +10,10 @@ import remarkGfm from "remark-gfm";
 import { RoomAgentAvatar } from "./room-agent-avatar";
 import type { AgentAppearance } from "../../../../shared/agent-appearance";
 import { Button } from "@/components/ui/button";
-import type { AgentRunMode, PrivateAgentJob, RoomAgentOption } from "../../../../shared/room-chat";
+import type { AgentRunMode, HubCitation, PrivateAgentJob, RoomAgentOption } from "../../../../shared/room-chat";
 
-export const AgentReply = memo(function AgentReply({ text, job }: { text: string; job?: PrivateAgentJob }) {
-  const citations = job?.citations ?? buildHubCitations(text, job?.sources ?? []);
+export const AgentReply = memo(function AgentReply({ text, job, citations: suppliedCitations }: { text: string; job?: PrivateAgentJob; citations?: HubCitation[] }) {
+  const citations = suppliedCitations ?? job?.citations ?? buildHubCitations(text, job?.sources ?? []);
   return <div className="room-private-reply">
     <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{
       a: ({ href, title, children }) => {

@@ -36,16 +36,17 @@ type HubProps = {
 
 export function AgentHub(props: HubProps) {
   const [roomTools, setRoomTools] = useState(false);
+  const [roomToolsMounted, setRoomToolsMounted] = useState(false);
   const [changed, setChanged] = useState(false);
   const onSessionChanged = useCallback(() => setChanged(true), []);
   if (changed) return <section role="alert">Your session changed. <Button onClick={() => window.location.reload()}>Reload workspace</Button></section>;
   return <>
     <div role="group" aria-label="Agent hub workspace" className="flex gap-2 mb-3">
       <Button variant={roomTools ? "ghost" : "secondary"} aria-pressed={!roomTools} onClick={() => setRoomTools(false)}>Private conversations</Button>
-      <Button variant={roomTools ? "secondary" : "ghost"} aria-pressed={roomTools} onClick={() => setRoomTools(true)}>Room tools</Button>
+      <Button variant={roomTools ? "secondary" : "ghost"} aria-pressed={roomTools} onClick={() => { setRoomToolsMounted(true); setRoomTools(true); }}>Room tools</Button>
     </div>
     <div hidden={roomTools}><HubWorkspace {...props} onSessionChanged={onSessionChanged} /></div>
-    {roomTools && <AgentHubChat organizationId={props.organizationId} userId={props.userId} />}
+    {roomToolsMounted && <div hidden={!roomTools}><AgentHubChat organizationId={props.organizationId} userId={props.userId} /></div>}
   </>;
 }
 

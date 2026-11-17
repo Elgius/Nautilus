@@ -30,7 +30,7 @@ Nautilus organizes people, agents, documents, and tasks into rooms within an org
 
 ## Agent tools
 
-The Agent Hub keeps saved profile chats under **Private conversations** and exposes document, knowledge, Kanban, Calendar, source citations, and confirmations under **Room tools**. Room-backed answers are reauthorized on replay; Activity directs readers back to that conversation for retrieved answers.
+The Agent Hub keeps saved profile chats under **Private conversations** and exposes document, knowledge, Kanban, Calendar, source citations, and confirmations under **Room tools**. Switching views preserves drafts, settings, and pending retries. Activity retains sourced answers beyond rolling chat history, displays their citations, and rechecks knowledge access whenever a saved answer is loaded.
 
 | Capability | Behavior | Implementation |
 | --- | --- | --- |
