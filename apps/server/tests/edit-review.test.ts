@@ -32,21 +32,31 @@ test('review distinguishes requested new factual content and returns a safe reas
 
 test('review instructions cover heading formatting after the requested section has been saved', async () => {
   const reviewer = model('{"approved":true,"reason":null}')
+  const oldSection = 'Pacific Ocean\rAn existing section.'
+  const heading = { paragraphId: 'pacific-heading', startIndex: oldSection.length + 14, paragraphStyle: {} }
   const candidate: EditReview = {
     documentId: 'doc', expectedVersionId: 'v5', kind: 'DOCUMENT', changeSummary: 'Style the Pacific Ocean heading',
     edits: [{ type: 'formatParagraph', paragraphId: 'pacific-heading', style: { namedStyleType: 4 } }],
+    savedDocumentEdits: {
+      baseVersionId: 'v4', savedVersionId: 'v5',
+      edits: [{ type: 'insertText', index: oldSection.length, text: '\nPacific Ocean\nThe Pacific is the largest ocean.' }],
+    },
     reads: [{ documentId: 'doc', currentVersionId: 'v5', kind: 'DOCUMENT', reads: [{ operation: 'readDocument', args: {}, result: {
       body: {
-        dataStream: 'Pacific Ocean\rThe Pacific is the largest ocean.\r\n',
-        paragraphs: [{ paragraphId: 'pacific-heading', startIndex: 13, paragraphStyle: {} }],
+        dataStream: `${oldSection}\rPacific Ocean\rThe Pacific is the largest ocean.\r\n`,
+        paragraphs: [{ paragraphId: 'existing-heading', startIndex: 13, paragraphStyle: {} }, heading],
       },
     } }] }],
   }
   await reviewDocumentEdit(reviewer, [{ role: 'user', content: 'Add a Pacific Ocean section and paragraph.' }], candidate, new AbortController().signal)
   const { prompt } = reviewer.doGenerateCalls[0]
-  expect(prompt[0].content).toContain('a separate formatting-only batch after the section has been saved')
-  expect(prompt[0].content).toContain('the read of the current version')
-  expect(JSON.stringify(prompt)).toContain('pacific-heading')
+  expect(prompt[0].content).toContain('A heading with matching text alone does not establish that the earlier batch inserted it.')
+  const message = prompt.find(({ role }) => role === 'user')
+  const part = message?.content.find(({ type }) => type === 'text')
+  if (!part) throw new Error('Missing reviewer payload')
+  const payload = JSON.parse(part.text)
+  expect(payload.candidate.reads).toEqual(candidate.reads)
+  expect(payload.candidate.savedDocumentEdits).toEqual(candidate.savedDocumentEdits)
 })
 
 test('rejection and malformed review output fail closed', async () => {

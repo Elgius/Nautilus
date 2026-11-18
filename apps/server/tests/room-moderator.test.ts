@@ -150,6 +150,31 @@ test('direct commits require independent review before writing', async () => {
 })
 
 
+test('heading review receives only saved insertion evidence that matches the document version', async () => {
+  const reviews: EditReview[] = []
+  const h = harness(undefined, async (candidate) => { reviews.push(candidate) })
+  const read = () => execute(h.skills, 'readDocument', { documentId: 'doc' })
+  const insert = { ...edit, edits: [{ type: 'insertText', index: 5, text: '\nPacific Ocean\nNew body.' }] }
+  const format = (expectedVersionId: string) => execute(h.skills, 'applyDocumentEdits', {
+    ...edit, expectedVersionId,
+    edits: [{ type: 'formatParagraph', paragraphId: 'pacific-heading', style: { namedStyleType: 4 } }],
+  })
+  await read()
+  await execute(h.skills, 'applyDocumentEdits', insert)
+  await read()
+  await format('v2')
+  await read()
+  await format('v3')
+  h.changeVersion()
+  await read()
+  await format('v-other')
+
+  const saved = { baseVersionId: 'v1', savedVersionId: 'v2', edits: insert.edits }
+  expect(reviews.map(({ expectedVersionId, savedDocumentEdits }) => [expectedVersionId, savedDocumentEdits]))
+    .toEqual([['v1', undefined], ['v2', saved], ['v3', saved], ['v-other', undefined]])
+  expect(reviews[1].reads).toMatchObject([{ documentId: 'doc', currentVersionId: 'v2' }])
+})
+
 test('cancellation during review blocks committing an approved edit', async () => {
   const controller = new AbortController()
   const h = harness(undefined, async () => { controller.abort() }, controller.signal)
