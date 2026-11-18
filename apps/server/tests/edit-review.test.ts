@@ -52,7 +52,8 @@ test('review instructions cover heading formatting after the requested section h
   const { prompt } = reviewer.doGenerateCalls[0]
   expect(prompt[0].content).toContain('A heading with matching text alone does not establish that the earlier batch inserted it.')
   const message = prompt.find(({ role }) => role === 'user')
-  const part = message?.content.find(({ type }) => type === 'text')
+  if (message?.role !== 'user') throw new Error('Missing reviewer message')
+  const part = message.content.find(({ type }) => type === 'text')
   if (!part) throw new Error('Missing reviewer payload')
   const payload = JSON.parse(part.text)
   expect(payload.candidate.reads).toEqual(candidate.reads)

@@ -154,7 +154,7 @@ test('heading review receives only saved insertion evidence that matches the doc
   const reviews: EditReview[] = []
   const h = harness(undefined, async (candidate) => { reviews.push(candidate) })
   const read = () => execute(h.skills, 'readDocument', { documentId: 'doc' })
-  const insert = { ...edit, edits: [{ type: 'insertText', index: 5, text: '\nPacific Ocean\nNew body.' }] }
+  const insert = { ...edit, edits: [{ type: 'insertText' as const, index: 5, text: '\nPacific Ocean\nNew body.' }] }
   const format = (expectedVersionId: string) => execute(h.skills, 'applyDocumentEdits', {
     ...edit, expectedVersionId,
     edits: [{ type: 'formatParagraph', paragraphId: 'pacific-heading', style: { namedStyleType: 4 } }],
