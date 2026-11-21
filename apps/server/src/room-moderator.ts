@@ -40,6 +40,34 @@ type Dependencies = {
   specialist: (profile: PrivateAgentProfile, instruction: string, signal: AbortSignal, skills: AgentSkill[]) => Promise<string>
 }
 
+// Track surviving inserted text in saved-version coordinates as each operation runs.
+function insertedRanges(edits: Proposal['edits']) {
+  let ranges: SavedDocumentEdits['insertedRanges'] = []
+  for (const edit of edits) {
+    if (edit.type === 'insertTable' || edit.type === 'deleteTable' || edit.type === 'setTableCell') {
+      // Table operations can shift main-body offsets without exposing their span.
+      ranges = ranges.filter(range => range.segmentId !== '')
+      continue
+    }
+    if (edit.type !== 'insertText' && edit.type !== 'replaceText' && edit.type !== 'deleteText') continue
+    const segmentId = edit.segmentId ?? ''
+    const start = edit.type === 'insertText' ? edit.index : edit.start
+    const end = edit.type === 'insertText' ? start : edit.end
+    const length = edit.type === 'deleteText' ? 0 : edit.text.replace(/\r\n|\n/g, '\r').length
+    const shift = start + length - end
+    ranges = ranges.flatMap(range => {
+      if (range.segmentId !== segmentId || range.end <= start) return [range]
+      if (range.start >= end) return [{ segmentId, start: range.start + shift, end: range.end + shift }]
+      const remaining = []
+      if (range.start < start) remaining.push({ segmentId, start: range.start, end: start })
+      if (range.end > end) remaining.push({ segmentId, start: start + length, end: range.end + shift })
+      return remaining
+    })
+    if (length) ranges.push({ segmentId, start, end: start + length })
+  }
+  return ranges
+}
+
 /** Specialists can prepare typed edits, but cannot call a shared-document writer. */
 export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRunContext, signal: AbortSignal, deps: Dependencies) {
   const proposals = new Map<string, Proposal>()
@@ -79,10 +107,10 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
     const reads = [...evidence].map(([id, entry]) => ({
       documentId: id, currentVersionId: entry.version, kind: entry.kind, reads: entry.reads,
     }))
-    const formattingOnly = kind === 'DOCUMENT' && edits.every(({ type }) =>
+    const formattingEdits = edits.filter(({ type }) =>
       type === 'formatParagraph' || type === 'formatText' || type === 'formatFont')
     const prior = savedEdits.get(documentId)
-    const savedDocumentEdits = formattingOnly && prior?.currentVersionId === expectedVersionId ? prior.batch : undefined
+    const savedDocumentEdits = kind === 'DOCUMENT' && formattingEdits.length > 0 && prior?.currentVersionId === expectedVersionId ? prior.batch : undefined
     await deps.review({ documentId, expectedVersionId, kind, edits, changeSummary: summary, reads, savedDocumentEdits }, commitSignal)
     commitSignal.throwIfAborted()
     await source.authorize()
@@ -90,11 +118,11 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
       phase: 'applying', target: targetLabel(edits[0]?.type ?? '', edits[0] ?? {}) }, profile.id)
     const result = await source.edit(documentId, expectedVersionId, kind, edits, summary, commitSignal) as { versionId: string; versionNumber: number }
     // Formatting preserves the text offsets tracked by the last saved insertion.
-    if (savedDocumentEdits) {
+    if (savedDocumentEdits && formattingEdits.length === edits.length) {
       savedEdits.set(documentId, { currentVersionId: result.versionId, batch: savedDocumentEdits })
     } else if (kind === 'DOCUMENT' && edits.some(({ type }) => type === 'insertText' || type === 'replaceText')) {
       savedEdits.set(documentId, { currentVersionId: result.versionId, batch: {
-        baseVersionId: expectedVersionId, savedVersionId: result.versionId, edits,
+        baseVersionId: expectedVersionId, savedVersionId: result.versionId, insertedRanges: insertedRanges(edits),
       } })
     } else {
       savedEdits.delete(documentId)

@@ -154,7 +154,7 @@ test('heading review receives only saved insertion evidence that matches the doc
   const reviews: EditReview[] = []
   const h = harness(undefined, async (candidate) => { reviews.push(candidate) })
   const read = () => execute(h.skills, 'readDocument', { documentId: 'doc' })
-  const insert = { ...edit, edits: [{ type: 'insertText' as const, index: 5, text: '\nPacific Ocean\nNew body.' }] }
+  const insert = { ...edit, edits: [{ type: 'insertText' as const, index: 5, text: '\r\nPacific Ocean' }] }
   const format = (expectedVersionId: string) => execute(h.skills, 'applyDocumentEdits', {
     ...edit, expectedVersionId,
     edits: [{ type: 'formatParagraph', paragraphId: 'pacific-heading', style: { namedStyleType: 4 } }],
@@ -164,15 +164,46 @@ test('heading review receives only saved insertion evidence that matches the doc
   await read()
   await format('v2')
   await read()
-  await format('v3')
+  const body = '\r' + 'x'.repeat(55_000)
+  await execute(h.skills, 'applyDocumentEdits', {
+    ...edit, expectedVersionId: 'v3', edits: [
+      { type: 'formatParagraph', paragraphId: 'pacific-heading', style: { namedStyleType: 4 } },
+      { type: 'insertText', index: 19, text: body },
+    ],
+  })
+  await read()
+  await format('v4')
   h.changeVersion()
   await read()
   await format('v-other')
 
-  const saved = { baseVersionId: 'v1', savedVersionId: 'v2', edits: insert.edits }
+  const saved = { baseVersionId: 'v1', savedVersionId: 'v2', insertedRanges: [{ segmentId: '', start: 5, end: 19 }] }
+  const savedBody = { baseVersionId: 'v3', savedVersionId: 'v4', insertedRanges: [{ segmentId: '', start: 19, end: 19 + body.length }] }
   expect(reviews.map(({ expectedVersionId, savedDocumentEdits }) => [expectedVersionId, savedDocumentEdits]))
-    .toEqual([['v1', undefined], ['v2', saved], ['v3', saved], ['v-other', undefined]])
+    .toEqual([['v1', undefined], ['v2', saved], ['v3', saved], ['v4', savedBody], ['v-other', undefined]])
   expect(reviews[1].reads).toMatchObject([{ documentId: 'doc', currentVersionId: 'v2' }])
+})
+
+test('saved insertion ranges follow sequential offsets and stay within their segment', async () => {
+  const reviews: EditReview[] = []
+  const h = harness(undefined, async candidate => { reviews.push(candidate) })
+  const read = () => execute(h.skills, 'readDocument', { documentId: 'doc' })
+  await read()
+  await execute(h.skills, 'applyDocumentEdits', { ...edit, edits: [
+    { type: 'insertText', index: 0, text: 'Title\r\n' },
+    { type: 'insertText', index: 0, text: 'Header', segmentId: 'header' },
+    { type: 'replaceText', start: 4, end: 7, expectedText: 'e\rH', text: 'es\r' },
+    { type: 'deleteText', start: 0, end: 2, expectedText: 'Ti' },
+  ] })
+  await read()
+  await execute(h.skills, 'applyDocumentEdits', { ...edit, expectedVersionId: 'v2', edits: [
+    { type: 'formatParagraph', paragraphId: 'heading', style: { namedStyleType: 4 } },
+  ] })
+  expect(reviews[1].savedDocumentEdits?.insertedRanges).toEqual([
+    { segmentId: '', start: 0, end: 2 },
+    { segmentId: 'header', start: 0, end: 6 },
+    { segmentId: '', start: 2, end: 5 },
+  ])
 })
 
 test('cancellation during review blocks committing an approved edit', async () => {

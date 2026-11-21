@@ -33,19 +33,21 @@ test('review distinguishes requested new factual content and returns a safe reas
 test('review instructions cover heading formatting after the requested section has been saved', async () => {
   const reviewer = model('{"approved":true,"reason":null}')
   const oldSection = 'Pacific Ocean\rAn existing section.'
-  const heading = { paragraphId: 'pacific-heading', startIndex: oldSection.length + 14, paragraphStyle: {} }
+  const inserted = '\rPacific Ocean\rThe Pacific is the largest ocean.'
+  const dataStream = oldSection + inserted + '\r\n'
+  const ids = ['existing-heading', 'existing-body', 'pacific-heading', 'pacific-body']
+  const paragraphs = Array.from(dataStream.matchAll(/\r/g), (delimiter, index) => ({
+    paragraphId: ids[index], startIndex: delimiter.index, paragraphStyle: {},
+  }))
   const candidate: EditReview = {
     documentId: 'doc', expectedVersionId: 'v5', kind: 'DOCUMENT', changeSummary: 'Style the Pacific Ocean heading',
     edits: [{ type: 'formatParagraph', paragraphId: 'pacific-heading', style: { namedStyleType: 4 } }],
     savedDocumentEdits: {
       baseVersionId: 'v4', savedVersionId: 'v5',
-      edits: [{ type: 'insertText', index: oldSection.length, text: '\nPacific Ocean\nThe Pacific is the largest ocean.' }],
+      insertedRanges: [{ segmentId: '', start: oldSection.length, end: oldSection.length + inserted.length }],
     },
     reads: [{ documentId: 'doc', currentVersionId: 'v5', kind: 'DOCUMENT', reads: [{ operation: 'readDocument', args: {}, result: {
-      body: {
-        dataStream: `${oldSection}\rPacific Ocean\rThe Pacific is the largest ocean.\r\n`,
-        paragraphs: [{ paragraphId: 'existing-heading', startIndex: 13, paragraphStyle: {} }, heading],
-      },
+      body: { dataStream, paragraphs },
     } }] }],
   }
   await reviewDocumentEdit(reviewer, [{ role: 'user', content: 'Add a Pacific Ocean section and paragraph.' }], candidate, new AbortController().signal)
@@ -58,6 +60,16 @@ test('review instructions cover heading formatting after the requested section h
   const payload = JSON.parse(part.text)
   expect(payload.candidate.reads).toEqual(candidate.reads)
   expect(payload.candidate.savedDocumentEdits).toEqual(candidate.savedDocumentEdits)
+  const body: { dataStream: string; paragraphs: typeof paragraphs } = payload.candidate.reads[0].reads[0].result.body
+  const [range] = payload.candidate.savedDocumentEdits.insertedRanges
+  for (const [id, isInserted] of [['existing-heading', false], [payload.candidate.edits[0].paragraphId, true]] as const) {
+    const index = body.paragraphs.findIndex(paragraph => paragraph.paragraphId === id)
+    expect(index).toBeGreaterThanOrEqual(0)
+    const start = index === 0 ? 0 : body.paragraphs[index - 1].startIndex + 1
+    const end = body.paragraphs[index].startIndex
+    expect(body.dataStream.slice(start, end + 1)).toBe('Pacific Ocean\r')
+    expect(start >= range.start && end <= range.end).toBe(isInserted)
+  }
 })
 
 test('rejection and malformed review output fail closed', async () => {
