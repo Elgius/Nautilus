@@ -7,11 +7,12 @@ import type { RoomWorkState } from '../../../../shared/room-chat';
 /** Polling covers read-only viewers, reconnects, and missed socket notifications.
  * Unknown status fails closed; local-only file previews do not use this guard.
  */
-export function useRoomWork(organizationId: string, roomId: string) {
+export function useRoomWork(organizationId: string, roomId: string, enabled = true) {
   const [state, setState] = useState<{ work: RoomWorkState; available: boolean }>({
     work: { locked: true, queued: 0, activities: [], expiresAt: null }, available: false,
   });
   useEffect(() => {
+    if (!enabled) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout>;
     let generation = 0;
@@ -33,6 +34,6 @@ export function useRoomWork(organizationId: string, roomId: string) {
     window.addEventListener('room-work-update', receive);
     void poll();
     return () => { disposed = true; clearTimeout(timer); window.removeEventListener('room-work-update', receive); };
-  }, [organizationId, roomId]);
+  }, [organizationId, roomId, enabled]);
   return { ...state.work, available: state.available, readOnly: !state.available || state.work.locked };
 }

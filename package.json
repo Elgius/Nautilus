@@ -30,6 +30,6 @@
     "@univerjs/engine-render@1.2.0": "patches/@univerjs%2Fengine-render@1.2.0.patch"
   },
   "dependencies": {
-    "open-bot-avatar": "0.2.1"
+    "open-bot-avatar": "0.3.0"
   }
 }

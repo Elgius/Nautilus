@@ -51,6 +51,8 @@ try {
   await page.getByRole('textbox', { name: 'Agent Hub instruction' }).fill('Look up the launch plan and delete the old task.');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await page.getByRole('button', { name: 'Approve deletion' }).waitFor();
+  await page.getByText('Awaiting approval', { exact: true }).waitFor();
+  await page.locator('.room-private-turn [data-avatar-state="waiting"]').waitFor();
   await page.getByRole('button', { name: 'Citation 1: Launch plan' }).click();
   await page.locator('[data-slot="inline-citation-card-body"]').getByText('Launch approved by the team.', { exact: true }).waitFor();
   await page.locator('[data-slot="inline-citation-card-body"]').getByText('Saved version: v1').waitFor();
@@ -62,6 +64,9 @@ try {
   await page.screenshot({ path: '/tmp/nautilus-hub-desktop.png', fullPage: true });
   await page.getByRole('button', { name: 'Approve deletion' }).click();
   await page.getByText('Approved', { exact: true }).waitFor();
+  await page.locator('.room-private-turn [data-avatar-state="done"]').waitFor();
+  await page.getByRole('status').filter({ hasText: /^Completed$/ }).waitFor();
+  await page.locator('.room-private-turn [data-avatar-state="idle"]').waitFor();
   assert.equal(await page.locator('a[href="/kanban?task=task"]').count(), 1);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Citation 1: Launch plan' }).click();

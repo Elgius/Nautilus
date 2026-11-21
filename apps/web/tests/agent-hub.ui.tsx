@@ -14,11 +14,18 @@ const requests: { path: string; body?: Record<string, unknown> }[] = [];
 const jobs: PrivateAgentJob[] = [];
 let failSend = true;
 let rejection: number | null = null;
+let finishPrivateReply: ((ok: boolean) => void) | undefined;
 const originalFetch = globalThis.fetch;
 Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (url: string, init?: RequestInit) => {
   const path = String(url), body = init?.body ? JSON.parse(String(init.body)) : undefined;
   requests.push({ path, body });
   if (path.endsWith('/agent-hub-history')) return Response.json({ summaries: [], next: null });
+  if (path.endsWith('/agents/agent/chat')) {
+    const ok = await new Promise<boolean>((resolve) => { finishPrivateReply = resolve; });
+    if (!ok) return Response.json({ error: 'The model timed out.' }, { status: 502 });
+    const history = body.history;
+    return Response.json({ turn: { ...history, agentId: 'agent', prompt: 'Private question', reply: 'Private answer', createdAt: Date.now() } });
+  }
   if (path.endsWith('/rooms')) return Response.json({ rooms: [{ id: 'room', name: 'Design', agents: [{ agent: { id: 'agent', name: 'Scout', role: 'Research', color: 'violet', avatarIcon: 'circle' } }] }] });
   if (path.endsWith('/capabilities')) return Response.json({ documents: true, execution: true, knowledge: true, kanban: true, calendar: true, scheduling: true });
   if (path.endsWith('/history')) return Response.json({ jobs });
@@ -91,11 +98,25 @@ try {
   const { AgentHub } = await import('../components/agents/agent-hub');
   const noop = () => {};
   await act(async () => root.render(createElement(SWRConfig, { value: { provider: () => new Map() } }, createElement(AgentHub, {
-    organizationId: 'org', userId: 'user', agents: [], rooms: [], onCreate: noop, onEdit: noop, onCreateRoom: noop, onOpenRoom: noop,
+    organizationId: 'org', userId: 'user', agents: [{ id: 'agent', name: 'Scout', initials: 'Sc', role: 'Research', color: 'violet', avatarIcon: 'circle', status: 'Available', rules: [] }], rooms: [], onCreate: noop, onEdit: noop, onCreateRoom: noop, onOpenRoom: noop,
   }))));
   await settle();
   const savedChats = host.querySelector('[aria-label="Agent hub"]');
   assert.ok(savedChats, 'The saved conversation workspace remains available');
+  const savedAvatarState = () => savedChats.querySelector('.hub-identity [data-avatar-state]')?.getAttribute('data-avatar-state');
+  assert.equal(savedAvatarState(), 'idle');
+  await click('What can you help me with?');
+  assert.equal(savedAvatarState(), 'thinking');
+  await act(async () => finishPrivateReply?.(false));
+  assert.equal(savedAvatarState(), 'blocked');
+  assert.match(savedChats.textContent!, /The model timed out/);
+  const privateForm = savedChats.querySelector<HTMLFormElement>('form')!;
+  await act(async () => privateForm.requestSubmit());
+  await settle();
+  assert.equal(savedAvatarState(), 'thinking');
+  await act(async () => finishPrivateReply?.(true));
+  assert.equal(savedAvatarState(), 'done');
+  assert.match(savedChats.textContent!, /Private answer/);
   await click('Room tools');
   assert.ok(host.querySelector('[aria-label="Agent Hub instruction"]'), 'Room tools expose the cited, tool-enabled conversation');
   assert.equal(savedChats.parentElement?.hidden, true);

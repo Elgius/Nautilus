@@ -2,7 +2,7 @@
 
 import { useRef, useState, type FormEvent } from 'react';
 import useSWR from 'swr';
-import { ArrowUp, BookOpen, History, MessageSquarePlus, Square } from 'lucide-react';
+import { ArrowUp, BookOpen, History, MessageSquarePlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { AgentPortrait } from '@/components/agents/agent-portrait';
@@ -117,7 +117,6 @@ function HubConversation({ organizationId, userId, room, capabilities }: { organ
       {knowledge.includes('PERSONAL') && <p className="text-sm text-muted-foreground">Personal knowledge stays in this private response. Disable it for shared changes or delegation.</p>}
       <Textarea aria-label="Agent Hub instruction" value={draft} maxLength={20000} disabled={sending || !!pending} placeholder={agent ? `Ask ${agent.name}…` : 'Create an agent to start'} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
       <div className="agent-hub-send"><span>Only you can see this chat. Saved changes are shared with the room.</span><Button type="submit" disabled={!agent || !draft.trim() || !conversationId || sending || busy || !!pending || !capabilities?.execution}><ArrowUp size={15} />{sending ? 'Sending…' : 'Send'}</Button></div>
-      {busy && <p role="status"><Square size={12} className="inline" /> Agent is working. You can cancel from its response.</p>}
       {error && <p role="alert">{error}</p>}
       {pending && !sending && <Button type="button" variant="outline" onClick={() => void send(pending)}>Retry sending instruction</Button>}
       <p className="text-xs text-muted-foreground">Enter to send · Shift + Enter for a new line. Agents use saved room content; local files stay on your device.</p>
