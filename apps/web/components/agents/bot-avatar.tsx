@@ -2,12 +2,14 @@
 
 import { useEffect, useRef } from "react";
 import { mountAvatar, type MountedAvatar } from "open-bot-avatar/dom";
+import type { AvatarState } from "open-bot-avatar";
 import type { BotAvatarDesign } from "../../../../shared/avatar-design";
 
-export function BotAvatar({ design, animated, mood }: {
+export function BotAvatar({ design, animated, mood, state }: {
   design: BotAvatarDesign;
   animated: boolean;
   mood: "idle" | "thinking" | "happy";
+  state?: AvatarState;
 }) {
   const host = useRef<HTMLSpanElement>(null);
   const avatar = useRef<MountedAvatar | null>(null);
@@ -24,14 +26,15 @@ export function BotAvatar({ design, animated, mood }: {
       definition: design.definition,
       color: design.color,
       mood,
-      followPointer: animated,
-      still: !animated,
+      state,
+      followPointer: animated && state === undefined,
+      still: !animated && (!state || state === "idle"),
       reducedMotion: "system" as const,
       label: "",
     };
     if (avatar.current) avatar.current.update(options);
     else avatar.current = mountAvatar(host.current, options);
-  }, [design, animated, mood]);
+  }, [design, animated, mood, state]);
 
   return <span ref={host} className="agent-shape bot-avatar" aria-hidden="true" style={{ color: design.color }} />;
 }

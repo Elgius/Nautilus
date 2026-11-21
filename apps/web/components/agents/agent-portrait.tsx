@@ -13,6 +13,7 @@ import {
 import { avatarShapes, type Agent, type AvatarIcon, type AvatarShape } from "@/lib/agent-data";
 import type { AvatarDesign } from "@/lib/avatar-generation";
 import { BotAvatar } from './bot-avatar';
+import type { AvatarState } from 'open-bot-avatar';
 import type { LegacyAvatarDesign } from '../../../../shared/avatar-design';
 import { parseAvatarDesign } from '../../../../shared/avatar-design';
 import type { AgentAppearance } from '../../../../shared/agent-appearance';
@@ -41,8 +42,8 @@ export function isAvatarShape(icon: AvatarIcon): icon is AvatarShape {
   return (avatarShapes as readonly string[]).includes(icon);
 }
 
-export function AgentShape({ shape, design, animated = false, mood = "idle" }: { shape: AvatarShape; design?: AvatarDesign; animated?: boolean; mood?: "idle" | "thinking" | "happy" }) {
-  if (design && 'definition' in design) return <BotAvatar design={design} animated={animated} mood={mood} />;
+export function AgentShape({ shape, design, animated = false, mood = "idle", state }: { shape: AvatarShape; design?: AvatarDesign; animated?: boolean; mood?: "idle" | "thinking" | "happy"; state?: AvatarState }) {
+  if (design && 'definition' in design) return <BotAvatar design={design} animated={animated} mood={mood} state={state} />;
   return <LegacyAgentShape shape={shape} design={design} animated={animated} />;
 }
 
@@ -144,10 +145,14 @@ export function AgentPortrait({
   agent,
   small = false,
   animated = false,
+  state,
+  activityLabel,
 }: {
   agent?: Pick<Agent, "name"> & AgentAppearance;
   small?: boolean;
   animated?: boolean;
+  state?: AvatarState;
+  activityLabel?: string;
 }) {
   const icon = agent?.avatarIcon ?? "bot";
   const shape = isAvatarShape(icon) ? icon : null;
@@ -158,7 +163,10 @@ export function AgentPortrait({
   const Icon = avatarIcons[icon as keyof typeof avatarIcons] ?? Bot;
   return (
     <span
-      title={agent?.name}
+      title={activityLabel && agent ? `${agent.name} · ${activityLabel}` : agent?.name}
+      role={activityLabel ? "img" : undefined}
+      aria-label={activityLabel && agent ? `${agent.name}: ${activityLabel}` : undefined}
+      data-avatar-state={state}
       className={`agent-avatar agent-portrait ${agent?.color ?? "green"} ${(shape || design) && !agent?.avatarUrl ? "agent-shape-portrait" : ""} ${small ? "avatar-small" : ""}`}
     >
       {agent?.avatarUrl ? (
@@ -171,7 +179,7 @@ export function AgentPortrait({
           className="object-cover"
         />
       ) : design || shape ? (
-        <AgentShape key={`${shape}-${agent?.color}`} shape={shape ?? "circle"} design={design} animated={animated && !small} />
+        <AgentShape key={`${shape}-${agent?.color}`} shape={shape ?? "circle"} design={design} animated={animated && !small} state={state} />
       ) : (
         <Icon size={small ? 13 : 18} />
       )}

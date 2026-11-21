@@ -27,7 +27,7 @@
 .hub-row > span:last-child { min-width: 0; }
 .hub-row strong, .hub-row small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hub-row strong { font-size: 14px; }
-.hub-row small, .hub-thinking { font-size: 12px; color: var(--muted-foreground); }
+.hub-row small, .hub-run-status { font-size: 12px; color: var(--muted-foreground); }
 .hub-chat { background: color-mix(in srgb, var(--muted) 28%, var(--background)); }
 .hub-header { position: relative; justify-content: center; padding: 12px 55px; min-height: 61px; }
 .hub-header > button { position: absolute; right: 16px; }
@@ -44,7 +44,7 @@
 .hub-message-content :is(ul,ol) { padding-left: 1.4em; list-style: revert; }
 .hub-message-content a { text-decoration: underline; }
 .hub-message-content :is(pre,.room-private-table) { overflow-x: auto; }
-.hub-thinking { display: flex; align-items: center; gap: 8px; }
+.hub-run-status { white-space: nowrap; }
 .hub-compose-wrap { padding: 12px clamp(14px, 3vw, 48px) 18px; }
 .hub-compose-wrap > p { color: var(--destructive); font-size: 13px; margin-bottom: 6px; }
 .hub-composer { display: flex; align-items: center; gap: 10px; padding: 9px 10px 9px 18px; border: 1px solid var(--border); border-radius: 26px; background: var(--card); box-shadow: var(--workspace-shadow); }

@@ -31,13 +31,14 @@ function RoomFileIcon({ kind }: { kind: string }) {
   return <Icon size={15} className="room-file-icon" aria-hidden="true" />;
 }
 
-export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsContainer, organizationId, roomId, initialDocuments, storageConfigured, officeConfigured = false, fileState, dispatchFiles, onSelect, onDirtyChange, onSelection }: {
+export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsContainer, organizationId, roomId, initialDocuments, storageConfigured, officeConfigured = false, fileState, dispatchFiles, onSelect, onDirtyChange, onSelection, roomWork }: {
   onSelection?: (selection: DocumentSelection) => void;
   dirtyDocumentIds: ReadonlySet<string>;
   navigationContainer: HTMLDivElement | null; actionsContainer: HTMLDivElement | null;
   organizationId: string; roomId: string; initialDocuments: RoomDocument[]; storageConfigured: boolean; officeConfigured?: boolean;
   fileState: RoomFileState; dispatchFiles: Dispatch<RoomFileAction>; onSelect: (id: string) => void;
   onDirtyChange: (id: string, dirty: boolean) => void;
+  roomWork?: ReturnType<typeof useRoomWork>;
 }) {
   const [documents, setDocuments] = useState(initialDocuments);
   const [attachments, setAttachments] = useState<RoomAttachment[]>([]);
@@ -45,7 +46,8 @@ export function RoomDocuments({ dirtyDocumentIds, navigationContainer, actionsCo
   const [savingFiles, setSavingFiles] = useState<ReadonlySet<string>>(new Set());
   const [savedFiles, setSavedFiles] = useState<Record<string, string>>({});
   const savingFileIds = useRef(new Set<string>());
-  const work = useRoomWork(organizationId, roomId);
+  const standaloneWork = useRoomWork(organizationId, roomId, !roomWork);
+  const work = roomWork ?? standaloneWork;
   const { files: localFiles, selectedId, uploadOpen, error: uploadError } = fileState;
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [fileSearch, setFileSearch] = useState('');

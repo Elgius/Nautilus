@@ -33,6 +33,8 @@ Nautilus organizes people, agents, documents, and tasks into rooms within an org
 
 The Agent Hub keeps saved profile chats under **Private conversations** and exposes document, knowledge, Kanban, Calendar, source citations, and confirmations under **Room tools**. Switching views preserves drafts, settings, and pending retries. Activity retains sourced answers beyond rolling chat history, displays their citations, and rechecks knowledge access whenever a saved answer is loaded.
 
+[Agent run states](apps/web/lib/agent-run-appearance.ts) drive custom avatar animations and text in [rooms](apps/web/components/room/room-workspace.tsx) and [Room tools](apps/web/components/room/private-agent-conversation.tsx). The room participant strip reflects shared planning and work phases. Private approvals and clarification prompts appear in the requester's conversation. [Private conversations](apps/web/components/agents/agent-hub.tsx) show request, completion, and failure states from the saved-chat endpoint.
+
 | Capability | Behavior | Implementation |
 | --- | --- | --- |
 | Document work | Read saved snapshots, create documents, and apply reviewed edits. A room write lock coordinates agent work with manual changes. | [Room skills](apps/server/src/agent_interface/room-skills.ts) · [Write lock](apps/server/src/documents/room-write-lock.ts) · [Office editing operations](apps/office/src/editing) |

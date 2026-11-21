@@ -19,7 +19,7 @@ buildSync({
     window.showAvatar = (options = {}) => root.render(
       <React.StrictMode><div className="create-agent-preview"><AgentShape shape="circle"
         design={{ definition: getExample(options.id || 'mug'), color: options.color || '#ff6a1a' }}
-        animated={options.animated !== false} mood={options.mood || 'idle'} /></div></React.StrictMode>
+        animated={options.animated !== false} mood={options.mood || 'idle'} state={options.state} /></div></React.StrictMode>
     );
     window.removeAvatar = () => root.unmount();
     window.showAvatar();
@@ -96,6 +96,16 @@ try {
   assert.ok(await page.locator('.bot-avatar svg use').count() > 1, 'static output includes volume slices');
   await page.evaluate(() => window.showAvatar({ id: 'controller' }));
   await page.waitForSelector('canvas');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.evaluate(() => window.showAvatar({ state: 'thinking', animated: false }));
+  await page.waitForTimeout(300);
+  const thinking = await page.locator('canvas').evaluate(canvas => canvas.toDataURL());
+  await page.evaluate(() => window.showAvatar({ state: 'blocked', animated: false }));
+  await page.waitForFunction(previous => document.querySelector('canvas').toDataURL() !== previous, thinking);
+  await page.waitForTimeout(300);
+  const blocked = await page.locator('canvas').evaluate(canvas => canvas.toDataURL());
+  await page.waitForTimeout(250);
+  assert.equal(await page.locator('canvas').evaluate(canvas => canvas.toDataURL()), blocked, 'Reduced motion keeps the blocked mark still');
   await page.evaluate(() => window.removeAvatar());
   assert.equal(await page.locator('.bot-avatar').count(), 0);
   assert.deepEqual(errors, []);

@@ -6,6 +6,7 @@ import { Message as ChatMessage } from "@/components/ui/message";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { hubFetch, HubSessionChanged, importHubHistory, type HubPage, type HubSummary, type HubTurn } from "@/lib/hub-history";
 import { AgentPortrait } from "./agent-portrait";
+import { useRunAvatarState } from "./use-run-avatar-state";
 import { Button } from "@/components/ui/button";
 import type { Agent } from "@/lib/agent-data";
 import type { Room } from "@/lib/room-data";
@@ -15,7 +16,7 @@ import "./agent-hub.css";
 import { AgentHubChat } from "@/components/agent-hub/agent-hub-chat";
 
 type Message = { role: "user" | "assistant"; content: string };
-type Thread = { retry?: { prompt: string; id: string }; draft: string; pending: string; error: string };
+type Thread = { retry?: { prompt: string; id: string }; draft: string; pending: string; error: string; completed?: boolean };
 const empty: Thread = { draft: "", pending: "", error: "" };
 
 function chatContext(messages: Message[]) {
@@ -78,6 +79,9 @@ function HubWorkspace({ userId, organizationId, agents, rooms, onCreate, onEdit,
   const turns = transcript?.id === conversationId ? transcript?.turns ?? [] : [];
   const transcriptReady = !summary || (transcript?.id === conversationId && transcript?.lastId === lastId);
   const thread = threads[conversationId ?? agent?.id] ?? empty;
+  const runState = thread.pending ? 'thinking' : thread.error ? 'blocked' : thread.completed ? 'done' : 'idle';
+  const avatarState = useRunAvatarState(runState, conversationId ?? agent?.id);
+  const statusLabel = { thinking: 'Thinking…', blocked: 'Blocked', done: 'Completed', idle: '' }[runState];
   const messages: Message[] = turns.flatMap((turn) => [{ role: "user", content: turn.prompt }, { role: "assistant", content: turn.reply }]);
   if (thread.pending) messages.push({ role: "user", content: thread.pending });
 
@@ -154,7 +158,7 @@ function HubWorkspace({ userId, organizationId, agents, rooms, onCreate, onEdit,
     requests.current.set(id, controller);
     const turnId = thread.retry?.prompt === content ? thread.retry.id : crypto.randomUUID();
     const context: Message[] = [...messages, { role: "user", content }];
-    update(id, { draft: "", pending: content, error: "" });
+    update(id, { draft: "", pending: content, error: "", completed: false });
     try {
       const response = await hubFetch(`/api/organizations/${encodeURIComponent(organizationId)}/agents/${encodeURIComponent(agent.id)}/chat`, userId, {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
@@ -172,7 +176,7 @@ function HubWorkspace({ userId, organizationId, agents, rooms, onCreate, onEdit,
       });
       setSummaries((previous) => [{ id, agentId: agent.id, title: summary?.title ?? content.slice(0, 160),
         preview: turn.reply.slice(0, 160), updatedAt: turn.createdAt, lastId: turn.id }, ...previous.filter((item) => item.id !== id)]);
-      update(id, { pending: "", retry: undefined });
+      update(id, { pending: "", retry: undefined, completed: true });
     } catch (error) {
       if (error instanceof HubSessionChanged) { onSessionChanged(); return; }
       if (!controller.signal.aborted) update(id, { retry: { prompt: content, id: turnId }, draft: text, pending: "", error: error instanceof Error ? error.message : "Couldn’t send message." });
@@ -217,7 +221,8 @@ function HubWorkspace({ userId, organizationId, agents, rooms, onCreate, onEdit,
       </section>
     </aside>
     {agent ? <div className="hub-chat">
-      <header className="hub-header"><span className="hub-identity"><AgentPortrait agent={agent} small /><strong>{agent.name}</strong></span>
+      <header className="hub-header"><span className="hub-identity"><AgentPortrait agent={agent} state={avatarState} small /><strong>{agent.name}</strong>
+        <span className="hub-run-status" role="status">{statusLabel}</span></span>
         <DropdownMenu><DropdownMenuTrigger render={<Button variant="outline" size="icon-sm" aria-label="Agent settings and rooms" />}><Settings2 /></DropdownMenuTrigger>
           <DropdownMenuContent align="end"><DropdownMenuItem onClick={() => onEdit(agent.id)}><Settings2 />Customize agent</DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -236,7 +241,6 @@ function HubWorkspace({ userId, organizationId, agents, rooms, onCreate, onEdit,
           <Bubble variant={message.role === "user" ? "default" : "muted"}><BubbleContent className="hub-message-content">
             {message.role === "assistant" ? <AgentReply text={message.content} /> : <span className="whitespace-pre-wrap">{message.content}</span>}
           </BubbleContent></Bubble></ChatMessage>)}
-        {thread.pending && <div className="hub-thinking" role="status"><AgentPortrait agent={agent} small />Thinking…</div>}
       </div>
       <div className="hub-compose-wrap">{thread.error && <p role="alert">{thread.error}</p>}
         <form className="hub-composer" onSubmit={(event) => { event.preventDefault(); void send(thread.draft); }}>
