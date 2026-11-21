@@ -8,7 +8,7 @@ import { parseCreation, type DocumentCreation, type CreationResult } from './doc
 import { createPlannerSkill } from './planner/skill'
 import { reviewPlannerEdit } from './edit-review'
 import { createSchedulerSkill } from './scheduler/skill'
-import { reviewDocumentEdit, type EditReview } from './edit-review'
+import { reviewDocumentEdit, type EditReview, type SavedDocumentEdits } from './edit-review'
 import { tool } from 'ai'
 import { z } from 'zod'
 import { HTTPException } from 'hono/http-exception'
@@ -53,6 +53,7 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
   }
   let delegated = 0
   const evidence = new Map<string, { version: string | null; kind: string; reads: unknown[] }>()
+  const savedEdits = new Map<string, { currentVersionId: string; batch: SavedDocumentEdits }>()
   const tracked = (agent: PrivateAgentProfile, source: SkillBackend, write: SkillBackend['edit'], create?: SkillBackend['create']): SkillBackend => ({
     ...source,
     read: async (id, operation, args, activeSignal) => {
@@ -78,12 +79,26 @@ export function createModeratorSkills(profile: PrivateAgentProfile, run: AgentRu
     const reads = [...evidence].map(([id, entry]) => ({
       documentId: id, currentVersionId: entry.version, kind: entry.kind, reads: entry.reads,
     }))
-    await deps.review({ documentId, expectedVersionId, kind, edits, changeSummary: summary, reads }, commitSignal)
+    const formattingOnly = kind === 'DOCUMENT' && edits.every(({ type }) =>
+      type === 'formatParagraph' || type === 'formatText' || type === 'formatFont')
+    const prior = savedEdits.get(documentId)
+    const savedDocumentEdits = formattingOnly && prior?.currentVersionId === expectedVersionId ? prior.batch : undefined
+    await deps.review({ documentId, expectedVersionId, kind, edits, changeSummary: summary, reads, savedDocumentEdits }, commitSignal)
     commitSignal.throwIfAborted()
     await source.authorize()
     await run.activity({ runId: run.id, agentId: profile.id, agentName: profile.name, color: profile.color, documentId,
       phase: 'applying', target: targetLabel(edits[0]?.type ?? '', edits[0] ?? {}) }, profile.id)
     const result = await source.edit(documentId, expectedVersionId, kind, edits, summary, commitSignal) as { versionId: string; versionNumber: number }
+    // Formatting preserves the text offsets tracked by the last saved insertion.
+    if (savedDocumentEdits) {
+      savedEdits.set(documentId, { currentVersionId: result.versionId, batch: savedDocumentEdits })
+    } else if (kind === 'DOCUMENT' && edits.some(({ type }) => type === 'insertText' || type === 'replaceText')) {
+      savedEdits.set(documentId, { currentVersionId: result.versionId, batch: {
+        baseVersionId: expectedVersionId, savedVersionId: result.versionId, edits,
+      } })
+    } else {
+      savedEdits.delete(documentId)
+    }
     // Record success even when cancellation arrives immediately after the commit.
     await recordCommit({ documentId, versionId: result.versionId, versionNumber: result.versionNumber })
     return result
