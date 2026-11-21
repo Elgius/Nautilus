@@ -65,7 +65,7 @@ try {
   await page.getByRole('button', { name: 'Approve deletion' }).click();
   await page.getByText('Approved', { exact: true }).waitFor();
   await page.locator('.room-private-turn [data-avatar-state="done"]').waitFor();
-  await page.getByText('Completed', { exact: true }).waitFor();
+  await page.getByRole('status').filter({ hasText: /^Completed$/ }).waitFor();
   await page.locator('.room-private-turn [data-avatar-state="idle"]').waitFor();
   assert.equal(await page.locator('a[href="/kanban?task=task"]').count(), 1);
   await page.setViewportSize({ width: 390, height: 844 });
