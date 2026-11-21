@@ -21,7 +21,7 @@ import { initials } from "@/lib/auth-types";
 import { errorMessage } from "@/lib/auth-client";
 import { roomRequest, type RoomDetail } from "@/lib/room-client";
 import { useRoomChat } from "./use-room-chat";
-import { useRoomWork } from "./use-room-work";
+import { useRoomAgentRoster, useRoomWork } from "./use-room-work";
 import { roomActivityAppearance } from "@/lib/agent-run-appearance";
 import { useRoomSuggestions } from "./use-room-suggestions";
 import { RoomDocuments } from "./room-documents";
@@ -36,6 +36,7 @@ export function RoomWorkspace({ initialData, initialDocumentId }: { initialData:
   const organizationId = session.activeOrganization!.id;
   const { room } = initialData;
   const roomWork = useRoomWork(organizationId, room.id);
+  const participants = useRoomAgentRoster(organizationId, room.id, session.user.id, room.agents, roomWork);
   const [selection, setSelection] = useState<DocumentSelection | null>(null);
   const [chatLayout, updateChatLayout] = useRoomLayout(session.user.id);
   const [dragWidth, setDragWidth] = useState<number | null>(null);
@@ -97,7 +98,7 @@ export function RoomWorkspace({ initialData, initialDocumentId }: { initialData:
       </div>
       <div className="room-header-actions"><Button className="room-chat-toggle" variant="ghost" size="sm" aria-controls="room-chat" aria-expanded={!chatLayout.collapsed} onClick={() => updateChatLayout({ ...chatLayout, collapsed: !chatLayout.collapsed })}>{chatLayout.collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}{chatLayout.collapsed ? "Show chat" : "Hide chat"}</Button><div className="room-participants" aria-label="Room participants">
         {room.members.map(({ member }) => <span key={member.user.id} title={member.user.name}>{initials(member.user.name)}</span>)}
-        {room.agents.map(({ agent }) => {
+        {participants.map(({ agent }) => {
           const activity = roomWork.available ? roomActivityAppearance(roomWork.activities, agent.id) : undefined;
           return <AgentPortrait key={agent.id} agent={agent} small state={activity?.state} activityLabel={activity?.label} />;
         })}
@@ -131,7 +132,7 @@ export function RoomWorkspace({ initialData, initialDocumentId }: { initialData:
             }
             if (entry.kind === 'agent') {
               const { job, outgoing, id, time } = entry;
-              const agent = agents.find(agent => agent.id === job.agentId) ?? room.agents.find(({ agent }) => agent.id === job.agentId)?.agent;
+              const agent = agents.find(agent => agent.id === job.agentId) ?? participants.find(({ agent }) => agent.id === job.agentId)?.agent;
               const clarification = job.continuationOf && agentJobs.find(parent => parent.id === job.continuationOf)?.question?.answer;
               return <MessageScrollerItem key={id} messageId={id} scrollAnchor={outgoing}>
                 <Message align={outgoing ? 'end' : 'start'} className={`room-message ${outgoing ? 'is-own' : ''}`}>

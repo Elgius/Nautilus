@@ -81,7 +81,7 @@ function HubWorkspace({ userId, organizationId, agents, rooms, onCreate, onEdit,
   const thread = threads[conversationId ?? agent?.id] ?? empty;
   const runState = thread.pending ? 'thinking' : thread.error ? 'blocked' : thread.completed ? 'done' : 'idle';
   const avatarState = useRunAvatarState(runState, conversationId ?? agent?.id);
-  const statusLabel = { thinking: 'Thinking…', blocked: 'Blocked', done: 'Completed', idle: '' }[runState];
+  const statusLabel = { thinking: 'Thinking…', blocked: 'Blocked', done: 'Completed', idle: turns.length ? 'Completed' : '' }[runState];
   const messages: Message[] = turns.flatMap((turn) => [{ role: "user", content: turn.prompt }, { role: "assistant", content: turn.reply }]);
   if (thread.pending) messages.push({ role: "user", content: thread.pending });
 

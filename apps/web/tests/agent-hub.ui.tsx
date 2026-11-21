@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { GlobalWindow as Window } from 'happy-dom';
+import type { HubTurn } from '../lib/hub-history';
 import type { PrivateAgentJob } from '../../../shared/room-chat';
 const dom = new Window({ url: 'http://localhost:3000/?view=Agents' });
 for (const key of ['window', 'document', 'navigator', 'sessionStorage', 'Element', 'HTMLElement', 'HTMLButtonElement', 'HTMLTextAreaElement', 'HTMLInputElement', 'HTMLSelectElement', 'Node', 'Event', 'MouseEvent', 'KeyboardEvent', 'MutationObserver', 'ResizeObserver'] as const) {
@@ -12,6 +13,7 @@ const { SWRConfig } = await import('swr');
 const { AgentHubChat } = await import('../components/agent-hub/agent-hub-chat');
 const requests: { path: string; body?: Record<string, unknown> }[] = [];
 const jobs: PrivateAgentJob[] = [];
+let savedTurn: HubTurn | undefined;
 let failSend = true;
 let rejection: number | null = null;
 let finishPrivateReply: ((ok: boolean) => void) | undefined;
@@ -19,12 +21,14 @@ const originalFetch = globalThis.fetch;
 Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (url: string, init?: RequestInit) => {
   const path = String(url), body = init?.body ? JSON.parse(String(init.body)) : undefined;
   requests.push({ path, body });
-  if (path.endsWith('/agent-hub-history')) return Response.json({ summaries: [], next: null });
+  if (path.endsWith('/agent-hub-history')) return Response.json({ summaries: savedTurn ? [{ id: savedTurn.conversationId, agentId: savedTurn.agentId, title: savedTurn.prompt, preview: savedTurn.reply, updatedAt: savedTurn.createdAt, lastId: savedTurn.id }] : [], next: null });
+  if (savedTurn && path.endsWith('/agent-hub-history/' + savedTurn.conversationId)) return Response.json({ turns: [savedTurn] });
   if (path.endsWith('/agents/agent/chat')) {
     const ok = await new Promise<boolean>((resolve) => { finishPrivateReply = resolve; });
     if (!ok) return Response.json({ error: 'The model timed out.' }, { status: 502 });
     const history = body.history;
-    return Response.json({ turn: { ...history, agentId: 'agent', prompt: 'Private question', reply: 'Private answer', createdAt: Date.now() } });
+    savedTurn = { ...history, agentId: 'agent', prompt: 'Private question', reply: 'Private answer', createdAt: Date.now() };
+    return Response.json({ turn: savedTurn });
   }
   if (path.endsWith('/rooms')) return Response.json({ rooms: [{ id: 'room', name: 'Design', agents: [{ agent: { id: 'agent', name: 'Scout', role: 'Research', color: 'violet', avatarIcon: 'circle' } }] }] });
   if (path.endsWith('/capabilities')) return Response.json({ documents: true, execution: true, knowledge: true, kanban: true, calendar: true, scheduling: true });
@@ -97,9 +101,10 @@ try {
   assert.equal(instruction.value, '', 'An edited or retried request can be accepted after a rejection');
   const { AgentHub } = await import('../components/agents/agent-hub');
   const noop = () => {};
-  await act(async () => root.render(createElement(SWRConfig, { value: { provider: () => new Map() } }, createElement(AgentHub, {
+  const renderHub = async (key: string) => act(async () => root.render(createElement(SWRConfig, { key, value: { provider: () => new Map() } }, createElement(AgentHub, {
     organizationId: 'org', userId: 'user', agents: [{ id: 'agent', name: 'Scout', initials: 'Sc', role: 'Research', color: 'violet', avatarIcon: 'circle', status: 'Available', rules: [] }], rooms: [], onCreate: noop, onEdit: noop, onCreateRoom: noop, onOpenRoom: noop,
   }))));
+  await renderHub('initial');
   await settle();
   const savedChats = host.querySelector('[aria-label="Agent hub"]');
   assert.ok(savedChats, 'The saved conversation workspace remains available');
@@ -142,6 +147,11 @@ try {
   assert.equal(roomInstruction.disabled, true, 'Pending acceptance must survive a view switch');
   await click('Retry sending instruction');
   assert.deepEqual(requests.filter((request) => request.path.endsWith('/runs')).at(-1)!.body, uncertainRun, 'Retry must preserve the original request ID and options');
+  await renderHub('reopened');
+  await settle();
+  assert.match(host.textContent!, /Private answer/);
+  assert.equal(host.querySelector('.hub-run-status')?.textContent, 'Completed');
+  assert.equal(host.querySelector('.hub-identity [data-avatar-state]')?.getAttribute('data-avatar-state'), 'idle');
   console.log('Agent Hub UI checks passed: discovery, exact retry, configured options, tools, citations, history, terminal-error recovery, and switching between saved chats and room tools.');
 } finally {
   await act(async () => root.unmount());
